@@ -15,9 +15,20 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same ref supersedes an older one, so a stuck build
+# does not hold the queue.
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Plain console keeps the log readable in CI, and the daemon buys nothing
+      # on a runner that is thrown away after one build.
+      GRADLE_OPTS: -Dorg.gradle.console=plain -Dorg.gradle.daemon=false
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +45,16 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Assemble
-        run: ./gradlew assemble${{ inputs.build_type == 'release' && 'Release' || 'Debug' }} --stacktrace
+        timeout-minutes: 20
+        # Bounded HTTP timeouts turn a stalled artifact download into a failure
+        # with a log, instead of a job that hangs until the runner is reclaimed.
+        run: |
+          ./gradlew assemble${{ inputs.build_type == 'release' && 'Release' || 'Debug' }} \
+            --stacktrace \
+            --console=plain \
+            --no-daemon \
+            -Dorg.gradle.internal.http.connectionTimeout=60000 \
+            -Dorg.gradle.internal.http.socketTimeout=60000
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
