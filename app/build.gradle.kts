@@ -44,12 +44,17 @@ android {
 
     buildFeatures {
         compose = true
+        // CarAppService розрізняє debug і release через BuildConfig.DEBUG.
+        buildConfig = true
     }
 
-    // The sources live under src/main/kotlin, not the Gradle default src/main/java.
+    // The sources live under src/<variant>/kotlin, not the Gradle default src/<variant>/java.
     sourceSets {
         getByName("main") {
             java.srcDirs("src/main/java", "src/main/kotlin")
+        }
+        getByName("test") {
+            java.srcDirs("src/test/java", "src/test/kotlin")
         }
     }
 }
@@ -67,4 +72,7 @@ dependencies {
     // these arriving transitively.
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

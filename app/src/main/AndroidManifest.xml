@@ -1,32 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!-- Легасі-дозволи потрібні лише до Android 11: на 12+ їх замінюють BLUETOOTH_CONNECT/SCAN. -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Сканування використовується тільки для пошуку OBD-адаптера, не для геолокації. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        tools:targetApi="s"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- Location потрібен лише на Android 11 і нижче, де без нього не працює Bluetooth. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="true" />
 
     <application
         android:allowBackup="true"
-        android:icon="@drawable/ic_app_logo"
-        android:roundIcon="@drawable/ic_app_logo"
-        android:label="Kia EV Plus 2"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.NoTitleBar">
+        android:theme="@style/Theme.App">
 
-        <!-- Android Auto Service -->
+        <!-- Android Auto -->
         <service
             android:name=".services.AndroidAuto.CarAppService"
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
-
-              <category android:name="androidx.car.app.category.NAVIGATION" /> 
-                
-                <!-- ДОДАНО: обов'язкова категорія для лаунчера Android Auto -->
-                <category android:name="android.intent.category.LAUNCHER" />
+                <!-- Це не навігаційний застосунок: категорія POI відповідає його змісту. -->
+                <category android:name="androidx.car.app.category.POI" />
             </intent-filter>
         </service>
 

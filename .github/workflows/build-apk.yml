@@ -49,7 +49,7 @@ jobs:
         # Bounded HTTP timeouts turn a stalled artifact download into a failure
         # with a log, instead of a job that hangs until the runner is reclaimed.
         run: |
-          ./gradlew assemble${{ inputs.build_type == 'release' && 'Release' || 'Debug' }} \
+          ./gradlew testDebugUnitTest assemble${{ inputs.build_type == 'release' && 'Release' || 'Debug' }} \
             --stacktrace \
             --console=plain \
             --no-daemon \
