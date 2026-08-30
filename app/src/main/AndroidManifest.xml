@@ -35,8 +35,14 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
-                <!-- Це не навігаційний застосунок: категорія POI відповідає його змісту. -->
-                <category android:name="androidx.car.app.category.POI" />
+                <!--
+                    Android Auto на телефоні показує сторонні template-застосунки лише в
+                    категоріях navigation / parking / charging. POI розрахована на
+                    Android Automotive OS і вимагає вищого minCarApiLevel, тому з нею
+                    хост цей сервіс просто не підхоплював. CHARGING підтримується з
+                    рівня 1 і відповідає змісту застосунка.
+                -->
+                <category android:name="androidx.car.app.category.CHARGING" />
             </intent-filter>
         </service>
 
