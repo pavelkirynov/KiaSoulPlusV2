@@ -56,6 +56,11 @@ object GeneralData {
     fun updateCalculated(calculated: CalculatedData) =
         _state.update { it.copy(calculated = calculated) }
 
+    fun startEnergySession(bms: BmsData) =
+        _state.update { it.copy(energySession = EnergySession.startingFrom(bms)) }
+
+    fun clearEnergySession() = _state.update { it.copy(energySession = EnergySession()) }
+
     // --- Ручні напруги: пише блок сховища та інтерфейс -------------------------
 
     fun updateManualCells(voltages: Map<Int, Double>) =

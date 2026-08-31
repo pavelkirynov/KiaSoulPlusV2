@@ -110,6 +110,44 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
             }
         }
 
+        if (bms.hasEnergyCounters) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(text = "Енергія за поїздку", fontSize = 18.sp)
+
+                    MetricRow("Витрачено", formatMeasurement(calculated.consumedKwh, 2, "кВт·год"))
+                    MetricRow("Повернуто", formatMeasurement(calculated.recoveredKwh, 2, "кВт·год"))
+                    MetricRow("Чисто", formatMeasurement(calculated.netKwh, 2, "кВт·год"))
+
+                    Text(
+                        text = "Відлік від моменту під'єднання до авто",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(text = "Лічильники батареї за весь час", fontSize = 18.sp)
+
+                    MetricRow(
+                        "Віддано",
+                        formatMeasurement(bms.cumulativeEnergyDischargedKwh, 1, "кВт·год"),
+                    )
+                    MetricRow(
+                        "Прийнято",
+                        formatMeasurement(bms.cumulativeEnergyChargedKwh, 1, "кВт·год"),
+                    )
+                }
+            }
+        }
+
         if (calculated.maxCellVoltage > 0.0) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(

@@ -2,11 +2,20 @@ package com.kirianov.kiasoulevplus2.Data
 
 /**
  * Величини, яких немає в кадрах BMS напряму — вони рахуються з BmsData та CellData.
- * Заповнює CalculationEngine, тому кожне поле тут завжди відповідає останньому зчитуванню.
+ * Заповнює CalculationBlock, тому кожне поле тут завжди відповідає останньому зчитуванню.
  */
 data class CalculatedData(
     val powerKw: Double = 0.0,          // Напруга * струм / 1000, від'ємна = розряд
     val minCellVoltage: Double = 0.0,   // Мін. комірка (В)
     val maxCellVoltage: Double = 0.0,   // Макс. комірка (В)
     val cellDeltaVolts: Double = 0.0,   // Розбаланс між комірками (В)
-)
+
+    /** Витрачено з батареї від моменту під'єднання (кВт·год). */
+    val consumedKwh: Double = 0.0,
+
+    /** Повернуто в батарею рекуперацією або зарядкою від моменту під'єднання (кВт·год). */
+    val recoveredKwh: Double = 0.0,
+) {
+    /** Чисте споживання: скільки пішло з батареї за вирахуванням поверненого. */
+    val netKwh: Double get() = consumedKwh - recoveredKwh
+}

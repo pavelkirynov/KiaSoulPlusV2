@@ -13,17 +13,31 @@ class BmsResponseDecoderTest {
      * [6] SOC*2, [12..13] струм, [14..15] напруга, [16] температура.
      */
     private fun frame(
-        socRaw: Int = 0xA0,        // 160 / 2 = 80.0 %
-        currentRaw: Int = 0xFFF6,  // -10 -> -1.0 A
-        voltageRaw: Int = 0x0E4C,  // 3660 -> 366.0 V
-        tempRaw: Int = 0x19,       // 25 °C
-    ): List<Int> = MutableList(20) { 0 }.apply {
+        socRaw: Int = 0xA0,           // 160 / 2 = 80.0 %
+        currentRaw: Int = 0xFFF6,     // -10 -> -1.0 A
+        voltageRaw: Int = 0x0E4C,     // 3660 -> 366.0 V
+        tempRaw: Int = 0x19,          // 25 °C
+        chargedRaw: Long = 61_234,    // -> 6123.4 кВт·год
+        dischargedRaw: Long = 59_876, // -> 5987.6 кВт·год
+        size: Int = 44,
+    ): List<Int> = MutableList(size) { 0 }.apply {
         this[6] = socRaw
         this[12] = currentRaw shr 8 and 0xFF
         this[13] = currentRaw and 0xFF
         this[14] = voltageRaw shr 8 and 0xFF
         this[15] = voltageRaw and 0xFF
         this[16] = tempRaw
+        if (size >= 40) {
+            putUnsigned32(32, chargedRaw)
+            putUnsigned32(36, dischargedRaw)
+        }
+    }
+
+    private fun MutableList<Int>.putUnsigned32(index: Int, value: Long) {
+        this[index] = (value shr 24 and 0xFF).toInt()
+        this[index + 1] = (value shr 16 and 0xFF).toInt()
+        this[index + 2] = (value shr 8 and 0xFF).toInt()
+        this[index + 3] = (value and 0xFF).toInt()
     }
 
     @Test
@@ -60,6 +74,38 @@ class BmsResponseDecoderTest {
     @Test
     fun `reports no data for an empty frame`() {
         assertFalse(BmsResponseDecoder.decode(emptyList()).hasData)
+    }
+
+    @Test
+    fun `decodes the lifetime energy counters`() {
+        val data = BmsResponseDecoder.decode(frame())
+
+        assertEquals(6123.4, data.cumulativeEnergyChargedKwh, 0.001)
+        assertEquals(5987.6, data.cumulativeEnergyDischargedKwh, 0.001)
+        assertTrue(data.hasEnergyCounters)
+    }
+
+    /**
+     * Лічильники лежать далеко в кадрі. Якщо адаптер віддав коротшу відповідь,
+     * заряд і напруга все одно мають дійти — інакше одна відсутня величина
+     * гасила б увесь екран.
+     */
+    @Test
+    fun `a frame too short for the counters still yields soc and voltage`() {
+        val data = BmsResponseDecoder.decode(frame(size = 20))
+
+        assertEquals(80.0, data.displaySoc, 0.001)
+        assertEquals(366.0, data.batteryVoltage, 0.001)
+        assertFalse(data.hasEnergyCounters)
+        assertEquals(0.0, data.cumulativeEnergyDischargedKwh, 0.001)
+    }
+
+    /** Читання не тих байтів дало б правдоподібне сміття; краще прочерк. */
+    @Test
+    fun `an implausible counter is reported as absent`() {
+        val data = BmsResponseDecoder.decode(frame(dischargedRaw = 4_000_000_000L))
+
+        assertFalse(data.hasEnergyCounters)
     }
 
     @Test

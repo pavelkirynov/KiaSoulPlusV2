@@ -58,6 +58,13 @@ object BmsFrameParser {
         return if (raw >= 0x8000) raw - 0x10000 else raw
     }
 
+    /** Чотири байти як беззнакове 32-бітне число: так лежать лічильники енергії. */
+    fun unsigned32(bytes: List<Int>, highIndex: Int): Long =
+        (bytes[highIndex].toLong() shl 24) or
+            (bytes[highIndex + 1].toLong() shl 16) or
+            (bytes[highIndex + 2].toLong() shl 8) or
+            bytes[highIndex + 3].toLong()
+
     /** Один байт як знакове 8-бітне число: температура буває нижче нуля. */
     fun signed8(bytes: List<Int>, index: Int): Int {
         val raw = bytes[index]

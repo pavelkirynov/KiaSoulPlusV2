@@ -19,6 +19,9 @@ data class State(
     /** Похідні величини: сюди пише блок обчислень. */
     val calculated: CalculatedData = CalculatedData(),
 
+    /** Позначка лічильників енергії на початок поїздки: теж блок обчислень. */
+    val energySession: EnergySession = EnergySession(),
+
     /** Введені вручну напруги: сюди пише блок сховища та інтерфейс. */
     val manualCells: ManualCells = ManualCells(),
 
