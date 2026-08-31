@@ -22,14 +22,19 @@ class ArchitectureTest {
         "tools.battery",
         "tools.calculations",
         "tools.storage",
+        "tools.probe",
         "tools.format",
+        "tools.frames",
     )
 
     /** Хаб: сюди дозволено звертатися будь-кому, це і є канал обміну. */
     private val hub = "Data"
 
-    /** Чисті помічники форматування без стану: спільна бібліотека, не канал обміну. */
-    private val sharedUtilities = "tools.format"
+    /**
+     * Бібліотеки чистих функцій без стану: форматування чисел і розбір байтів кадру.
+     * Ними користуються всі блоки — це спільна бібліотека, а не канал обміну даними.
+     */
+    private val sharedUtilities = listOf("tools.format", "tools.frames")
 
     /**
      * Файли в корені пакета: MainActivity та місце, де перелічені всі блоки.
@@ -49,7 +54,7 @@ class ArchitectureTest {
                 val target = blocks.firstOrNull { imported == it || imported.startsWith("$it.") }
                     ?: return@forEach
 
-                val allowed = target == owner || target == hub || target == sharedUtilities
+                val allowed = target == owner || target == hub || target in sharedUtilities
                 if (!allowed) {
                     violations += "${file.name} (блок $owner) імпортує $target"
                 }

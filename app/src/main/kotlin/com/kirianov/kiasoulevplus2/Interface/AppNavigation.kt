@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsScreen
 import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsViewModel
+import com.kirianov.kiasoulevplus2.Interface.screens.experiments.ProbeScreen
+import com.kirianov.kiasoulevplus2.Interface.screens.experiments.ProbeViewModel
 import com.kirianov.kiasoulevplus2.Interface.screens.main.MainScreen
 
 @Composable
@@ -55,7 +57,7 @@ fun AppNavigation() {
                 when (currentScreen) {
                     AppScreen.MAIN -> MainScreen()
                     AppScreen.CELLS -> CellsScreen(cellsViewModel = viewModel<CellsViewModel>())
-                    AppScreen.EXPERIMENTS -> ScreenPlaceholder("Експерименти")
+                    AppScreen.EXPERIMENTS -> ProbeScreen(probeViewModel = viewModel<ProbeViewModel>())
                     AppScreen.SETTINGS -> ScreenPlaceholder("Калібрування")
                 }
             }

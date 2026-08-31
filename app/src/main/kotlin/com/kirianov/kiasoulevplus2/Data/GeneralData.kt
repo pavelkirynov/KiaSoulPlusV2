@@ -45,6 +45,19 @@ object GeneralData {
             it.copy(can = it.can.copy(vehicleFrames = nextFrames(commands, responses)))
         }
 
+    /**
+     * Сирі відповіді на ручний запит. У commands кладеться заголовок, команда і,
+     * якщо запит не вдався, текст помилки — так блок розбору отримує весь контекст.
+     */
+    fun publishProbeFrames(header: String, command: String, response: String, error: String? = null) =
+        _state.update {
+            it.copy(
+                can = it.can.copy(
+                    probeFrames = nextFrames(listOfNotNull(header, command, error), listOf(response)),
+                ),
+            )
+        }
+
     fun publishCellFrames(commands: List<String>, responses: List<String>) =
         _state.update {
             it.copy(can = it.can.copy(cellFrames = nextFrames(commands, responses)))
@@ -72,6 +85,19 @@ object GeneralData {
 
     fun selectConsumptionWindow(window: ConsumptionWindow) =
         _state.update { it.copy(consumptionWindow = window) }
+
+    // --- Ручні запити -----------------------------------------------------------
+
+    fun requestProbe(header: String, command: String) =
+        _state.update {
+            it.copy(probe = it.probe.copy(pending = ProbeRequest(header, command, ++sequence)))
+        }
+
+    /** Викликає блок Bluetooth, коли прийняв запит до виконання. */
+    fun clearProbeRequest() = _state.update { it.copy(probe = it.probe.copy(pending = null)) }
+
+    fun addProbeResult(result: ProbeResult) =
+        _state.update { it.copy(probe = it.probe.plus(result)) }
 
     // --- Ручні напруги: пише блок сховища та інтерфейс -------------------------
 

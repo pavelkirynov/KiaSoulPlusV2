@@ -17,15 +17,15 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
-import java.util.UUID
 
 @SuppressLint("MissingPermission")
 class ElmBluetoothManager {

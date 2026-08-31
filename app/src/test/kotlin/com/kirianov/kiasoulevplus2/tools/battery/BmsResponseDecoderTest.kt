@@ -1,6 +1,7 @@
 package com.kirianov.kiasoulevplus2.tools.battery
 
 import com.kirianov.kiasoulevplus2.Data.BmsData
+import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -115,7 +116,7 @@ class BmsResponseDecoderTest {
             "1: 00 00 00 00 FF F6 0E 4C\r" +
             "2: 19 00 00 00 00 00 00 00\r>"
 
-        val data = BmsResponseDecoder.decode(BmsFrameParser.parse(raw))
+        val data = BmsResponseDecoder.decode(FrameParser.parse(raw))
 
         assertEquals(80.0, data.displaySoc, 0.001)
         assertEquals(366.0, data.batteryVoltage, 0.001)

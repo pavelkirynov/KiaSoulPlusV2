@@ -19,6 +19,7 @@ import com.kirianov.kiasoulevplus2.Data.AppRequest
 import com.kirianov.kiasoulevplus2.Data.BmsCommands
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,7 +30,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.IOException
 
 class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
 
@@ -52,6 +52,47 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
                 }
             }
             .launchIn(scope)
+
+        GeneralData.state
+            .map { it.probe.pending }
+            .distinctUntilChanged()
+            .onEach { request ->
+                if (request == null) return@onEach
+                GeneralData.clearProbeRequest()
+                runProbe(request)
+            }
+            .launchIn(scope)
+    }
+
+    /**
+     * Ручний запит з екрана «Експерименти». Помилка тут не рве з'єднання: це
+     * пошук робочої команди, і відмова блока — теж корисний результат.
+     */
+    private fun runProbe(request: com.kirianov.kiasoulevplus2.Data.ProbeRequest) {
+        val scope = scope ?: return
+        if (!GeneralData.state.value.isConnected) {
+            GeneralData.publishProbeFrames(
+                request.header,
+                request.command,
+                response = "",
+                error = "Немає з'єднання з адаптером",
+            )
+            return
+        }
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                val response = canBridge.sendCANCommand(request.header, request.command)
+                GeneralData.publishProbeFrames(request.header, request.command, response)
+            } catch (e: IOException) {
+                GeneralData.publishProbeFrames(
+                    request.header,
+                    request.command,
+                    response = "",
+                    error = e.localizedMessage ?: "немає відповіді",
+                )
+            }
+        }
     }
 
     private fun attemptConnect() {

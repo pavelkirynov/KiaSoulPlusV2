@@ -26,6 +26,9 @@ data class State(
     /** Діапазон, за який рахувати витрату. Обирає користувач на екрані. */
     val consumptionWindow: ConsumptionWindow = ConsumptionWindow.Trip,
 
+    /** Ручні запити до шини та відповіді на них. */
+    val probe: ProbeState = ProbeState(),
+
     /** Введені вручну напруги: сюди пише блок сховища та інтерфейс. */
     val manualCells: ManualCells = ManualCells(),
 

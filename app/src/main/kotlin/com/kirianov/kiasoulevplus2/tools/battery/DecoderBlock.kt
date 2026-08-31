@@ -9,6 +9,7 @@
 package com.kirianov.kiasoulevplus2.tools.battery
 
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
@@ -24,7 +25,7 @@ class DecoderBlock(private val cellDecoder: CellDecoder = CellDecoder()) {
             .filterNotNull()
             .distinctUntilChanged()
             .onEach { frames ->
-                val bytes = BmsFrameParser.parse(frames.responses.firstOrNull().orEmpty())
+                val bytes = FrameParser.parse(frames.responses.firstOrNull().orEmpty())
                 GeneralData.updateBms(BmsResponseDecoder.decode(bytes))
             }
             .launchIn(scope)
@@ -34,7 +35,7 @@ class DecoderBlock(private val cellDecoder: CellDecoder = CellDecoder()) {
             .filterNotNull()
             .distinctUntilChanged()
             .onEach { frames ->
-                val bytes = BmsFrameParser.parse(frames.responses.firstOrNull().orEmpty())
+                val bytes = FrameParser.parse(frames.responses.firstOrNull().orEmpty())
                 GeneralData.updateVehicle(OdometerDecoder.decode(bytes))
             }
             .launchIn(scope)

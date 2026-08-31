@@ -8,6 +8,9 @@ data class CanExchange(
     val batteryFrames: CanFrames? = null,
     val cellFrames: CanFrames? = null,
     val vehicleFrames: CanFrames? = null,
+
+    /** Відповідь на ручний запит з екрана «Експерименти». */
+    val probeFrames: CanFrames? = null,
 )
 
 /**

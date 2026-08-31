@@ -13,6 +13,7 @@ import com.kirianov.kiasoulevplus2.services.bluetooth.BluetoothBlock
 import com.kirianov.kiasoulevplus2.services.bluetooth.ElmBluetoothManager
 import com.kirianov.kiasoulevplus2.tools.battery.DecoderBlock
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
+import com.kirianov.kiasoulevplus2.tools.probe.ProbeBlock
 import com.kirianov.kiasoulevplus2.tools.storage.SharedPreferencesCellStore
 import com.kirianov.kiasoulevplus2.tools.storage.StorageBlock
 import kotlinx.coroutines.CoroutineScope
@@ -22,11 +23,13 @@ class AppBlocks(context: Context) {
     private val bluetooth = BluetoothBlock(ElmBluetoothManager())
     private val decoders = DecoderBlock()
     private val calculations = CalculationBlock()
+    private val probe = ProbeBlock()
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
 
     fun start(scope: CoroutineScope) {
         decoders.start(scope)
         calculations.start(scope)
+        probe.start(scope)
         storage.start(scope)
         bluetooth.start(scope)
     }

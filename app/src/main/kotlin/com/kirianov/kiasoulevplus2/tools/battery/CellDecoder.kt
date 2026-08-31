@@ -10,7 +10,7 @@
 // займає ОДИН байт, а вольти рахуються як байт * 0.02 (тобто байт / 50).
 //
 // АЛГОРИТМ:
-// 1. BmsFrameParser чистить відповідь і віддає байти.
+// 1. FrameParser чистить відповідь і віддає байти.
 // 2. Комірки читаються по одному байту починаючи з FIRST_CELL_INDEX.
 // 3. Значення поза PLAUSIBLE_VOLTAGE_RANGE вважається незчитаним і стає 0.0,
 //    щоб не зіпсувати min/max.
@@ -23,6 +23,7 @@
 package com.kirianov.kiasoulevplus2.tools.battery
 
 import com.kirianov.kiasoulevplus2.Data.CellData
+import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
 
 class CellDecoder {
 
@@ -32,7 +33,7 @@ class CellDecoder {
 
         responses.forEachIndexed { index, rawResponse ->
             val cmdName = commands.getOrElse(index) { "кадр ${index + 1}" }
-            val bytes = BmsFrameParser.parse(rawResponse)
+            val bytes = FrameParser.parse(rawResponse)
             val frameVoltages = decodeFrame(bytes)
             allVoltages += frameVoltages
 

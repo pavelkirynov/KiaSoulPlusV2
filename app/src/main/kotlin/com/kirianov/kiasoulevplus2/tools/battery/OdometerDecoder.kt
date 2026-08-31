@@ -13,6 +13,7 @@
 package com.kirianov.kiasoulevplus2.tools.battery
 
 import com.kirianov.kiasoulevplus2.Data.VehicleData
+import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
 
 object OdometerDecoder {
 
@@ -25,7 +26,7 @@ object OdometerDecoder {
     fun decode(bytes: List<Int>): VehicleData {
         if (bytes.size < MIN_FRAME_SIZE) return VehicleData()
 
-        val km = BmsFrameParser.unsigned24(bytes, ODOMETER_INDEX).toDouble()
+        val km = FrameParser.unsigned24(bytes, ODOMETER_INDEX).toDouble()
         return if (km in 1.0..MAX_PLAUSIBLE_KM) VehicleData(odometerKm = km) else VehicleData()
     }
 }

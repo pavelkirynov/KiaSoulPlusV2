@@ -7,8 +7,8 @@
 
 package com.kirianov.kiasoulevplus2.services.bluetooth
 
-import kotlinx.coroutines.delay
 import java.io.IOException
+import kotlinx.coroutines.delay
 
 class ElmCANBridge(private val bluetoothManager: ElmBluetoothManager) {
 

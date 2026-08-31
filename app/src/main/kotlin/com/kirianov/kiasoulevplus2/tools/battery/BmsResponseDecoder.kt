@@ -11,6 +11,7 @@
 package com.kirianov.kiasoulevplus2.tools.battery
 
 import com.kirianov.kiasoulevplus2.Data.BmsData
+import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
 
 object BmsResponseDecoder {
 
@@ -44,9 +45,9 @@ object BmsResponseDecoder {
 
         return BmsData(
             displaySoc = bytes[SOC_INDEX] / 2.0,
-            batteryVoltage = BmsFrameParser.unsigned16(bytes, VOLTAGE_HIGH_INDEX) / 10.0,
-            batteryCurrent = BmsFrameParser.signed16(bytes, CURRENT_HIGH_INDEX) / 10.0,
-            batteryTempC = BmsFrameParser.signed8(bytes, TEMP_MAX_INDEX).toDouble(),
+            batteryVoltage = FrameParser.unsigned16(bytes, VOLTAGE_HIGH_INDEX) / 10.0,
+            batteryCurrent = FrameParser.signed16(bytes, CURRENT_HIGH_INDEX) / 10.0,
+            batteryTempC = FrameParser.signed8(bytes, TEMP_MAX_INDEX).toDouble(),
             cumulativeEnergyChargedKwh = energyAt(bytes, ENERGY_CHARGED_INDEX),
             cumulativeEnergyDischargedKwh = energyAt(bytes, ENERGY_DISCHARGED_INDEX),
         )
@@ -59,7 +60,7 @@ object BmsResponseDecoder {
     private fun energyAt(bytes: List<Int>, index: Int): Double {
         if (bytes.size < MIN_FRAME_SIZE_WITH_COUNTERS) return 0.0
 
-        val value = BmsFrameParser.unsigned32(bytes, index) / 10.0
+        val value = FrameParser.unsigned32(bytes, index) / 10.0
         return if (value <= MAX_PLAUSIBLE_LIFETIME_KWH) value else 0.0
     }
 }
