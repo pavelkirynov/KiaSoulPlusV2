@@ -35,13 +35,35 @@ import com.kirianov.kiasoulevplus2.Data.MlSegment
 import kotlin.math.abs
 
 class CapacityModel(
-    /** Крива ємності: dQ/du = c₀ + c₁u + c₂u², де u = SOC/100. */
+    /**
+     * Крива ємності по **корзинах** шкали: скільки кіловат-годин лежить у кожних
+     * десяти відсотках SOC. Разом вони й складають повну ємність.
+     *
+     * Чому не поліном. Комірки в пакеті літій-залізо-фосфатні, а BMS читає їх
+     * таблицею напруг від рідних нікелевих. У LFP полиця напруги майже пласка, тож
+     * у середині шкали BMS «не помічає» витраченого: на малий ΔSOC там припадає
+     * багато енергії, а на колінах навпаки. Виходить крива з вираженим горбом і
+     * різкими краями.
+     *
+     * Поліном такий профіль описує погано, і найгірше — **поза** тим діапазоном, де
+     * були дані: на перевірці правдоподібною кривою LFP куб дав −79 % на 95 % шкали
+     * просто тому, що вище 88 % сесій не траплялося, і криву понесло. Корзини так не
+     * вміють: кожна визначається лише тими сесіями, які її перетинають, а корзина
+     * без даних чесно лишається при апріорному значенні.
+     *
+     * Лінійність за параметрами зберігається повністю: енергія за проміжок — це сума
+     * корзин, узятих у частках покриття. Тому тут працює та сама математика.
+     */
     private val energy: OnlineRegression = OnlineRegression(
-        size = 3,
-        prior = doubleArrayOf(NOMINAL_CAPACITY_KWH, 0.0, 0.0),
-        priorSigma = doubleArrayOf(4.0, 6.0, 6.0),
+        size = BINS,
+        prior = DoubleArray(BINS) { NOMINAL_CAPACITY_KWH / BINS },
+        priorSigma = DoubleArray(BINS) { PRIOR_BIN_SIGMA_KWH },
         noiseSigma = 0.5,
         forgetMs = OnlineRegression.FORGET_TWO_YEARS_MS,
+        // Сусідні корзини — шматки однієї кривої, а не незалежні числа. Поки сесій
+        // мало, вони діляться інформацією: інакше корзина, яку жодна сесія не
+        // перетнула окремо, так і лишалася б при апріорі, а сусідня поруч — ні.
+        penalty = OnlineRegression.smoothnessPenalty(BINS, SMOOTHNESS),
     ),
     /** Панельний SOC як пряма від точного: [зсув, нахил]. Звідси й беруться буфери. */
     private val buffer: OnlineRegression = OnlineRegression(
@@ -121,10 +143,12 @@ class CapacityModel(
         // Енергія і SOC мусять рухатися в один бік: інакше це збій читання.
         if (drop * energyKwh <= 0.0) return false
 
+        // Вага одна на сесію: довший проміжок і так важить більше, бо накриває
+        // більше корзин і накриває їх повніше.
         return energy.observe(
             featuresFor(socEndPercent, socStartPercent),
             energyKwh,
-            weight = abs(drop),
+            weight = 1.0,
             atMs = atMs,
         )
     }
@@ -146,16 +170,16 @@ class CapacityModel(
 
     /** Скільки кВт·год важить один відсоток у цій точці шкали. */
     fun kwhPerPercentAt(socPercent: Double): Double {
-        val theta = energy.coefficients()
-        val u = socPercent / 100.0
-        return ((theta[0] + theta[1] * u + theta[2] * u * u) / 100.0)
-            .coerceAtLeast(MIN_KWH_PER_PERCENT)
+        val bin = binOf(socPercent)
+        return (energy.coefficients()[bin] / BIN_WIDTH_PERCENT).coerceAtLeast(MIN_KWH_PER_PERCENT)
     }
 
+    private fun binOf(socPercent: Double): Int =
+        (socPercent / BIN_WIDTH_PERCENT).toInt().coerceIn(0, BINS - 1)
+
     /**
-     * Енергія між двома точками шкали, кВт·год.
-     *
-     * ∫(c₀ + c₁u + c₂u²) du = c₀·Δu + c₁·Δ(u²)/2 + c₂·Δ(u³)/3
+     * Енергія між двома точками шкали, кВт·год: сума корзин, узятих у частках,
+     * якими проміжок їх накриває.
      */
     fun energyBetween(fromSocPercent: Double, toSocPercent: Double): Double {
         if (toSocPercent <= fromSocPercent) return 0.0
@@ -193,20 +217,51 @@ class CapacityModel(
         return energyRestored && bufferRestored
     }
 
-    /** [Δu, Δ(u²)/2, Δ(u³)/3] — рівно те, на що множаться c₀, c₁, c₂. */
+    /**
+     * Яку частку кожної корзини накриває проміжок: від 0 до 1. Саме на ці частки
+     * і множаться енергії корзин.
+     *
+     * Знак важливий. Під час заряджання SOC росте, тобто кінець вищий за початок, —
+     * і тоді частки беруться з мінусом. Разом із від'ємною енергією заряду це дає
+     * той самий доданок, що й розряд: заряд і рух кажуть моделі одне й те саме,
+     * просто з різних боків. Без знака заряджання не вчило б її взагалі.
+     */
     private fun featuresFor(fromSocPercent: Double, toSocPercent: Double): DoubleArray {
-        val from = fromSocPercent / 100.0
-        val to = toSocPercent / 100.0
-        return doubleArrayOf(
-            to - from,
-            (to * to - from * from) / 2.0,
-            (to * to * to - from * from * from) / 3.0,
-        )
+        val from = fromSocPercent.coerceIn(0.0, 100.0)
+        val to = toSocPercent.coerceIn(0.0, 100.0)
+        val lower = minOf(from, to)
+        val upper = maxOf(from, to)
+        val sign = if (to >= from) 1.0 else -1.0
+        return DoubleArray(BINS) { bin ->
+            val binFrom = bin * BIN_WIDTH_PERCENT
+            val binTo = binFrom + BIN_WIDTH_PERCENT
+            val overlap = minOf(upper, binTo) - maxOf(lower, binFrom)
+            sign * (overlap / BIN_WIDTH_PERCENT).coerceIn(0.0, 1.0)
+        }
     }
 
     companion object {
         /** Апріорна корисна ємність перепакованого пакета. Див. `Vehicle`. */
         const val NOMINAL_CAPACITY_KWH = Vehicle.USABLE_CAPACITY_KWH
+
+        /** На скільки шматків ділиться шкала. Десять відсотків на корзину. */
+        const val BINS = 10
+
+        const val BIN_WIDTH_PERCENT = 100.0 / BINS
+
+        /**
+         * Наскільки непевна корзина спочатку. Приблизно третина від апріорного
+         * значення: досить широко, щоб дані швидко перемогли, і досить вузько, щоб
+         * корзина без жодної сесії не зіпсувала загальну суму.
+         */
+        const val PRIOR_BIN_SIGMA_KWH = 1.5
+
+        /**
+         * Наскільки міцно триматися гладкості. Приблизно вага однієї сесії: досить,
+         * щоб на першому десятку сесій крива не розсипалася на окремі стовпчики, і
+         * замало, щоб через рік завадити їй показати справжній горб.
+         */
+        const val SMOOTHNESS = 1.0
 
         /**
          * Менший розмах SOC не годиться: точний SOC приходить раз на ~хвилину і сам є

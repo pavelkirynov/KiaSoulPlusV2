@@ -48,6 +48,15 @@ class OnlineRegression(
     /** Стала часу забування, мілісекунди календарного часу. */
     private val forgetMs: Long = FORGET_YEAR_MS,
     private val ridge: Double = RIDGE,
+    /**
+     * Необов'язковий штраф на форму розв'язку, size×size. Додається до A так само,
+     * як апріорні ваги, але, на відміну від них, тягне не до значення, а до
+     * **співвідношення** між коефіцієнтами — наприклад, до гладкості сусідніх.
+     *
+     * Це звичайна регуляризація Тихонова. Правої частини вона не чіпає, тож із
+     * накопиченням даних тане сама собою: коли A росте, штраф лишається сталим.
+     */
+    private val penalty: DoubleArray? = null,
 ) {
 
     init {
@@ -242,9 +251,12 @@ class OnlineRegression(
         cached = null
     }
 
-    /** A з апріорними псевдоспостереженнями і гребенем: те, що реально розв'язується. */
+    /** A з апріорними псевдоспостереженнями, штрафом і гребенем. */
     private fun totalGram(): DoubleArray {
         val total = gram.copyOf()
+        if (penalty != null) {
+            for (index in total.indices) total[index] += penalty[index]
+        }
         for (index in 0 until size) {
             total[index * size + index] += priorWeight[index] + ridge
         }
@@ -285,6 +297,23 @@ class OnlineRegression(
 
         /** Нижня межа розкиду як частка оголошеного типового шуму. */
         const val MIN_SIGMA_SHARE = 0.5
+
+        /**
+         * Штраф на негладкість: λ·DᵀD, де D — різниці сусідніх коефіцієнтів.
+         * Потрібен там, де коефіцієнти — це сусідні шматки однієї кривої: поки даних
+         * мало, вони діляться інформацією замість того, щоб кожен окремо тягнутися
+         * до апріорі.
+         */
+        fun smoothnessPenalty(size: Int, lambda: Double): DoubleArray {
+            val matrix = DoubleArray(size * size)
+            for (row in 0 until size - 1) {
+                matrix[row * size + row] += lambda
+                matrix[(row + 1) * size + row + 1] += lambda
+                matrix[row * size + row + 1] -= lambda
+                matrix[(row + 1) * size + row] -= lambda
+            }
+            return matrix
+        }
     }
 }
 
