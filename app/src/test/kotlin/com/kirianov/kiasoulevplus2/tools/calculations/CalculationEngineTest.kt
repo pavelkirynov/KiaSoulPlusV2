@@ -1,4 +1,7 @@
-package com.kirianov.kiasoulevplus2.Data
+package com.kirianov.kiasoulevplus2.tools.calculations
+
+import com.kirianov.kiasoulevplus2.Data.BmsData
+import com.kirianov.kiasoulevplus2.Data.CellData
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

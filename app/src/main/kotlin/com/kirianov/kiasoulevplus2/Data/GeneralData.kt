@@ -1,3 +1,14 @@
+// ====================================================================================
+// ЄДИНА ТОЧКА ОБМІНУ ДАНИМИ МІЖ БЛОКАМИ (GeneralData)
+//
+// Блоки додатка (Bluetooth, декодери, обчислення, сховище, інтерфейс, Android Auto)
+// не знають один про одного і не викликають один одного. Кожен читає потрібне звідси
+// і сюди ж пише свій результат.
+//
+// Це сховище навмисно пасивне: воно не рахує, не декодує і нікуди не звертається.
+// Уся логіка живе у блоках, тому будь-який із них можна замінити, не чіпаючи решту.
+// ====================================================================================
+
 package com.kirianov.kiasoulevplus2.Data
 
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -5,76 +16,72 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-/**
- * Стан додатка.
- */
-data class State(
-    val inputBms: InputBmsData = InputBmsData(),
-    val bms: BmsData = BmsData(),
-    val calculated: CalculatedData = CalculatedData(),
-    val cells: CellData = CellData(),
-    val connection: ConnectionState = ConnectionState.Disconnected,
-    val debugInfo: String = "",
-) {
-    val isConnected: Boolean get() = connection == ConnectionState.Connected
-}
-
-/**
- * Фаза Bluetooth-з'єднання. Окремий тип замість пари булів прибирає
- * стан «підключаємось і водночас підключені», який раніше був можливий.
- */
-enum class ConnectionState {
-    Disconnected,
-    Connecting,
-    Connected,
-}
-
-/**
- * Єдине центральне сховище стану додатка (Single Source of Truth).
- */
 object GeneralData {
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
-    fun updateInputBms(transform: (InputBmsData) -> InputBmsData) {
-        _state.update { current -> current.copy(inputBms = transform(current.inputBms)) }
-    }
+    // --- Запити від інтерфейсу -------------------------------------------------
 
-    /** Записує комірки разом із перерахованими на їх основі величинами. */
-    fun updateCellData(cellData: CellData) {
-        _state.update { current ->
-            current.copy(
-                cells = cellData,
-                calculated = CalculationEngine.calculate(current.bms, cellData),
-            )
+    fun requestConnect() = _state.update { it.copy(request = AppRequest.Connect) }
+
+    fun requestDisconnect() = _state.update { it.copy(request = AppRequest.Disconnect) }
+
+    /** Викликає блок Bluetooth, коли прийняв запит до виконання. */
+    fun clearRequest() = _state.update { it.copy(request = AppRequest.None) }
+
+    fun updateInputBms(transform: (InputBmsData) -> InputBmsData) =
+        _state.update { it.copy(inputBms = transform(it.inputBms)) }
+
+    // --- Сирий обмін із шиною: пише блок Bluetooth -----------------------------
+
+    fun publishBatteryFrames(commands: List<String>, responses: List<String>) =
+        _state.update {
+            it.copy(can = it.can.copy(batteryFrames = nextFrames(commands, responses)))
         }
-    }
 
-    /** Записує показники BMS разом із перерахованими на їх основі величинами. */
-    fun updateBmsData(bmsData: BmsData) {
-        _state.update { current ->
-            current.copy(
-                bms = bmsData,
-                calculated = CalculationEngine.calculate(bmsData, current.cells),
-            )
+    fun publishCellFrames(commands: List<String>, responses: List<String>) =
+        _state.update {
+            it.copy(can = it.can.copy(cellFrames = nextFrames(commands, responses)))
         }
-    }
 
-    fun updateConnection(connection: ConnectionState, debugInfo: String) {
-        _state.update { current -> current.copy(connection = connection, debugInfo = debugInfo) }
-    }
+    // --- Розібрані показники: пише блок декодерів ------------------------------
 
-    fun updateDebugInfo(debugInfo: String) {
-        _state.update { current -> current.copy(debugInfo = debugInfo) }
-    }
+    fun updateBms(bms: BmsData) = _state.update { it.copy(bms = bms) }
 
-    fun updateState(transform: (State) -> State) {
-        _state.update(transform)
-    }
+    fun updateCells(cells: CellData) = _state.update { it.copy(cells = cells) }
+
+    // --- Похідні величини: пише блок обчислень ---------------------------------
+
+    fun updateCalculated(calculated: CalculatedData) =
+        _state.update { it.copy(calculated = calculated) }
+
+    // --- Ручні напруги: пише блок сховища та інтерфейс -------------------------
+
+    fun updateManualCells(voltages: Map<Int, Double>) =
+        _state.update { it.copy(manualCells = ManualCells(voltages)) }
+
+    fun setManualCell(index: Int, voltage: Double) =
+        _state.update { current ->
+            current.copy(manualCells = ManualCells(current.manualCells.voltages + (index to voltage)))
+        }
+
+    // --- Стан з'єднання та лог -------------------------------------------------
+
+    fun updateConnection(connection: ConnectionState, debugInfo: String) =
+        _state.update { it.copy(connection = connection, debugInfo = debugInfo) }
+
+    fun updateDebugInfo(debugInfo: String) = _state.update { it.copy(debugInfo = debugInfo) }
 
     /** Повертає сховище у вихідний стан. Потрібно тестам, бо об'єкт живе весь процес. */
     fun reset() {
         _state.value = State()
+        sequence = 0
     }
+
+    @Volatile
+    private var sequence = 0L
+
+    private fun nextFrames(commands: List<String>, responses: List<String>) =
+        CanFrames(commands = commands, responses = responses, sequence = ++sequence)
 }

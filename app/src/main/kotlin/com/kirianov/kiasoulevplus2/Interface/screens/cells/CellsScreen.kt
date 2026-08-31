@@ -8,7 +8,6 @@
 
 package com.kirianov.kiasoulevplus2.Interface.screens.cells
 
-import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -36,17 +35,14 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -54,32 +50,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kirianov.kiasoulevplus2.Data.CellData
-import com.kirianov.kiasoulevplus2.Interface.formatDecimal
-import com.kirianov.kiasoulevplus2.Interface.formatMeasurement
-import com.kirianov.kiasoulevplus2.Interface.parseDecimalInput
+import com.kirianov.kiasoulevplus2.Data.ManualCells
+import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
+import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
 
-object CellVoltagePrefs {
-    private const val PREFS_NAME = "cell_voltage_prefs"
-    const val CELL_COUNT = CellData.TOTAL_CELLS
-    const val COLUMNS = 8
-
-    val cellVoltages = mutableStateMapOf<Int, Double>()
-
-    fun load(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        for (index in 0 until CELL_COUNT) {
-            cellVoltages[index] = prefs.getFloat("cell_$index", 0f).toDouble()
-        }
-    }
-
-    fun saveCell(context: Context, index: Int, value: Double) {
-        cellVoltages[index] = value
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putFloat("cell_$index", value.toFloat())
-            .apply()
-    }
-}
+private const val GRID_COLUMNS = 8
 
 /** Реальна розбивка батареї Kia Soul EV на блоки. */
 private data class CellBlock(val startIndex: Int, val count: Int)
@@ -93,18 +68,16 @@ private enum class CellsViewMode { GRID, BLOCKS }
 
 @Composable
 fun CellsScreen(cellsViewModel: CellsViewModel) {
-    val context = LocalContext.current
     var viewMode by remember { mutableStateOf(CellsViewMode.GRID) }
-
-    LaunchedEffect(Unit) { CellVoltagePrefs.load(context) }
 
     val appState by cellsViewModel.uiState.collectAsState()
     val cellData = appState.cells
+    val manualCells = appState.manualCells
 
     // Індикатор виводиться прямо з прапорця запиту, тому розсинхрону бути не може.
     val isLoading = appState.inputBms.scanCellsRequested
 
-    val storedVoltages = CellVoltagePrefs.cellVoltages.values.filter { it > 0.0 }
+    val storedVoltages = manualCells.voltages.values.filter { it > 0.0 }
     val minVoltage = cellData.minVoltage.takeIf { it > 0.0 } ?: (storedVoltages.minOrNull() ?: 0.0)
     val maxVoltage = cellData.maxVoltage.takeIf { it > 0.0 } ?: (storedVoltages.maxOrNull() ?: 0.0)
     val delta = cellData.deltaVoltage.takeIf { it > 0.0 }
@@ -164,8 +137,8 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
         Spacer(modifier = Modifier.height(6.dp))
 
         when (viewMode) {
-            CellsViewMode.GRID -> CompactGridView(context, cellData)
-            CellsViewMode.BLOCKS -> BlocksView(context, cellData)
+            CellsViewMode.GRID -> CompactGridView(cellsViewModel, cellData, manualCells)
+            CellsViewMode.BLOCKS -> BlocksView(cellsViewModel, cellData, manualCells)
         }
     }
 }
@@ -215,10 +188,15 @@ private fun StatItem(label: String, value: Double) {
 }
 
 @Composable
-private fun CompactCellCell(index: Int, context: Context, cellData: CellData, modifier: Modifier) {
+private fun CompactCellCell(
+    index: Int,
+    cellsViewModel: CellsViewModel,
+    cellData: CellData,
+    manualCells: ManualCells,
+    modifier: Modifier,
+) {
     val canVoltage = cellData.cellVoltages.getOrElse(index) { 0.0 }
-    val storedVoltage = CellVoltagePrefs.cellVoltages[index] ?: 0.0
-    val activeVoltage = if (canVoltage > 0.0) canVoltage else storedVoltage
+    val activeVoltage = if (canVoltage > 0.0) canVoltage else manualCells.voltageAt(index)
 
     var textValue by remember(activeVoltage) {
         mutableStateOf(if (activeVoltage > 0.0) formatDecimal(activeVoltage, 2) else "")
@@ -240,7 +218,7 @@ private fun CompactCellCell(index: Int, context: Context, cellData: CellData, mo
             value = textValue,
             onValueChange = { newValue ->
                 textValue = newValue
-                parseDecimalInput(newValue)?.let { CellVoltagePrefs.saveCell(context, index, it) }
+                cellsViewModel.onManualVoltageEntered(index, newValue)
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             singleLine = true,
@@ -253,23 +231,31 @@ private fun CompactCellCell(index: Int, context: Context, cellData: CellData, mo
 }
 
 @Composable
-private fun CompactGridView(context: Context, cellData: CellData) {
+private fun CompactGridView(
+    cellsViewModel: CellsViewModel,
+    cellData: CellData,
+    manualCells: ManualCells,
+) {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(CellVoltagePrefs.COLUMNS),
+        columns = GridCells.Fixed(GRID_COLUMNS),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
         modifier = Modifier
             .fillMaxWidth()
             .height(420.dp),
     ) {
-        items(CellVoltagePrefs.CELL_COUNT) { index ->
-            CompactCellCell(index, context, cellData, Modifier.size(34.dp))
+        items(CellData.TOTAL_CELLS) { index ->
+            CompactCellCell(index, cellsViewModel, cellData, manualCells, Modifier.size(34.dp))
         }
     }
 }
 
 @Composable
-private fun BlocksView(context: Context, cellData: CellData) {
+private fun BlocksView(
+    cellsViewModel: CellsViewModel,
+    cellData: CellData,
+    manualCells: ManualCells,
+) {
     val cellHeight = 22.dp
     val spacing = 1.dp
 
@@ -290,8 +276,9 @@ private fun BlocksView(context: Context, cellData: CellData) {
                                 if (offset < block.count) {
                                     CompactCellCell(
                                         index = block.startIndex + offset,
-                                        context = context,
+                                        cellsViewModel = cellsViewModel,
                                         cellData = cellData,
+                                        manualCells = manualCells,
                                         modifier = Modifier.width(cellWidth).height(cellHeight),
                                     )
                                 }

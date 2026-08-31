@@ -1,41 +1,62 @@
 // ====================================================================================
-// УПРАВЛІННЯ З'ЄДНАННЯМ ТА ЦИКЛОМ ОПИТУВАННЯ CAN (ConnectionManager)
+// БЛОК BLUETOOTH (BluetoothBlock)
 //
 // ЩО ВІН РОБИТЬ:
-// 1. Знаходить OBD-адаптер, підключається і одноразово ініціалізує ELM327.
-// 2. Крутить фоновий цикл: або звичайне зчитування 21 01, або, на запит з екрана
-//    комірок, серію 21 02..21 04.
-// 3. Стежить за обривом зв'язку: після кількох підряд помилок вводу-виводу
-//    переводить додаток у стан «Відключено» замість того, щоб мовчки крутитися далі.
+// 1. Слухає запит на під'єднання/від'єднання в GeneralData — інтерфейс кличе не його,
+//    а лише пише запит у сховище.
+// 2. Знаходить OBD-адаптер, під'єднується і одноразово ініціалізує ELM327.
+// 3. Крутить цикл опитування і кладе СИРІ відповіді в GeneralData.
+// 4. Стежить за обривом зв'язку: після кількох підряд помилок вводу-виводу переводить
+//    додаток у стан «Відключено».
+//
+// ЧОГО ВІН НЕ РОБИТЬ:
+// - НЕ декодує відповіді: цим займається блок декодерів, який теж читає GeneralData.
 // ====================================================================================
 
 package com.kirianov.kiasoulevplus2.services.bluetooth
 
+import com.kirianov.kiasoulevplus2.Data.AppRequest
 import com.kirianov.kiasoulevplus2.Data.BmsCommands
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
-import com.kirianov.kiasoulevplus2.tools.battery.BatteryDecoder
-import com.kirianov.kiasoulevplus2.tools.battery.CellDecoder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.IOException
 
-class ConnectionManager(
-    private val bluetoothManager: ElmBluetoothManager,
-    private val scope: CoroutineScope,
-) {
-    private val canBridge = ElmCANBridge(bluetoothManager)
-    private val batteryDecoder = BatteryDecoder(canBridge)
-    private val cellDecoder = CellDecoder()
+class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
 
+    private val canBridge = ElmCANBridge(bluetoothManager)
+
+    private var scope: CoroutineScope? = null
     private var pollingJob: Job? = null
 
-    fun attemptConnect() {
+    fun start(scope: CoroutineScope) {
+        this.scope = scope
+
+        GeneralData.state
+            .map { it.request }
+            .distinctUntilChanged()
+            .onEach { request ->
+                when (request) {
+                    AppRequest.Connect -> { GeneralData.clearRequest(); attemptConnect() }
+                    AppRequest.Disconnect -> { GeneralData.clearRequest(); disconnect() }
+                    AppRequest.None -> Unit
+                }
+            }
+            .launchIn(scope)
+    }
+
+    private fun attemptConnect() {
         if (GeneralData.state.value.connection != ConnectionState.Disconnected) return
+        val scope = scope ?: return
 
         GeneralData.updateConnection(ConnectionState.Connecting, "Пошук спарованих OBD пристроїв...")
 
@@ -62,11 +83,11 @@ class ConnectionManager(
             }
 
             GeneralData.updateConnection(ConnectionState.Connected, "Підключено до $deviceName")
-            startDataPolling()
+            startDataPolling(scope)
         }
     }
 
-    private fun startDataPolling() {
+    private fun startDataPolling(scope: CoroutineScope) {
         pollingJob?.cancel()
         pollingJob = scope.launch(Dispatchers.IO) {
             var consecutiveFailures = 0
@@ -93,18 +114,18 @@ class ConnectionManager(
 
     private suspend fun pollOnce() {
         val inputBms = GeneralData.state.value.inputBms
+        val header = inputBms.customHeader.ifEmpty { BmsCommands.HEADER_BMS }
 
         if (!inputBms.scanCellsRequested) {
-            GeneralData.updateBmsData(batteryDecoder.getBatteryData())
+            val command = BmsCommands.REQUEST_BATTERY_MAIN
+            val response = canBridge.sendCANCommand(header, command)
+            GeneralData.publishBatteryFrames(listOf(command), listOf(response))
             return
         }
 
-        val header = inputBms.customHeader.ifEmpty { BmsCommands.HEADER_BMS }
         val commands = inputBms.cellCommands.ifEmpty { BmsCommands.REQUEST_CELL_VOLTAGES }
-
         try {
-            val responses = readCellFrames(header, commands)
-            GeneralData.updateCellData(cellDecoder.decodeResponses(commands, responses))
+            GeneralData.publishCellFrames(commands, readCellFrames(header, commands))
         } finally {
             // Прапорець знімається за будь-якого результату, інакше кнопка «Зчитати комірки»
             // залишалася б заблокованою назавжди після першої ж помилки.
@@ -125,8 +146,6 @@ class ConnectionManager(
             // Пауза, щоб адаптер устиг зібрати багаторамковий ISO-TP кадр.
             delay(INTER_FRAME_DELAY_MS)
             response
-        }.also { responses ->
-            GeneralData.updateInputBms { it.copy(rawResponses = responses) }
         }
 
     private fun handleConnectionLost(cause: IOException) {

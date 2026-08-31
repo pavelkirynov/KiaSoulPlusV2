@@ -1,4 +1,8 @@
-package com.kirianov.kiasoulevplus2.Data
+package com.kirianov.kiasoulevplus2.tools.calculations
+
+import com.kirianov.kiasoulevplus2.Data.BmsData
+import com.kirianov.kiasoulevplus2.Data.CalculatedData
+import com.kirianov.kiasoulevplus2.Data.CellData
 
 /**
  * Рахує похідні величини з уже зчитаних даних BMS та комірок.

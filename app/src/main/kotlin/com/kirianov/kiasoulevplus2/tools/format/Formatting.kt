@@ -7,7 +7,7 @@
 // комірок мовчки губилися. Тепер формат і розбір симетричні на будь-якій локалі.
 // ====================================================================================
 
-package com.kirianov.kiasoulevplus2.Interface
+package com.kirianov.kiasoulevplus2.tools.format
 
 import java.util.Locale
 

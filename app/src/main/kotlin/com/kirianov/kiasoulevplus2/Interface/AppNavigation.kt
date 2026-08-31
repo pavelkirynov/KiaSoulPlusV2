@@ -1,5 +1,5 @@
-// Навігація додатка: перемикання між екранами, запит дозволів Bluetooth.
-// Стан підключення екрани читають самі з GeneralData, тому сюди його передавати не треба.
+// Навігація додатка: перемикання між екранами та запит дозволів Bluetooth.
+// Стан і дії екрани беруть із GeneralData самостійно, тому сюди нічого передавати не треба.
 
 package com.kirianov.kiasoulevplus2.Interface
 
@@ -26,7 +26,7 @@ import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsViewModel
 import com.kirianov.kiasoulevplus2.Interface.screens.main.MainScreen
 
 @Composable
-fun AppNavigation(onConnectClick: () -> Unit) {
+fun AppNavigation() {
     RequestBluetoothPermissions()
 
     var currentScreen by remember { mutableStateOf(AppScreen.MAIN) }
@@ -53,7 +53,7 @@ fun AppNavigation(onConnectClick: () -> Unit) {
                     .padding(paddingValues),
             ) {
                 when (currentScreen) {
-                    AppScreen.MAIN -> MainScreen(onConnectClick = onConnectClick)
+                    AppScreen.MAIN -> MainScreen()
                     AppScreen.CELLS -> CellsScreen(cellsViewModel = viewModel<CellsViewModel>())
                     AppScreen.EXPERIMENTS -> ScreenPlaceholder("Експерименти")
                     AppScreen.SETTINGS -> ScreenPlaceholder("Калібрування")

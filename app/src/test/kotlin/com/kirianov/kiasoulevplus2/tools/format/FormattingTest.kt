@@ -1,4 +1,4 @@
-package com.kirianov.kiasoulevplus2.Interface
+package com.kirianov.kiasoulevplus2.tools.format
 
 import java.util.Locale
 import org.junit.After

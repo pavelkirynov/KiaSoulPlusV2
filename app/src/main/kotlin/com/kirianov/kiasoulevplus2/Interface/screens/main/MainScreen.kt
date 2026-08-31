@@ -23,14 +23,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
-import com.kirianov.kiasoulevplus2.Interface.formatDecimal
-import com.kirianov.kiasoulevplus2.Interface.formatMeasurement
+import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
+import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
 
 @Composable
-fun MainScreen(
-    onConnectClick: () -> Unit = {},
-    mainViewModel: MainViewModel = viewModel(),
-) {
+fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
     val state by mainViewModel.uiState.collectAsState()
     val bms = state.bms
     val calculated = state.calculated
@@ -53,7 +50,7 @@ fun MainScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Button(
-                        onClick = onConnectClick,
+                        onClick = mainViewModel::onConnectClick,
                         // Під час підключення кнопка вимкнена: повторне натискання
                         // раніше могло запустити другу спробу поверх першої.
                         enabled = state.connection != ConnectionState.Connecting,

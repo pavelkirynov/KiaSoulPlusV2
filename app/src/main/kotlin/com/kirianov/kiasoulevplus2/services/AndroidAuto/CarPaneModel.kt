@@ -10,8 +10,8 @@
 package com.kirianov.kiasoulevplus2.services.AndroidAuto
 
 import com.kirianov.kiasoulevplus2.Data.State
-import com.kirianov.kiasoulevplus2.Interface.formatDecimal
-import com.kirianov.kiasoulevplus2.Interface.formatMeasurement
+import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
+import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
 
 data class CarPaneModel(
     val title: String,
