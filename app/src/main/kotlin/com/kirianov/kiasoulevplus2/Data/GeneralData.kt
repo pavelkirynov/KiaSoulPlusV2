@@ -40,11 +40,6 @@ object GeneralData {
             it.copy(can = it.can.copy(batteryFrames = nextFrames(commands, responses)))
         }
 
-    fun publishVehicleFrames(commands: List<String>, responses: List<String>) =
-        _state.update {
-            it.copy(can = it.can.copy(vehicleFrames = nextFrames(commands, responses)))
-        }
-
     /**
      * Сирі відповіді на ручний запит. У commands кладеться заголовок, команда і,
      * якщо запит не вдався, текст помилки — так блок розбору отримує весь контекст.
@@ -56,6 +51,11 @@ object GeneralData {
                     probeFrames = nextFrames(listOfNotNull(header, command, error), listOf(response)),
                 ),
             )
+        }
+
+    fun publishMonitorLines(lines: List<String>) =
+        _state.update {
+            it.copy(can = it.can.copy(monitor = MonitorCapture(lines, ++sequence)))
         }
 
     fun publishCellFrames(commands: List<String>, responses: List<String>) =

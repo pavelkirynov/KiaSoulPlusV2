@@ -23,6 +23,7 @@ class ArchitectureTest {
         "tools.calculations",
         "tools.storage",
         "tools.probe",
+        "tools.vehicle",
         "tools.format",
         "tools.frames",
     )

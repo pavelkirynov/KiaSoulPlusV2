@@ -31,16 +31,6 @@ class DecoderBlock(private val cellDecoder: CellDecoder = CellDecoder()) {
             .launchIn(scope)
 
         GeneralData.state
-            .map { it.can.vehicleFrames }
-            .filterNotNull()
-            .distinctUntilChanged()
-            .onEach { frames ->
-                val bytes = FrameParser.parse(frames.responses.firstOrNull().orEmpty())
-                GeneralData.updateVehicle(OdometerDecoder.decode(bytes))
-            }
-            .launchIn(scope)
-
-        GeneralData.state
             .map { it.can.cellFrames }
             .filterNotNull()
             .distinctUntilChanged()

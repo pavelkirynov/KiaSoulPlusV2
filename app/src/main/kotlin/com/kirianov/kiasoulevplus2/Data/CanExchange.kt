@@ -7,10 +7,11 @@ package com.kirianov.kiasoulevplus2.Data
 data class CanExchange(
     val batteryFrames: CanFrames? = null,
     val cellFrames: CanFrames? = null,
-    val vehicleFrames: CanFrames? = null,
-
     /** Відповідь на ручний запит з екрана «Експерименти». */
     val probeFrames: CanFrames? = null,
+
+    /** Сирі рядки, зняті за одне вікно режиму монітора. */
+    val monitor: MonitorCapture? = null,
 )
 
 /**

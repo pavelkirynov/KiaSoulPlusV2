@@ -4,6 +4,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -103,13 +104,26 @@ class GeneralDataTest {
     }
 
     @Test
-    fun `vehicle frames are kept apart from the battery ones`() {
+    fun `monitor lines are kept apart from the battery frames`() {
         GeneralData.publishBatteryFrames(listOf("21 01"), listOf("61 01 AA"))
-        GeneralData.publishVehicleFrames(listOf("22 B0 02"), listOf("62 B0 02 BB"))
+        GeneralData.publishMonitorLines(listOf("4F0 00 00 00 00 00 B3 C1 1C"))
 
         val can = GeneralData.state.value.can
         assertEquals(listOf("61 01 AA"), can.batteryFrames?.responses)
-        assertEquals(listOf("62 B0 02 BB"), can.vehicleFrames?.responses)
+        assertEquals(listOf("4F0 00 00 00 00 00 B3 C1 1C"), can.monitor?.lines)
+    }
+
+    @Test
+    fun `every monitor window gets its own sequence`() {
+        GeneralData.publishMonitorLines(listOf("4F0 00"))
+        val first = GeneralData.state.value.can.monitor?.sequence
+
+        GeneralData.publishMonitorLines(listOf("4F0 00"))
+        val second = GeneralData.state.value.can.monitor?.sequence
+
+        assertNotNull(first)
+        assertNotNull(second)
+        assertTrue("послідовність мусить рости", second!! > first!!)
     }
 
     @Test

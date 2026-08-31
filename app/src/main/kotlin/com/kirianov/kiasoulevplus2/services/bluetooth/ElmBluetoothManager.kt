@@ -126,6 +126,48 @@ class ElmBluetoothManager : ElmAdapter {
         readUntilPrompt(inp, command)
     }
 
+    override suspend fun writeRaw(text: String) = withContext(Dispatchers.IO) {
+        val out = output ?: throw IOException("Bluetooth-потік запису закритий")
+        out.write(text.toByteArray())
+        out.flush()
+    }
+
+    /**
+     * Читає один рядок до \r. Саме це потрібно в режимі монітора: промпт там
+     * не приходить, і звичайне читання «до промпта» просто висіло б до таймауту.
+     */
+    override suspend fun readLine(timeoutMs: Long): String? = withContext(Dispatchers.IO) {
+        val inp = input ?: throw IOException("Bluetooth-потік читання закритий")
+        val line = StringBuilder()
+        var waited = 0L
+
+        while (waited < timeoutMs) {
+            if (inp.available() <= 0) {
+                delay(POLL_INTERVAL_MS)
+                waited += POLL_INTERVAL_MS
+                continue
+            }
+
+            val symbol = inp.read()
+            if (symbol < 0) break
+
+            val character = symbol.toChar()
+            if (character == '\r' || character == '\n') {
+                if (line.isNotEmpty()) return@withContext line.toString()
+            } else {
+                line.append(character)
+            }
+        }
+
+        line.takeIf { it.isNotEmpty() }?.toString()
+    }
+
+    override suspend fun flushInput() = withContext(Dispatchers.IO) {
+        val inp = input ?: return@withContext
+        while (inp.available() > 0) inp.read()
+        Unit
+    }
+
     private suspend fun readUntilPrompt(inp: InputStream, command: String): String {
         val response = StringBuilder()
         val buffer = ByteArray(READ_BUFFER_SIZE)

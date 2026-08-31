@@ -19,13 +19,29 @@ import org.junit.Test
 class ElmCANBridgeTest {
 
     /** Записує послідовність команд і навмисно «гальмує», щоб дати шанс перемішатися. */
-    private class RecordingAdapter : ElmAdapter {
+    private class RecordingAdapter(
+        private val monitorLines: List<String> = emptyList(),
+    ) : ElmAdapter {
         val sent = mutableListOf<String>()
+        val raw = mutableListOf<String>()
+        var flushes = 0
+        private var lineIndex = 0
 
         override suspend fun sendCommand(command: String): String {
             sent += command
             delay(1)
             return if (command.startsWith("AT")) "OK" else "61 01 AA"
+        }
+
+        override suspend fun writeRaw(text: String) {
+            raw += text
+        }
+
+        override suspend fun readLine(timeoutMs: Long): String? =
+            monitorLines.getOrNull(lineIndex++)
+
+        override suspend fun flushInput() {
+            flushes++
         }
     }
 
@@ -48,6 +64,71 @@ class ElmCANBridgeTest {
             val expected = requests.first { header == "AT SH ${it.first}" }.second
             assertEquals(expected, command)
         }
+    }
+
+    @Test
+    fun `a monitor window collects the lines it saw`() = runBlocking {
+        val adapter = RecordingAdapter(monitorLines = listOf("4F0 00 5A 00 00 00 B3 C1 1C", "653 00"))
+        val bridge = ElmCANBridge(adapter)
+
+        val lines = bridge.monitorBroadcast(windowMs = 200)
+
+        assertTrue(lines.contains("4F0 00 5A 00 00 00 B3 C1 1C"))
+        assertTrue(adapter.raw.contains("AT MA\r"))
+    }
+
+    /**
+     * Найважливіше про монітор: якщо не надіслати пробіл і не добитися промпта,
+     * адаптер лишається в моніторі, і всі подальші запити 22 xx перестають працювати.
+     */
+    @Test
+    fun `leaving the monitor sends a space and waits for the prompt`() = runBlocking {
+        val adapter = RecordingAdapter(monitorLines = listOf("4F0 00"))
+        val bridge = ElmCANBridge(adapter)
+
+        bridge.monitorBroadcast(windowMs = 100)
+
+        assertTrue("Пробіл не надіслано", adapter.raw.contains(" "))
+        assertTrue("Промпт не добивався", adapter.sent.contains("AT AR"))
+        assertTrue("Фільтр не знято", adapter.sent.contains("AT CRA"))
+    }
+
+    /** Якщо промпт відповів з першого разу, добиватися його ще чотири рази немає сенсу. */
+    @Test
+    fun `the exit stops asking as soon as the prompt answers`() = runBlocking {
+        val adapter = RecordingAdapter(monitorLines = listOf("4F0 00"))
+        val bridge = ElmCANBridge(adapter)
+
+        bridge.monitorBroadcast(windowMs = 100)
+
+        assertEquals(1, adapter.sent.count { it == "AT AR" })
+    }
+
+    /** Тихої шини (зажигання вимкнене) не треба слухати все вікно. */
+    @Test
+    fun `a silent bus ends the window early instead of waiting it out`() = runBlocking {
+        val adapter = RecordingAdapter(monitorLines = emptyList())
+        val bridge = ElmCANBridge(adapter)
+
+        val started = System.currentTimeMillis()
+        val lines = bridge.monitorBroadcast(windowMs = 5_000)
+        val spent = System.currentTimeMillis() - started
+
+        assertTrue(lines.isEmpty())
+        assertTrue("Вікно чекало все 5 с: $spent мс", spent < 2_000)
+    }
+
+    /** Після монітора звичайні запити мають працювати як раніше. */
+    @Test
+    fun `a request after a monitor window still pairs header with command`() = runBlocking {
+        val adapter = RecordingAdapter(monitorLines = listOf("4F0 00"))
+        val bridge = ElmCANBridge(adapter)
+
+        bridge.monitorBroadcast(windowMs = 100)
+        adapter.sent.clear()
+        bridge.sendCANCommand("7E4", "21 01")
+
+        assertEquals(listOf("AT SH 7E4", "21 01"), adapter.sent)
     }
 
     @Test

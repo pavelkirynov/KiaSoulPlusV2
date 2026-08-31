@@ -164,9 +164,9 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
             val response = canBridge.sendCANCommand(header, command)
             GeneralData.publishBatteryFrames(listOf(command), listOf(response))
 
-            // Пробіг змінюється повільно, тому питаємо його рідше, ніж струм і напругу:
-            // зайвий запит щоразу лише сповільнював би основний цикл.
-            if (pollTick++ % ODOMETER_EVERY_N_POLLS == 0L) pollOdometer()
+            // Пробіг і швидкість приходять широкомовними кадрами, а не на запит,
+            // тому раз на кілька циклів слухаємо шину в режимі монітора.
+            if (pollTick++ % MONITOR_EVERY_N_POLLS == 0L) captureBroadcast()
             return
         }
 
@@ -181,18 +181,20 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
     }
 
     /**
-     * Пробіг живе у щитку приладів. Якщо він не відповідає, це не привід рвати
-     * з'єднання: витрата в кВт·год рахується й без пробігу.
+     * Вікно монітора: звідси беруться пробіг, швидкість, SOC панелі, запас ходу,
+     * температура за бортом і стан заряджання. Помилка тут не привід рвати
+     * з'єднання: витрата в кВт·год рахується й без цих кадрів.
      */
-    private suspend fun pollOdometer() {
-        val command = BmsCommands.REQUEST_ODOMETER
-        val response = try {
-            canBridge.sendCANCommand(BmsCommands.HEADER_CLUSTER, command)
+    private suspend fun captureBroadcast() {
+        val lines = try {
+            canBridge.monitorBroadcast(MONITOR_WINDOW_MS)
         } catch (e: IOException) {
-            GeneralData.updateDebugInfo("Щиток не віддав пробіг: ${e.localizedMessage ?: "немає відповіді"}")
+            GeneralData.updateDebugInfo(
+                "Не вдалося послухати шину: ${e.localizedMessage ?: "немає відповіді"}",
+            )
             return
         }
-        GeneralData.publishVehicleFrames(listOf(command), listOf(response))
+        if (lines.isNotEmpty()) GeneralData.publishMonitorLines(lines)
     }
 
     private suspend fun readCellFrames(header: String, commands: List<String>): List<String> =
@@ -237,7 +239,10 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         /** Скільки підряд помилок вводу-виводу вважати обривом, а не одиничним збоєм. */
         const val MAX_CONSECUTIVE_FAILURES = 3
 
-        /** Один запит пробігу на кожні стільки циклів опитування. */
-        const val ODOMETER_EVERY_N_POLLS = 5L
+        /** Одне вікно монітора на кожні стільки циклів опитування. */
+        const val MONITOR_EVERY_N_POLLS = 4L
+
+        /** Скільки слухати шину за одне вікно: кадри 4F0 і 594 йдуть часто. */
+        const val MONITOR_WINDOW_MS = 700L
     }
 }

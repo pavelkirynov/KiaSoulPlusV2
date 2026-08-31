@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
+import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WindowStats
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import com.kirianov.kiasoulevplus2.tools.format.formatDuration
@@ -138,16 +139,10 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
                         "Прийнято",
                         formatMeasurement(bms.cumulativeEnergyChargedKwh, 1, "кВт·год"),
                     )
-                    MetricRow(
-                        "Пробіг",
-                        if (state.vehicle.hasOdometer) {
-                            formatMeasurement(state.vehicle.odometerKm, 0, "км")
-                        } else {
-                            "--"
-                        },
-                    )
                 }
             }
+
+            VehicleCard(state.vehicle)
         }
 
         if (calculated.maxCellVoltage > 0.0) {
@@ -161,6 +156,58 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
                     MetricRow("Максимальна", formatMeasurement(calculated.maxCellVoltage, 3, "В"))
                     MetricRow("Розбаланс ΔV", formatMeasurement(calculated.cellDeltaVolts, 3, "В"))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VehicleCard(vehicle: VehicleData) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Дані з шини авто", fontSize = 18.sp)
+
+            MetricRow(
+                "Пробіг",
+                if (vehicle.hasOdometer) formatMeasurement(vehicle.odometerKm, 1, "км") else "--",
+            )
+            MetricRow(
+                "Швидкість",
+                if (vehicle.hasSpeed) formatMeasurement(vehicle.speedKmh, 0, "км/год") else "--",
+            )
+            MetricRow(
+                "SOC панелі",
+                if (vehicle.hasDisplaySoc) "${formatDecimal(vehicle.displaySocPercent, 1)}%" else "--",
+            )
+            MetricRow(
+                "SOC точний",
+                if (vehicle.hasPreciseSoc) "${formatDecimal(vehicle.preciseSocPercent, 1)}%" else "--",
+            )
+            MetricRow(
+                "Запас ходу",
+                if (vehicle.hasRange) formatMeasurement(vehicle.rangeKm.toDouble(), 0, "км") else "--",
+            )
+            MetricRow(
+                "За бортом",
+                if (vehicle.hasAmbientTemp) formatMeasurement(vehicle.ambientTempC, 1, "°C") else "--",
+            )
+
+            if (vehicle.charging.isCharging) {
+                MetricRow(
+                    "Заряджання",
+                    formatMeasurement(vehicle.charging.powerKw, 1, "кВт"),
+                )
+            }
+
+            if (!vehicle.hasOdometer) {
+                Text(
+                    text = "Пробіг і швидкість приходять широкомовними кадрами; " +
+                        "додаток слухає шину раз на кілька секунд.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }
