@@ -126,6 +126,73 @@ class CapacityModelTest {
         assertTrue("енергія мала скластися з відрізків", result.energyKwh > 0.0)
     }
 
+    /**
+     * Головна перевірка для того, хто не тримає застосунок увімкненим весь час.
+     *
+     * Поки телефон у кишені, машина їде, і SOC падає — а енергії ніхто не міряв.
+     * Якщо просто продовжити сесію після повернення, вийде великий крок шкали з
+     * маленькою енергією, і ємність упаде в рази. На вимірюванні пропуск у п'ять
+     * відсотків давав 20 кВт·год замість 45.
+     */
+    @Test
+    fun `a gap in the data starts the session over instead of lying`() {
+        val session = CapacitySession()
+        var observation: CapacityObservation? = null
+
+        // Видима частина: 80 -> 77.
+        listOf(80.0 to 79.0, 79.0 to 78.0, 78.0 to 77.0).forEach { (from, to) ->
+            observation = observation ?: session.add(segment(from, to))
+        }
+        // Застосунок був згорнутий: машина проїхала 77 -> 72 непоміченою.
+        // Далі знову видно, аж поки не набереться поріг.
+        listOf(72.0 to 71.0, 71.0 to 70.0, 70.0 to 69.0, 69.0 to 68.0).forEach { (from, to) ->
+            observation = observation ?: session.add(segment(from, to))
+        }
+
+        assertTrue("сесія крізь пропуск не мала закритися", observation == null)
+        assertTrue("а рахуватися мала вже з-за пропуску", session.spanPercent <= 4.0)
+    }
+
+    /** Без пропусків усе працює як раніше: відрізки складаються в сесію. */
+    @Test
+    fun `contiguous segments still add up`() {
+        val session = CapacitySession()
+        var observation: CapacityObservation? = null
+
+        var soc = 90.0
+        repeat(10) {
+            val next = soc - 1.0
+            observation = observation ?: session.add(segment(soc, next))
+            soc = next
+        }
+
+        val result = requireNonNull(observation)
+        assertEquals(90.0, result.socStartPercent, 1e-9)
+        assertEquals("енергія має бути сумою відрізків", 8 * 0.45, result.energyKwh, 0.5)
+    }
+
+    /** Відрізок без відомого SOC на початку перевірити нічим — отже, це теж розрив. */
+    @Test
+    fun `a segment with no starting charge is treated as a gap`() {
+        val session = CapacitySession()
+        session.add(segment(80.0, 79.0))
+        session.add(segment(79.0, 78.0))
+
+        session.add(segment(null, 70.0))
+
+        assertTrue("сесія мала початися заново", session.spanPercent < 1.0)
+    }
+
+    private fun segment(
+        socStart: Double?,
+        socEnd: Double,
+        energyKwh: Double = 0.45,
+    ) = VirtualCar().segment(speedKmh = 60.0).copy(
+        socStartPercent = socStart,
+        socEndPercent = socEnd,
+        energyKwh = energyKwh,
+    )
+
     private fun requireNonNull(observation: CapacityObservation?): CapacityObservation {
         assertTrue("сесія так і не закрилася", observation != null)
         return observation!!

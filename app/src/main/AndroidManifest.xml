@@ -17,6 +17,17 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30" />
 
+    <!--
+        Служба переднього плану: без неї Android заморожує, а потім вивантажує процес,
+        щойно застосунок згорнули, і опитування зупиняється посеред поїздки.
+        Тип connectedDevice — саме наш випадок: робота триває, поки під'єднаний
+        зовнішній пристрій.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- З Android 13 без цього дозволу сповіщення служби просто не видно. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <uses-feature
         android:name="android.hardware.bluetooth"
         android:required="true" />
@@ -29,6 +40,15 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.App">
+
+        <!--
+            Тримає процес живим, поки триває з'єднання з адаптером. Не експортована:
+            її піднімає й прибирає тільки сам застосунок.
+        -->
+        <service
+            android:name=".services.foreground.ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- Android Auto -->
         <service

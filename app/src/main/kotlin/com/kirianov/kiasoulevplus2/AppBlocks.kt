@@ -11,6 +11,7 @@ package com.kirianov.kiasoulevplus2
 import android.content.Context
 import com.kirianov.kiasoulevplus2.services.bluetooth.BluetoothBlock
 import com.kirianov.kiasoulevplus2.services.bluetooth.ElmBluetoothManager
+import com.kirianov.kiasoulevplus2.services.foreground.ForegroundBlock
 import com.kirianov.kiasoulevplus2.tools.battery.DecoderBlock
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
 import com.kirianov.kiasoulevplus2.tools.ml.FileMlStore
@@ -30,6 +31,7 @@ class AppBlocks(context: Context) {
     private val vehicle = VehicleBlock()
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
     private val prediction = MlBlock(FileMlStore(context.applicationContext))
+    private val foreground = ForegroundBlock(context.applicationContext)
 
     fun start(scope: CoroutineScope) {
         decoders.start(scope)
@@ -38,6 +40,7 @@ class AppBlocks(context: Context) {
         vehicle.start(scope)
         storage.start(scope)
         prediction.start(scope)
+        foreground.start(scope)
         bluetooth.start(scope)
     }
 }
