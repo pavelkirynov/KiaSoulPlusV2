@@ -70,11 +70,18 @@ jobs:
           if keytool -list -keystore app/debug.keystore -storepass android >/dev/null 2>&1; then
             echo "Ключ підпису відновлено ($(wc -c < app/debug.keystore) байт):"
             echo "оновлення стане поверх попередньої версії."
+            # Відбиток СЕРТИФІКАТА (не ключа) — не таємниця, і саме він вирішує,
+            # чи прийме телефон збірку як оновлення. Дає звірити дві збірки між собою.
+            keytool -list -v -keystore app/debug.keystore -storepass android 2>/dev/null \
+              | grep -i 'SHA256:' | head -1
           else
             rm -f app/debug.keystore
             echo "::warning::DEBUG_KEYSTORE_BASE64 пошкоджений або неповний — APK буде"
-            echo "::warning::підписано типовим ключем Gradle. Найчастіша причина:"
-            echo "::warning::рядок base64 скопійовано не повністю. Перезаписати секрет."
+            echo "::warning::підписано типовим ключем Gradle, тому цю збірку доведеться"
+            echo "::warning::ставити після видалення старої."
+            # Довжина не є таємницею, а причину показує одразу: майже завжди це
+            # обрізаний під час копіювання рядок.
+            echo "::warning::Отримано $(printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '[:space:]' | wc -c) символів base64, очікується 3664."
           fi
 
       - name: Assemble
