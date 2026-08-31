@@ -28,7 +28,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 @SuppressLint("MissingPermission")
-class ElmBluetoothManager {
+class ElmBluetoothManager : ElmAdapter {
 
     private var socket: BluetoothSocket? = null
     private var input: InputStream? = null
@@ -112,7 +112,7 @@ class ElmBluetoothManager {
      * Очікування зроблене через delay, а не Thread.sleep, тому опитування можна скасувати
      * разом із корутиною, і потік вводу-виводу не блокується намертво.
      */
-    suspend fun sendCommand(command: String): String = withContext(Dispatchers.IO) {
+    override suspend fun sendCommand(command: String): String = withContext(Dispatchers.IO) {
         val out = output ?: throw IOException("Bluetooth-потік запису закритий")
         val inp = input ?: throw IOException("Bluetooth-потік читання закритий")
 

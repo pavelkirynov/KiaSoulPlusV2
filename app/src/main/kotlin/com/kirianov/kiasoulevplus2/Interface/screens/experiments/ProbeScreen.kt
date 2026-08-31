@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
@@ -35,16 +36,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kirianov.kiasoulevplus2.Data.ProbeResult
 
 /** Команди, з яких варто почати пошук. Усі — лише читання. */
 private val presets = listOf(
-    Preset("Пробіг: щиток", "7C6", "22 B0 02"),
-    Preset("Пробіг: щиток, варіант", "7C6", "22 B0 01"),
-    Preset("VMCU", "7E2", "21 01"),
-    Preset("Швидкість OBD", "7E0", "01 0D"),
+    // 7C6 / 22 B0 01 прибрано: на цьому авто відповідь порожня.
+    Preset("Пробіг: OBD 01 A6", "7DF", "01 A6"),
+    Preset("Щиток 21 01", "7C6", "21 01"),
+    Preset("Щиток 22 B0 02", "7C6", "22 B0 02"),
+    Preset("VMCU 21 01", "7E2", "21 01"),
+    Preset("Швидкість OBD", "7DF", "01 0D"),
     Preset("BMS (перевірка зв'язку)", "7E4", "21 01"),
 )
 
@@ -57,6 +61,7 @@ fun ProbeScreen(probeViewModel: ProbeViewModel) {
     var header by remember { mutableStateOf("7C6") }
     var command by remember { mutableStateOf("22 B0 02") }
     var error by remember { mutableStateOf<String?>(null) }
+    var target by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -100,6 +105,22 @@ fun ProbeScreen(probeViewModel: ProbeViewModel) {
         error?.let {
             Text(text = it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
         }
+
+        OutlinedTextField(
+            value = target,
+            onValueChange = {
+                target = it.filter(Char::isDigit)
+                probeViewModel.onTargetChanged(target)
+            },
+            label = { Text("Відоме значення, напр. пробіг зі щитка") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = "Якщо число є у відповіді, застосунок покаже, на якому зсуві воно лежить.",
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         Text(text = "Швидкий вибір", style = MaterialTheme.typography.titleSmall)
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -163,6 +184,17 @@ private fun ResultCard(result: ProbeResult) {
                     "$index:%02X".format(byte)
                 },
             )
+
+            if (result.matches.isNotEmpty()) {
+                MonoBlock(
+                    title = "ЗНАЙДЕНО відоме значення",
+                    text = result.matches.joinToString("\n") { match ->
+                        val order = if (match.bigEndian) "прямий" else "зворотний"
+                        val scale = if (match.divisor == 1) "" else ", масштаб 1/${match.divisor}"
+                        "зсув ${match.index}, ${match.width} б, порядок $order$scale"
+                    },
+                )
+            }
 
             MonoBlock(
                 title = "Схоже на пробіг (зсув × ширина = значення)",

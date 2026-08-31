@@ -99,6 +99,13 @@ object GeneralData {
     fun addProbeResult(result: ProbeResult) =
         _state.update { it.copy(probe = it.probe.plus(result)) }
 
+    fun setProbeTarget(value: Long?) =
+        _state.update { it.copy(probe = it.probe.copy(targetValue = value)) }
+
+    /** Переписує вже збережені відповіді: потрібно, коли змінилося шукане значення. */
+    fun updateProbeResults(results: List<ProbeResult>) =
+        _state.update { it.copy(probe = it.probe.copy(results = results)) }
+
     // --- Ручні напруги: пише блок сховища та інтерфейс -------------------------
 
     fun updateManualCells(voltages: Map<Int, Double>) =

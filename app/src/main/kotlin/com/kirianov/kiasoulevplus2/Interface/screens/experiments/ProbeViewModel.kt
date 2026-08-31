@@ -17,6 +17,10 @@ class ProbeViewModel : ViewModel() {
 
     val uiState: StateFlow<State> = GeneralData.state
 
+    /** Відоме число зі щитка, яке шукаємо у відповідях. Порожній рядок знімає пошук. */
+    fun onTargetChanged(text: String) =
+        GeneralData.setProbeTarget(text.trim().toLongOrNull()?.takeIf { it > 0 })
+
     /** Повертає текст помилки або null, якщо запит поставлено. */
     fun onSend(header: String, command: String): String? {
         if (!CanCommand.isValidHeader(header)) {

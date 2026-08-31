@@ -22,6 +22,32 @@ import kotlinx.coroutines.flow.onEach
 class ProbeBlock {
 
     fun start(scope: CoroutineScope) {
+        recordReplies(scope)
+        rematchOnTargetChange(scope)
+    }
+
+    /**
+     * Коли користувач вводить відоме число, збіги треба перерахувати і для вже
+     * отриманих відповідей — інакше довелося б перепитувати авто заради пошуку.
+     */
+    private fun rematchOnTargetChange(scope: CoroutineScope) {
+        GeneralData.state
+            .map { it.probe.targetValue }
+            .distinctUntilChanged()
+            .onEach { target ->
+                val results = GeneralData.state.value.probe.results
+                if (results.isEmpty()) return@onEach
+                GeneralData.updateProbeResults(
+                    results.map { it.copy(matches = matchesFor(it.bytes, target)) },
+                )
+            }
+            .launchIn(scope)
+    }
+
+    private fun matchesFor(bytes: List<Int>, target: Long?) =
+        target?.let { ByteCandidates.findValue(bytes, it) }.orEmpty()
+
+    private fun recordReplies(scope: CoroutineScope) {
         GeneralData.state
             .map { it.can.probeFrames }
             .filterNotNull()
@@ -36,6 +62,7 @@ class ProbeBlock {
                         rawResponse = raw,
                         bytes = bytes,
                         odometerCandidates = ByteCandidates.find(bytes, ODOMETER_RANGE),
+                        matches = matchesFor(bytes, GeneralData.state.value.probe.targetValue),
                         error = frames.commands.getOrNull(2),
                     ),
                 )

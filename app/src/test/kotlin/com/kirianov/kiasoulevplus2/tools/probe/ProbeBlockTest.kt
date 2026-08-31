@@ -60,6 +60,43 @@ class ProbeBlockTest {
         assertEquals("22 B0 0${ProbeState.MAX_RESULTS + 4}", results.first().command)
     }
 
+    @Test
+    fun `a target set before probing is matched in the reply`() {
+        GeneralData.setProbeTarget(188_443)
+
+        GeneralData.publishProbeFrames("7C6", "22 B0 02", "62 B0 02 00 00 02 E0 1B")
+
+        val match = GeneralData.state.value.probe.results.first().matches.first()
+        assertEquals(5, match.index)
+        assertEquals(3, match.width)
+    }
+
+    /**
+     * Число вводять уже після кількох запитів, тому збіги мають перерахуватися
+     * для збережених відповідей — інакше довелося б перепитувати авто.
+     */
+    @Test
+    fun `setting a target rematches replies already received`() {
+        GeneralData.publishProbeFrames("7C6", "22 B0 02", "62 B0 02 00 00 02 E0 1B")
+        assertTrue(GeneralData.state.value.probe.results.first().matches.isEmpty())
+
+        GeneralData.setProbeTarget(188_443)
+
+        val match = GeneralData.state.value.probe.results.first().matches.first()
+        assertEquals(5, match.index)
+        assertEquals(3, match.width)
+    }
+
+    @Test
+    fun `clearing the target drops the matches`() {
+        GeneralData.setProbeTarget(188_443)
+        GeneralData.publishProbeFrames("7C6", "22 B0 02", "62 B0 02 00 00 02 E0 1B")
+
+        GeneralData.setProbeTarget(null)
+
+        assertTrue(GeneralData.state.value.probe.results.first().matches.isEmpty())
+    }
+
     /** Повторний однаковий запит має дати новий результат, а не бути пропущеним. */
     @Test
     fun `repeating the same probe records it again`() {
