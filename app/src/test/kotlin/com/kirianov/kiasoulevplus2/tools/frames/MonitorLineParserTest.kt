@@ -54,11 +54,31 @@ class MonitorLineParserTest {
         assertNull(MonitorLineParser.parse("NO DATA"))
     }
 
+    /**
+     * Відкидати зіпсований байт не можна: усі наступні зсуви поїхали б на один,
+     * і замість «немає даних» вийшов би тихо неправильний пробіг.
+     */
     @Test
-    fun `non hex bytes are dropped rather than breaking the frame`() {
-        val frame = MonitorLineParser.parse("4F0 00 ZZ 00 00 00 B3 C1 1C")!!
+    fun `a line with a corrupted byte is refused whole`() {
+        assertNull(MonitorLineParser.parse("4F0 00 ZZ 00 00 00 B3 C1 1C"))
+        assertNull(MonitorLineParser.parse("4F0 00 5A 00 00 00 B3 C1 1"))
+    }
+
+    /** Якщо в адаптері вимкнені пробіли (AT S0), кадр приходить одним словом. */
+    @Test
+    fun `parses a glued line with the spaces switched off`() {
+        val frame = MonitorLineParser.parse("4F0005A000000B3C11C")!!
 
         assertEquals("4F0", frame.id)
-        assertEquals(7, frame.bytes.size)
+        assertEquals(8, frame.bytes.size)
+        assertEquals(0x5A, frame.bytes[1])
+        assertEquals(0xB3, frame.bytes[5])
+        assertEquals(0x1C, frame.bytes[7])
+    }
+
+    @Test
+    fun `a word that is not a frame stays refused`() {
+        assertNull(MonitorLineParser.parse("BUFFERFULL"))
+        assertNull(MonitorLineParser.parse("STOPPED"))
     }
 }

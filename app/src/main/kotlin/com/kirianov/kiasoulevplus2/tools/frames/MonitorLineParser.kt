@@ -19,6 +19,7 @@ object MonitorLineParser {
 
     private val ID_PATTERN = Regex("^[0-9A-F]{3}$")
     private val BYTE_PATTERN = Regex("^[0-9A-Fa-f]{2}$")
+    private val HEX_PATTERN = Regex("^[0-9A-Fa-f]+$")
     private val WHITESPACE = Regex("\\s+")
 
     fun parse(raw: String): CanBroadcastFrame? {
@@ -28,15 +29,32 @@ object MonitorLineParser {
             .filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return null
 
-        val normalized = unpadSplitId(tokens)
+        val normalized = unpadSplitId(splitGlued(tokens))
         val id = normalized.first().uppercase()
         if (!ID_PATTERN.matches(id)) return null
 
-        val bytes = normalized.drop(1)
-            .filter { BYTE_PATTERN.matches(it) }
-            .map { it.toInt(16) }
+        // Зіпсований байт НЕ відкидається: без нього всі наступні зсуви поїхали б
+        // на один, і замість «немає даних» вийшов би тихо неправильний пробіг.
+        val payload = normalized.drop(1)
+        if (payload.any { !BYTE_PATTERN.matches(it) }) return null
 
-        return CanBroadcastFrame(id, bytes)
+        return CanBroadcastFrame(id, payload.map { it.toInt(16) })
+    }
+
+    /**
+     * «4F0005A000000B3C11C» -> «4F0 00 5A ...».
+     * Якщо десь у налаштуваннях адаптера пробіли виявилися вимкненими (AT S0),
+     * увесь кадр приходить одним словом.
+     */
+    private fun splitGlued(tokens: List<String>): List<String> {
+        if (tokens.size != 1) return tokens
+
+        val glued = tokens.first()
+        val looksGlued = glued.length >= 5 && (glued.length - 3) % 2 == 0 &&
+            HEX_PATTERN.matches(glued)
+        if (!looksGlued) return tokens
+
+        return listOf(glued.take(3)) + glued.drop(3).chunked(2)
     }
 
     /** «00 00 06 53 ...» -> «653 ...». Решту рядків повертає без змін. */
