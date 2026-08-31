@@ -44,6 +44,24 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # Постійний ключ підпису debug-збірки. У репозиторії його немає навмисно:
+      # маючи ключ, стороння людина зібрала б APK, який телефон прийме як
+      # оновлення цього застосунка. Без секрета збірка не падає — Gradle підпише
+      # типовим ключем, але таку збірку доведеться ставити після видалення старої.
+      - name: Restore the debug signing key
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        # Перевірка в шелі, а не в `if`: контекст secrets у step-level `if`
+        # недоступний, а власний env кроку в його ж `if` ще не існує.
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > app/debug.keystore
+            echo "Ключ підпису відновлено: оновлення стане поверх попередньої версії."
+          else
+            echo "Секрета DEBUG_KEYSTORE_BASE64 немає — збірку буде підписано типовим"
+            echo "ключем Gradle. Таку збірку доведеться ставити після видалення старої."
+          fi
+
       - name: Assemble
         timeout-minutes: 20
         # Bounded HTTP timeouts turn a stalled artifact download into a failure

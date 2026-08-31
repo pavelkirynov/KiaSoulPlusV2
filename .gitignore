@@ -12,3 +12,8 @@ local.properties
 *.apk
 *.aab
 captures/
+
+# Ключ підпису debug-збірки.
+# Лежить у GitHub Secrets (DEBUG_KEYSTORE_BASE64), а не в репозиторії: маючи його,
+# можна зібрати APK, який телефон прийме як оновлення саме цього застосунка.
+app/debug.keystore

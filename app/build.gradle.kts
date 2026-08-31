@@ -19,18 +19,30 @@ android {
 
     // Постійний ключ підпису для debug.
     //
-    // Без нього кожна збірка в CI підписувалася новим ключем, який Gradle створює
-    // на чистому раннері. Android відмовляє в оновленні застосунку, підписаного
-    // іншим ключем (INSTALL_FAILED_UPDATE_INCOMPATIBLE), тому щоразу доводилося
-    // спершу видаляти стару версію. З постійним ключем оновлення ставиться поверх.
+    // НАВІЩО. Без нього кожна збірка в CI підписувалася новим ключем, який Gradle
+    // створює на чистому раннері. Android відмовляє в оновленні застосунку,
+    // підписаного іншим ключем (INSTALL_FAILED_UPDATE_INCOMPATIBLE), тому щоразу
+    // доводилося спершу видаляти стару версію.
+    //
+    // ЧОМУ ФАЙЛА НЕМАЄ В РЕПОЗИТОРІЇ. Маючи цей ключ, стороння людина може зібрати
+    // APK, який телефон прийме як оновлення саме цього застосунка. Тому файл живе
+    // в GitHub Secrets (DEBUG_KEYSTORE_BASE64) і розкодовується сюди в CI.
+    //
+    // ЯКЩО ФАЙЛА НЕМАЄ — збірка не падає, а підписується типовим ключем Gradle.
+    // Так збірка з чистого клону працює без секрета; ціна лише в тому, що таку
+    // збірку доведеться ставити після видалення попередньої.
     //
     // Ключ лише для debug: підписувати ним реліз не можна.
+    val debugKeystore = file("debug.keystore")
+
     signingConfigs {
         getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            if (debugKeystore.exists()) {
+                storeFile = debugKeystore
+                storePassword = DEBUG_KEYSTORE_PASSWORD
+                keyAlias = DEBUG_KEY_ALIAS
+                keyPassword = DEBUG_KEYSTORE_PASSWORD
+            }
         }
     }
 
@@ -96,3 +108,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }
+
+// Стандартні для відлагоджувального ключа значення — саме такі, як у ключа, що
+// його Android Studio створює сама. Секретом тут є файл сховища, а не пароль.
+private const val DEBUG_KEYSTORE_PASSWORD = "android"
+private const val DEBUG_KEY_ALIAS = "androiddebugkey"
