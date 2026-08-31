@@ -33,15 +33,18 @@ android {
     // збірку доведеться ставити після видалення попередньої.
     //
     // Ключ лише для debug: підписувати ним реліз не можна.
+    //
+    // Пароль і alias стандартні — такі самі, як у ключа, що його створює Android
+    // Studio. Секретом тут є файл сховища, а не пароль, тому вони просто в коді.
     val debugKeystore = file("debug.keystore")
 
     signingConfigs {
         getByName("debug") {
             if (debugKeystore.exists()) {
                 storeFile = debugKeystore
-                storePassword = DEBUG_KEYSTORE_PASSWORD
-                keyAlias = DEBUG_KEY_ALIAS
-                keyPassword = DEBUG_KEYSTORE_PASSWORD
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
             }
         }
     }
@@ -108,8 +111,3 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }
-
-// Стандартні для відлагоджувального ключа значення — саме такі, як у ключа, що
-// його Android Studio створює сама. Секретом тут є файл сховища, а не пароль.
-private const val DEBUG_KEYSTORE_PASSWORD = "android"
-private const val DEBUG_KEY_ALIAS = "androiddebugkey"
