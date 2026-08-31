@@ -15,12 +15,16 @@ data class State(
     /** Розібрані показники: сюди пише блок декодерів. */
     val bms: BmsData = BmsData(),
     val cells: CellData = CellData(),
+    val vehicle: VehicleData = VehicleData(),
 
     /** Похідні величини: сюди пише блок обчислень. */
     val calculated: CalculatedData = CalculatedData(),
 
-    /** Позначка лічильників енергії на початок поїздки: теж блок обчислень. */
-    val energySession: EnergySession = EnergySession(),
+    /** Знімки лічильників за поїздку: їх веде блок обчислень. */
+    val tripHistory: TripHistory = TripHistory(),
+
+    /** Діапазон, за який рахувати витрату. Обирає користувач на екрані. */
+    val consumptionWindow: ConsumptionWindow = ConsumptionWindow.Trip,
 
     /** Введені вручну напруги: сюди пише блок сховища та інтерфейс. */
     val manualCells: ManualCells = ManualCells(),

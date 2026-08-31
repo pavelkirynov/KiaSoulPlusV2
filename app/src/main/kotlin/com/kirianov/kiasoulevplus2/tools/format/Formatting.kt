@@ -19,6 +19,24 @@ fun formatDecimal(value: Double, decimals: Int): String =
 fun formatMeasurement(value: Double, decimals: Int, unit: String): String =
     "${formatDecimal(value, decimals)} $unit"
 
+/** Тривалість у вигляді «1 год 24 хв» або «7 хв 12 с». */
+fun formatDuration(millis: Long): String {
+    val totalSeconds = millis / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+
+    return when {
+        hours > 0 -> "$hours год $minutes хв"
+        minutes > 0 -> "$minutes хв $seconds с"
+        else -> "$seconds с"
+    }
+}
+
+/** Значення або прочерк, якщо рахувати ще нема з чого. */
+fun formatOrDash(value: Double?, decimals: Int, unit: String): String =
+    value?.let { formatMeasurement(it, decimals, unit) } ?: "--"
+
 /** Розбирає введений користувачем текст, приймаючи і крапку, і кому. */
 fun parseDecimalInput(text: String): Double? =
     text.trim().replace(',', '.').toDoubleOrNull()

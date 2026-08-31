@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,8 +24,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
+import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
+import com.kirianov.kiasoulevplus2.Data.WindowStats
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
+import com.kirianov.kiasoulevplus2.tools.format.formatDuration
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
+import com.kirianov.kiasoulevplus2.tools.format.formatOrDash
 
 @Composable
 fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
@@ -111,23 +116,12 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
         }
 
         if (bms.hasEnergyCounters) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(text = "Енергія за поїздку", fontSize = 18.sp)
-
-                    MetricRow("Витрачено", formatMeasurement(calculated.consumedKwh, 2, "кВт·год"))
-                    MetricRow("Повернуто", formatMeasurement(calculated.recoveredKwh, 2, "кВт·год"))
-                    MetricRow("Чисто", formatMeasurement(calculated.netKwh, 2, "кВт·год"))
-
-                    Text(
-                        text = "Відлік від моменту під'єднання до авто",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
+            ConsumptionCard(
+                stats = calculated.window,
+                selected = state.consumptionWindow,
+                hasOdometer = state.vehicle.hasOdometer,
+                onWindowSelected = mainViewModel::onWindowSelected,
+            )
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
@@ -143,6 +137,14 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
                     MetricRow(
                         "Прийнято",
                         formatMeasurement(bms.cumulativeEnergyChargedKwh, 1, "кВт·год"),
+                    )
+                    MetricRow(
+                        "Пробіг",
+                        if (state.vehicle.hasOdometer) {
+                            formatMeasurement(state.vehicle.odometerKm, 0, "км")
+                        } else {
+                            "--"
+                        },
                     )
                 }
             }
@@ -162,6 +164,72 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
             }
         }
     }
+}
+
+@Composable
+private fun ConsumptionCard(
+    stats: WindowStats,
+    selected: ConsumptionWindow,
+    hasOdometer: Boolean,
+    onWindowSelected: (ConsumptionWindow) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Витрата енергії", fontSize = 18.sp)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ConsumptionWindow.entries.forEach { window ->
+                    FilterChip(
+                        selected = window == selected,
+                        onClick = { onWindowSelected(window) },
+                        label = { Text(windowLabel(window), fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            if (!stats.hasData) {
+                Text(
+                    text = "Збираю дані...",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                return@Column
+            }
+
+            MetricRow("Витрата", formatOrDash(stats.kwhPer100Km, 1, "кВт·год/100 км"))
+            MetricRow("Пробіг", formatMeasurement(stats.distanceKm, 1, "км"))
+            MetricRow("Час", formatDuration(stats.durationMs))
+            MetricRow("Сер. швидкість", formatOrDash(stats.averageSpeedKmh, 0, "км/год"))
+            MetricRow("Сер. потужність", formatOrDash(stats.averagePowerKw, 1, "кВт"))
+            MetricRow("Витрачено", formatMeasurement(stats.consumedKwh, 2, "кВт·год"))
+            MetricRow("Повернуто", formatMeasurement(stats.recoveredKwh, 2, "кВт·год"))
+
+            if (!hasOdometer) {
+                Text(
+                    text = "Пробіг із щитка не зчитано — витрата на 100 км недоступна",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else if (!stats.isComplete && selected != ConsumptionWindow.Trip) {
+                Text(
+                    text = "Діапазон ще не набрався: показано за наявний пробіг",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
+private fun windowLabel(window: ConsumptionWindow) = when (window) {
+    ConsumptionWindow.Trip -> "Поїздка"
+    ConsumptionWindow.Last1Km -> "1 км"
+    ConsumptionWindow.Last5Km -> "5 км"
+    ConsumptionWindow.Last20Km -> "20 км"
 }
 
 @Composable

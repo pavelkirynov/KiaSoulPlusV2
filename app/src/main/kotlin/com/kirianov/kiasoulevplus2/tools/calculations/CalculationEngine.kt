@@ -3,15 +3,22 @@ package com.kirianov.kiasoulevplus2.tools.calculations
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CalculatedData
 import com.kirianov.kiasoulevplus2.Data.CellData
-import com.kirianov.kiasoulevplus2.Data.EnergySession
+import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
+import com.kirianov.kiasoulevplus2.Data.TripHistory
+import com.kirianov.kiasoulevplus2.Data.WindowStats
 
 /**
- * Рахує похідні величини з уже зчитаних даних BMS та комірок.
+ * Рахує похідні величини з уже зчитаних даних.
  * Чиста функція без стану — саме тому її можна покрити тестами без емулятора.
  */
 object CalculationEngine {
 
-    fun calculate(bms: BmsData, cells: CellData, session: EnergySession): CalculatedData {
+    fun calculate(
+        bms: BmsData,
+        cells: CellData,
+        history: TripHistory,
+        window: ConsumptionWindow,
+    ): CalculatedData {
         val valid = cells.cellVoltages.filter { it > MIN_PLAUSIBLE_CELL_VOLTAGE }
         val minCell = valid.minOrNull() ?: 0.0
         val maxCell = valid.maxOrNull() ?: 0.0
@@ -21,24 +28,26 @@ object CalculationEngine {
             minCellVoltage = minCell,
             maxCellVoltage = maxCell,
             cellDeltaVolts = if (valid.isEmpty()) 0.0 else maxCell - minCell,
-            consumedKwh = sinceSessionStart(bms.cumulativeEnergyDischargedKwh, session.startedDischargedKwh, bms, session),
-            recoveredKwh = sinceSessionStart(bms.cumulativeEnergyChargedKwh, session.startedChargedKwh, bms, session),
+            trip = statsFor(history, ConsumptionWindow.Trip),
+            window = statsFor(history, window),
         )
     }
 
     /**
-     * BMS віддає лише підсумок за весь час, тому витрата за поїздку — це різниця
-     * з позначкою на момент під'єднання. Поки позначки немає або лічильники
-     * не зчиталися, показувати нема чого.
+     * Різниця між першим і останнім знімком діапазону. BMS віддає лише підсумки за
+     * весь час, тому будь-яка витрата «за зараз» — це саме різниця двох знімків.
      */
-    private fun sinceSessionStart(
-        current: Double,
-        atStart: Double,
-        bms: BmsData,
-        session: EnergySession,
-    ): Double {
-        if (!session.isStarted || !bms.hasEnergyCounters) return 0.0
-        return (current - atStart).coerceAtLeast(0.0)
+    fun statsFor(history: TripHistory, window: ConsumptionWindow): WindowStats {
+        val latest = history.samples.lastOrNull() ?: return WindowStats()
+        val start = history.startOf(window) ?: return WindowStats()
+
+        return WindowStats(
+            distanceKm = (latest.odometerKm - start.odometerKm).coerceAtLeast(0.0),
+            durationMs = (latest.elapsedMs - start.elapsedMs).coerceAtLeast(0L),
+            consumedKwh = (latest.dischargedKwh - start.dischargedKwh).coerceAtLeast(0.0),
+            recoveredKwh = (latest.chargedKwh - start.chargedKwh).coerceAtLeast(0.0),
+            isComplete = history.covers(window),
+        )
     }
 
     /** Нижче цього порога значення вважається «комірку не зчитано», а не реальною напругою. */

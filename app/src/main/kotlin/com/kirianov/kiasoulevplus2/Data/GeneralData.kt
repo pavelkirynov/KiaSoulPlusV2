@@ -40,6 +40,11 @@ object GeneralData {
             it.copy(can = it.can.copy(batteryFrames = nextFrames(commands, responses)))
         }
 
+    fun publishVehicleFrames(commands: List<String>, responses: List<String>) =
+        _state.update {
+            it.copy(can = it.can.copy(vehicleFrames = nextFrames(commands, responses)))
+        }
+
     fun publishCellFrames(commands: List<String>, responses: List<String>) =
         _state.update {
             it.copy(can = it.can.copy(cellFrames = nextFrames(commands, responses)))
@@ -51,15 +56,22 @@ object GeneralData {
 
     fun updateCells(cells: CellData) = _state.update { it.copy(cells = cells) }
 
+    fun updateVehicle(vehicle: VehicleData) = _state.update { it.copy(vehicle = vehicle) }
+
     // --- Похідні величини: пише блок обчислень ---------------------------------
 
     fun updateCalculated(calculated: CalculatedData) =
         _state.update { it.copy(calculated = calculated) }
 
-    fun startEnergySession(bms: BmsData) =
-        _state.update { it.copy(energySession = EnergySession.startingFrom(bms)) }
+    fun addTripSample(sample: TripSample) =
+        _state.update { it.copy(tripHistory = it.tripHistory.plus(sample)) }
 
-    fun clearEnergySession() = _state.update { it.copy(energySession = EnergySession()) }
+    fun clearTripHistory() = _state.update { it.copy(tripHistory = TripHistory()) }
+
+    // --- Вибір діапазону: пише інтерфейс ---------------------------------------
+
+    fun selectConsumptionWindow(window: ConsumptionWindow) =
+        _state.update { it.copy(consumptionWindow = window) }
 
     // --- Ручні напруги: пише блок сховища та інтерфейс -------------------------
 

@@ -16,4 +16,10 @@ object BmsCommands {
      * Порядок важливий — комірки склеюються в один масив саме в цій послідовності.
      */
     val REQUEST_CELL_VOLTAGES = listOf("21 02", "21 03", "21 04")
+
+    /** CAN-заголовок щитка приладів: пробіг живе там, а не в BMS. */
+    const val HEADER_CLUSTER = "7C6"
+
+    /** Запит пробігу до щитка. */
+    const val REQUEST_ODOMETER = "22 B0 02"
 }

@@ -112,6 +112,8 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         }
     }
 
+    private var pollTick = 0L
+
     private suspend fun pollOnce() {
         val inputBms = GeneralData.state.value.inputBms
         val header = inputBms.customHeader.ifEmpty { BmsCommands.HEADER_BMS }
@@ -120,6 +122,10 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
             val command = BmsCommands.REQUEST_BATTERY_MAIN
             val response = canBridge.sendCANCommand(header, command)
             GeneralData.publishBatteryFrames(listOf(command), listOf(response))
+
+            // Пробіг змінюється повільно, тому питаємо його рідше, ніж струм і напругу:
+            // зайвий запит щоразу лише сповільнював би основний цикл.
+            if (pollTick++ % ODOMETER_EVERY_N_POLLS == 0L) pollOdometer()
             return
         }
 
@@ -131,6 +137,21 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
             // залишалася б заблокованою назавжди після першої ж помилки.
             GeneralData.updateInputBms { it.copy(scanCellsRequested = false) }
         }
+    }
+
+    /**
+     * Пробіг живе у щитку приладів. Якщо він не відповідає, це не привід рвати
+     * з'єднання: витрата в кВт·год рахується й без пробігу.
+     */
+    private suspend fun pollOdometer() {
+        val command = BmsCommands.REQUEST_ODOMETER
+        val response = try {
+            canBridge.sendCANCommand(BmsCommands.HEADER_CLUSTER, command)
+        } catch (e: IOException) {
+            GeneralData.updateDebugInfo("Щиток не віддав пробіг: ${e.localizedMessage ?: "немає відповіді"}")
+            return
+        }
+        GeneralData.publishVehicleFrames(listOf(command), listOf(response))
     }
 
     private suspend fun readCellFrames(header: String, commands: List<String>): List<String> =
@@ -174,5 +195,8 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
 
         /** Скільки підряд помилок вводу-виводу вважати обривом, а не одиничним збоєм. */
         const val MAX_CONSECUTIVE_FAILURES = 3
+
+        /** Один запит пробігу на кожні стільки циклів опитування. */
+        const val ODOMETER_EVERY_N_POLLS = 5L
     }
 }

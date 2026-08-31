@@ -94,6 +94,25 @@ class GeneralDataTest {
     }
 
     @Test
+    fun `the consumption window defaults to the whole trip and can be switched`() {
+        assertEquals(ConsumptionWindow.Trip, GeneralData.state.value.consumptionWindow)
+
+        GeneralData.selectConsumptionWindow(ConsumptionWindow.Last5Km)
+
+        assertEquals(ConsumptionWindow.Last5Km, GeneralData.state.value.consumptionWindow)
+    }
+
+    @Test
+    fun `vehicle frames are kept apart from the battery ones`() {
+        GeneralData.publishBatteryFrames(listOf("21 01"), listOf("61 01 AA"))
+        GeneralData.publishVehicleFrames(listOf("22 B0 02"), listOf("62 B0 02 BB"))
+
+        val can = GeneralData.state.value.can
+        assertEquals(listOf("61 01 AA"), can.batteryFrames?.responses)
+        assertEquals(listOf("62 B0 02 BB"), can.vehicleFrames?.responses)
+    }
+
+    @Test
     fun `cell commands default to the three frames that actually carry cells`() {
         assertEquals(listOf("21 02", "21 03", "21 04"), GeneralData.state.value.inputBms.cellCommands)
     }

@@ -1,9 +1,12 @@
 // ====================================================================================
 // БЛОК ОБЧИСЛЕНЬ (CalculationBlock)
 //
-// Слухає розібрані показники в GeneralData і кладе туди ж похідні величини.
-// Він же ставить позначку лічильників енергії на початку поїздки та знімає її
-// при від'єднанні — тобто одне підключення до авто дає одну поїздку.
+// Веде історію поїздки — знімки лічильників із часом і пробігом — і рахує з неї
+// витрату за обраний діапазон. Історія починається при під'єднанні і скидається
+// при від'єднанні: одне підключення — одна поїздка.
+//
+// Годинник передається ззовні, щоб тести не залежали від реального часу.
+// Він монотонний: переведення системного часу не має зіпсувати тривалість.
 // ====================================================================================
 
 package com.kirianov.kiasoulevplus2.tools.calculations
@@ -11,46 +14,86 @@ package com.kirianov.kiasoulevplus2.tools.calculations
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CellData
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
-import com.kirianov.kiasoulevplus2.Data.EnergySession
+import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.Data.TripHistory
+import com.kirianov.kiasoulevplus2.Data.TripSample
+import com.kirianov.kiasoulevplus2.Data.VehicleData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 
-class CalculationBlock {
-
-    /** Вхідні дані перерахунку — окремим типом, щоб distinctUntilChanged порівнював саме їх. */
-    private data class Readings(val bms: BmsData, val cells: CellData, val session: EnergySession)
+class CalculationBlock(
+    private val elapsedMillis: () -> Long = { System.nanoTime() / 1_000_000 },
+) {
+    private var startedAt: Long? = null
 
     fun start(scope: CoroutineScope) {
-        GeneralData.state
-            .map { Readings(it.bms, it.cells, it.energySession) }
-            .distinctUntilChanged()
-            .onEach { GeneralData.updateCalculated(CalculationEngine.calculate(it.bms, it.cells, it.session)) }
-            .launchIn(scope)
+        recalculateOnChange(scope)
+        recordSamples(scope)
+        resetOnDisconnect(scope)
+    }
 
-        // Позначка ставиться на першому зчитуванні з лічильниками і тримається до від'єднання.
-        GeneralData.state
-            .map { SessionTrigger(it.connection, it.bms.hasEnergyCounters, it.energySession.isStarted) }
-            .distinctUntilChanged()
-            .onEach { trigger ->
-                when {
-                    trigger.connection == ConnectionState.Disconnected && trigger.sessionStarted ->
-                        GeneralData.clearEnergySession()
+    private data class Inputs(
+        val bms: BmsData,
+        val cells: CellData,
+        val history: TripHistory,
+        val window: ConsumptionWindow,
+    )
 
-                    trigger.connection == ConnectionState.Connected &&
-                        trigger.hasCounters && !trigger.sessionStarted ->
-                        GeneralData.startEnergySession(GeneralData.state.value.bms)
-                }
+    private fun recalculateOnChange(scope: CoroutineScope) {
+        GeneralData.state
+            .map { Inputs(it.bms, it.cells, it.tripHistory, it.consumptionWindow) }
+            .distinctUntilChanged()
+            .onEach {
+                GeneralData.updateCalculated(
+                    CalculationEngine.calculate(it.bms, it.cells, it.history, it.window),
+                )
             }
             .launchIn(scope)
     }
 
-    private data class SessionTrigger(
+    private data class Reading(
         val connection: ConnectionState,
-        val hasCounters: Boolean,
-        val sessionStarted: Boolean,
+        val bms: BmsData,
+        val vehicle: VehicleData,
     )
+
+    private fun recordSamples(scope: CoroutineScope) {
+        GeneralData.state
+            .map { Reading(it.connection, it.bms, it.vehicle) }
+            .distinctUntilChanged()
+            .onEach { reading ->
+                if (reading.connection != ConnectionState.Connected) return@onEach
+                if (!reading.bms.hasEnergyCounters) return@onEach
+
+                val now = elapsedMillis()
+                val since = startedAt ?: now.also { startedAt = it }
+
+                GeneralData.addTripSample(
+                    TripSample(
+                        elapsedMs = now - since,
+                        odometerKm = reading.vehicle.odometerKm,
+                        dischargedKwh = reading.bms.cumulativeEnergyDischargedKwh,
+                        chargedKwh = reading.bms.cumulativeEnergyChargedKwh,
+                    ),
+                )
+            }
+            .launchIn(scope)
+    }
+
+    private fun resetOnDisconnect(scope: CoroutineScope) {
+        GeneralData.state
+            .map { it.connection }
+            .distinctUntilChanged()
+            .onEach { connection ->
+                if (connection == ConnectionState.Disconnected) {
+                    startedAt = null
+                    GeneralData.clearTripHistory()
+                }
+            }
+            .launchIn(scope)
+    }
 }
