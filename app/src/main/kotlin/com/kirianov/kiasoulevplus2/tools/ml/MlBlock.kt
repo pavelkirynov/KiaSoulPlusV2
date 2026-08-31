@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class MlBlock(
@@ -56,6 +58,14 @@ class MlBlock(
     private var lastSequence: Long? = null
 
     /**
+     * Один замок на всі моделі. Знімки вчаться в одній корутині, але «Перенавчити»
+     * і «Забути все» приходять з іншої — і без замка вони пересоздавали б моделі
+     * рівно тоді, коли ті вчаться. Ні втрачених оновлень, ні напівзібраної моделі
+     * побачити не можна.
+     */
+    private val guard = Mutex()
+
+    /**
      * Поки модель піднімається з диска, вчитися не можна: `rebuild` замінює моделі
      * цілком, і відрізок, який устиг би прослизнути раніше, просто зник би разом
      * зі старим об'єктом.
@@ -65,9 +75,11 @@ class MlBlock(
 
     fun start(scope: CoroutineScope) {
         scope.launch(ioDispatcher) {
-            restore()
-            ready = true
-            publish()
+            guard.withLock {
+                restore()
+                ready = true
+                publish()
+            }
         }
         collectSamples(scope)
         answerRequests(scope)
@@ -105,11 +117,13 @@ class MlBlock(
                 lastSequence = sequence
 
                 val sample = sampleOf(state, elapsedMillis()) ?: return@onEach
-                capacity.learnBuffer(sample.displaySocPercent, sample.socPercent, sample.wallClockMs)
+                guard.withLock {
+                    capacity.learnBuffer(sample.displaySocPercent, sample.socPercent, sample.wallClockMs)
 
-                val segment = segments.accept(sample)
-                if (segment != null) absorb(segment)
-                publish()
+                    val segment = segments.accept(sample)
+                    if (segment != null) absorb(segment)
+                    publish()
+                }
             }
             .launchIn(scope)
     }
@@ -180,11 +194,13 @@ class MlBlock(
         GeneralData.updateMl { it.copy(retraining = true) }
         try {
             val history = withContext(ioDispatcher) { store.readSegments() }
-            rebuild(history)
-            withContext(ioDispatcher) { store.saveModel(snapshot()) }
+            guard.withLock {
+                rebuild(history)
+                withContext(ioDispatcher) { store.saveModel(snapshot()) }
+            }
         } finally {
             GeneralData.updateMl { it.copy(retraining = false) }
-            publish()
+            guard.withLock { publish() }
         }
     }
 
@@ -213,9 +229,11 @@ class MlBlock(
 
     private suspend fun forgetEverything() {
         withContext(ioDispatcher) { store.clear() }
-        rebuild(emptyList())
-        segments.reset()
-        publish()
+        guard.withLock {
+            rebuild(emptyList())
+            segments.reset()
+            publish()
+        }
     }
 
     private suspend fun restore() {
