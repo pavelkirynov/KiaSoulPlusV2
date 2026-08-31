@@ -2,6 +2,7 @@ package com.kirianov.kiasoulevplus2.services.AndroidAuto
 
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CalculatedData
+import com.kirianov.kiasoulevplus2.Data.ClockStatus
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.State
 import com.kirianov.kiasoulevplus2.Data.VehicleData
@@ -148,25 +149,27 @@ class CarMediaModelTest {
     fun `a drifted car clock is called out in the row title`() {
         val state = connected().let {
             it.copy(
-                vehicle = it.vehicle.copy(clockMinutesOfDay = 12 * 60),
-                calculated = it.calculated.copy(clockDriftMinutes = -37),
+                vehicle = it.vehicle.copy(clockSecondsOfDay = 12 * 3600),
+                calculated = it.calculated.copy(
+                    clock = ClockStatus(driftSeconds = -37 * 60),
+                ),
             )
         }
 
         val clockRow = CarMediaModel.childrenOf(CarMediaModel.PERFORMANCE_ID, state)
             .single { it.id == "clock" }
 
-        assertEquals("12:00", clockRow.subtitle)
-        assertTrue(clockRow.title.contains("37 хв"))
+        assertEquals("12:00:00", clockRow.subtitle)
+        assertTrue(clockRow.title, clockRow.title.contains("-37 хв"))
     }
 
-    /** Хвилина різниці — це округлення, а не збитий годинник. */
+    /** Кілька секунд різниці — це округлення, а не збитий годинник. */
     @Test
-    fun `a clock within a minute is not called out`() {
+    fun `a clock within a few seconds is not called out`() {
         val state = connected().let {
             it.copy(
-                vehicle = it.vehicle.copy(clockMinutesOfDay = 12 * 60),
-                calculated = it.calculated.copy(clockDriftMinutes = 1),
+                vehicle = it.vehicle.copy(clockSecondsOfDay = 12 * 3600),
+                calculated = it.calculated.copy(clock = ClockStatus(driftSeconds = 3)),
             )
         }
 
@@ -174,5 +177,26 @@ class CarMediaModelTest {
             .single { it.id == "clock" }
 
         assertEquals("Годинник авто", clockRow.title)
+    }
+
+    /**
+     * Найважливіше з поля: якщо годинник іде з іншою швидкістю, це кварц магнітоли,
+     * і вимикати GPS безглуздо. Рядок мусить казати саме про хід, а не про розбіжність.
+     */
+    @Test
+    fun `a clock running at the wrong rate is reported as a rate fault`() {
+        val state = connected().let {
+            it.copy(
+                vehicle = it.vehicle.copy(clockSecondsOfDay = 12 * 3600),
+                calculated = it.calculated.copy(
+                    clock = ClockStatus(driftSeconds = 300, rateSecondsPerHour = 145.0),
+                ),
+            )
+        }
+
+        val clockRow = CarMediaModel.childrenOf(CarMediaModel.PERFORMANCE_ID, state)
+            .single { it.id == "clock" }
+
+        assertTrue(clockRow.title, clockRow.title.contains("хід +145 с/год"))
     }
 }

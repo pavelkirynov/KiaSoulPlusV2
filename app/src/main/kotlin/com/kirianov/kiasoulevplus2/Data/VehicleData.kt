@@ -29,11 +29,15 @@ data class VehicleData(
     val charging: ChargingState = ChargingState(),
 
     /**
-     * Годинник авто, хвилини від початку доби. Кадр 567.
+     * Годинник авто, СЕКУНДИ від початку доби. Кадр 567.
      *
-     * null, а не познака числом: 0 — це рівно 00:00, дійсне значення.
+     * Секунди, а не хвилини: щоб побачити, що годинник магнітоли йде з іншою
+     * швидкістю, потрібна роздільність краща за хвилину — інакше на вимір швидкості
+     * ходу пішли б години.
+     *
+     * null, а не познака числом: 0 — це рівно 00:00:00, дійсне значення.
      */
-    val clockMinutesOfDay: Int? = null,
+    val clockSecondsOfDay: Int? = null,
 ) {
     val hasOdometer: Boolean get() = odometerKm > 0.0
     val hasSpeed: Boolean get() = speedKmh >= 0.0
@@ -41,7 +45,7 @@ data class VehicleData(
     val hasPreciseSoc: Boolean get() = preciseSocPercent >= 0.0
     val hasRange: Boolean get() = rangeKm > 0
     val hasAmbientTemp: Boolean get() = ambientTempC > NO_TEMPERATURE
-    val hasClock: Boolean get() = clockMinutesOfDay != null
+    val hasClock: Boolean get() = clockSecondsOfDay != null
 
     companion object {
         const val NO_DATA = -1.0

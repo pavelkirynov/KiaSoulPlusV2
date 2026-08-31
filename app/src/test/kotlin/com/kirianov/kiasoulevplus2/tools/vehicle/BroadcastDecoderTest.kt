@@ -116,7 +116,7 @@ class BroadcastDecoderTest {
             listOf(frame("567", 0, 21, 47, 30, 0, 0, 0, 0)),
         )
 
-        assertEquals(21 * 60 + 47, result.clockMinutesOfDay)
+        assertEquals(21 * 3600 + 47 * 60 + 30, result.clockSecondsOfDay)
         assertTrue(result.hasClock)
     }
 
@@ -128,21 +128,21 @@ class BroadcastDecoderTest {
             listOf(frame("567", 0, 0, 0, 0, 0, 0, 0, 0)),
         )
 
-        assertEquals(0, result.clockMinutesOfDay)
+        assertEquals(0, result.clockSecondsOfDay)
         assertTrue(result.hasClock)
     }
 
     /** Значення поза межами доби — це сміття в кадрі, а не «північ». */
     @Test
     fun `an impossible clock value is ignored`() {
-        val previous = VehicleData(clockMinutesOfDay = 10 * 60)
+        val previous = VehicleData(clockSecondsOfDay = 10 * 3600)
 
         val result = BroadcastDecoder.merge(
             previous,
             listOf(frame("567", 0, 47, 99, 0, 0, 0, 0, 0)),
         )
 
-        assertEquals(10 * 60, result.clockMinutesOfDay)
+        assertEquals(10 * 3600, result.clockSecondsOfDay)
     }
 
     @Test

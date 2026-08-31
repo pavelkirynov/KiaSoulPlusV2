@@ -22,14 +22,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.abs
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
+import com.kirianov.kiasoulevplus2.Data.ClockDiagnosis
+import com.kirianov.kiasoulevplus2.Data.ClockStatus
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WindowStats
 import com.kirianov.kiasoulevplus2.tools.format.formatClock
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
+import com.kirianov.kiasoulevplus2.tools.format.formatDriftSigned
+import com.kirianov.kiasoulevplus2.tools.format.formatRate
 import com.kirianov.kiasoulevplus2.tools.format.formatDuration
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
 import com.kirianov.kiasoulevplus2.tools.format.formatOrDash
@@ -144,7 +147,7 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
                 }
             }
 
-            VehicleCard(state.vehicle, calculated.clockDriftMinutes)
+            VehicleCard(state.vehicle, calculated.clock)
         }
 
         if (calculated.maxCellVoltage > 0.0) {
@@ -164,7 +167,7 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
 }
 
 @Composable
-private fun VehicleCard(vehicle: VehicleData, clockDriftMinutes: Int?) {
+private fun VehicleCard(vehicle: VehicleData, clock: ClockStatus) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -206,21 +209,22 @@ private fun VehicleCard(vehicle: VehicleData, clockDriftMinutes: Int?) {
 
             MetricRow(
                 "Годинник авто",
-                vehicle.clockMinutesOfDay?.let { formatClock(it) } ?: "--",
+                vehicle.clockSecondsOfDay?.let { formatClock(it) } ?: "--",
             )
-
-            // Коли РЕБ зсуває час по GPS, магнітола перестає пускати Android Auto,
-            // і зі сторони це виглядає як «застосунок відвалився».
-            if (clockDriftMinutes != null && abs(clockDriftMinutes) >= CLOCK_DRIFT_WARNING_MINUTES) {
-                Text(
-                    text = "Годинник авто розійшовся з телефоном на " +
-                        "${abs(clockDriftMinutes)} хв. Саме через це Android Auto може " +
-                        "не під'єднуватись. Виправляється лише в меню магнітоли: " +
-                        "вимкнути синхронізацію часу по GPS і виставити час вручну.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+            MetricRow(
+                "Розбіжність з телефоном",
+                clock.driftSeconds?.let { formatDriftSigned(it) } ?: "--",
+            )
+            MetricRow(
+                "Хід годинника",
+                clock.rateSecondsPerHour?.let { formatRate(it) }
+                    ?: if (clock.hasDrift) "міряю…" else "--",
+            )
+            if (clock.jumpCount > 0) {
+                MetricRow("Стрибків часу", clock.jumpCount.toString())
             }
+
+            ClockVerdict(clock)
 
             if (!vehicle.hasOdometer) {
                 Text(
@@ -312,5 +316,39 @@ private fun MetricRow(label: String, value: String) {
 
 private const val NO_VALUE = "--"
 
-/** Менше цього годинник магнітоли й телефона розходяться просто від округлення хвилин. */
-private const val CLOCK_DRIFT_WARNING_MINUTES = 2
+/**
+ * Вердикт по годиннику магнітоли.
+ *
+ * Сенс саме в тому, щоб не шукати причину там, де її немає: рівномірний хід — це
+ * кварц у магнітолі, і вимикання GPS тут не допоможе взагалі; стрибки — це вже
+ * підмінений час або перезавантаження магнітоли.
+ */
+@Composable
+private fun ClockVerdict(clock: ClockStatus) {
+    val text = when (clock.diagnosis) {
+        ClockDiagnosis.Unknown -> null
+        ClockDiagnosis.Fine -> null
+
+        ClockDiagnosis.SetWrong ->
+            "Годинник іде нормально, але виставлений неправильно. Достатньо виставити " +
+                "час у меню магнітоли."
+
+        ClockDiagnosis.TimeJumps ->
+            "Годинник переставлявся під час поїздки. Це або підмінений час по GPS, " +
+                "або магнітола перезавантажувалась. Спробуйте вимкнути синхронізацію " +
+                "часу по GPS у меню магнітоли."
+
+        ClockDiagnosis.RateFault ->
+            "Годинник магнітоли ІДЕ З ІНШОЮ ШВИДКІСТЮ. Це кварц RTC у самій магнітолі, " +
+                "і вимикання GPS тут не допоможе — GPS зсуває час стрибком, а не " +
+                "змінює швидкість ходу. Варто перевірити постійне живлення магнітоли " +
+                "(запобіжник пам'яті): якщо годинник скидається після стоянки, справа в " +
+                "живленні, а не в кварці."
+    } ?: return
+
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+    )
+}

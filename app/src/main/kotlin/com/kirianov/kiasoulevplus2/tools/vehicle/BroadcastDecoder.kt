@@ -74,10 +74,16 @@ object BroadcastDecoder {
             CAR_CLOCK -> {
                 val hour = b.getOrNull(1)
                 val minute = b.getOrNull(2)
-                if (hour == null || minute == null || hour > 23 || minute > 59) {
+                val second = b.getOrNull(3)
+                val garbage = hour == null || minute == null || second == null ||
+                    hour > 23 || minute > 59 || second > 59
+                if (garbage) {
                     data
                 } else {
-                    data.copy(clockMinutesOfDay = hour * MINUTES_PER_HOUR + minute)
+                    data.copy(
+                        clockSecondsOfDay = hour!! * SECONDS_PER_HOUR +
+                            minute!! * SECONDS_PER_MINUTE + second!!,
+                    )
                 }
             }
 
@@ -93,5 +99,6 @@ object BroadcastDecoder {
     private const val CHARGING = "581"
     private const val CAR_CLOCK = "567"
 
-    private const val MINUTES_PER_HOUR = 60
+    private const val SECONDS_PER_MINUTE = 60
+    private const val SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
 }

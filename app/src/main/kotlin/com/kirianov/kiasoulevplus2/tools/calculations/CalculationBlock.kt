@@ -13,6 +13,9 @@ package com.kirianov.kiasoulevplus2.tools.calculations
 
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CellData
+import com.kirianov.kiasoulevplus2.Data.ClockDriftHistory
+import com.kirianov.kiasoulevplus2.Data.ClockDriftSample
+import com.kirianov.kiasoulevplus2.Data.ClockStatus
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
 import com.kirianov.kiasoulevplus2.Data.GeneralData
@@ -28,16 +31,21 @@ import kotlinx.coroutines.flow.onEach
 class CalculationBlock(
     private val elapsedMillis: () -> Long = { System.nanoTime() / 1_000_000 },
     /**
-     * Час телефона, хвилини від початку доби. Окремо від [elapsedMillis]: той
+     * Час телефона, секунди від початку доби. Окремо від [elapsedMillis]: той
      * монотонний і про добу нічого не знає, а тут потрібен саме годинник на стіні,
      * щоб порівняти його з годинником магнітоли.
      */
-    private val phoneMinutesOfDay: () -> Int = {
+    private val phoneSecondsOfDay: () -> Int = {
         val now = java.util.Calendar.getInstance()
-        now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
+        now.get(java.util.Calendar.HOUR_OF_DAY) * 3600 +
+            now.get(java.util.Calendar.MINUTE) * 60 +
+            now.get(java.util.Calendar.SECOND)
     },
 ) {
     private var startedAt: Long? = null
+
+    /** Живе в блоці, а не в хабі: інтерфейсу потрібен лише підсумок, не вся серія. */
+    private var clockHistory = ClockDriftHistory()
 
     fun start(scope: CoroutineScope) {
         recalculateOnChange(scope)
@@ -64,8 +72,7 @@ class CalculationBlock(
                         cells = it.cells,
                         history = it.history,
                         window = it.window,
-                        vehicle = it.vehicle,
-                        phoneMinutesOfDay = phoneMinutesOfDay(),
+                        clock = observeClock(it.vehicle),
                     ),
                 )
             }
@@ -103,6 +110,27 @@ class CalculationBlock(
             .launchIn(scope)
     }
 
+    /**
+     * Веде серію розходжень годинників і повертає підсумок.
+     *
+     * Саме серія, а не одне число: рівномірний хід (несправний кварц RTC) і стрибок
+     * (підмінений час або перезавантаження магнітоли) — це різні несправності з
+     * різним ремонтом, і відрізнити їх можна лише за формою розходження в часі.
+     */
+    private fun observeClock(vehicle: VehicleData): ClockStatus {
+        val drift = CalculationEngine.clockDrift(vehicle.clockSecondsOfDay, phoneSecondsOfDay())
+            ?: return ClockStatus()
+
+        clockHistory = clockHistory.plus(ClockDriftSample(elapsedMillis(), drift))
+
+        return ClockStatus(
+            driftSeconds = clockHistory.driftSeconds,
+            rateSecondsPerHour = clockHistory.rateSecondsPerHour,
+            jumpCount = clockHistory.jumpCount,
+            observedMs = clockHistory.spanMs,
+        )
+    }
+
     private fun resetOnDisconnect(scope: CoroutineScope) {
         GeneralData.state
             .map { it.connection }
@@ -110,6 +138,14 @@ class CalculationBlock(
             .onEach { connection ->
                 if (connection == ConnectionState.Disconnected) {
                     startedAt = null
+                    clockHistory = ClockDriftHistory()
+
+                    // Очистити саму серію недостатньо: вже опублікований вердикт
+                    // висів би на екрані до наступного перерахунку, а перерахунок
+                    // залежить від показників, які після від'єднання не приходять.
+                    GeneralData.updateCalculated(
+                        GeneralData.state.value.calculated.copy(clock = ClockStatus()),
+                    )
                     GeneralData.clearTripHistory()
                 }
             }

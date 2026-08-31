@@ -42,15 +42,39 @@ fun parseDecimalInput(text: String): Double? =
     text.trim().replace(',', '.').toDoubleOrNull()
 
 /**
- * Хвилини від початку доби у «ГГ:ХХ». Саме хвилинами, бо кадр 567 віддає годинник
- * магнітоли, а не мітку часу: дати в ньому немає.
+ * Секунди від початку доби у «ГГ:ХХ:СС». Саме секунди від доби, а не мітка часу:
+ * кадр 567 віддає годинник магнітоли, дати в ньому немає.
  */
-fun formatClock(minutesOfDay: Int): String {
-    val normalized = minutesOfDay.mod(MINUTES_PER_DAY)
-    val hours = normalized / MINUTES_PER_HOUR
-    val minutes = normalized % MINUTES_PER_HOUR
-    return "%02d:%02d".format(hours, minutes)
+fun formatClock(secondsOfDay: Int): String {
+    val normalized = secondsOfDay.mod(SECONDS_PER_DAY)
+    return "%02d:%02d:%02d".format(
+        normalized / SECONDS_PER_HOUR,
+        normalized % SECONDS_PER_HOUR / SECONDS_PER_MINUTE,
+        normalized % SECONDS_PER_MINUTE,
+    )
 }
 
-private const val MINUTES_PER_HOUR = 60
-private const val MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR
+/**
+ * Розходження годинників «на око»: «+3 хв 12 с» читається краще за «192 с».
+ * Знак лишається завжди — без нього не видно, спішить годинник чи відстає.
+ */
+fun formatDriftSigned(seconds: Int): String {
+    val sign = if (seconds < 0) "-" else "+"
+    val absolute = kotlin.math.abs(seconds)
+    val minutes = absolute / SECONDS_PER_MINUTE
+    val rest = absolute % SECONDS_PER_MINUTE
+    return if (minutes == 0) "$sign$rest с" else "$sign$minutes хв $rest с"
+}
+
+/**
+ * Швидкість ходу годинника відносно телефона: «+42 с/год».
+ * Саме секунди на годину — у цих одиницях видно різницю за кілька хвилин поїздки.
+ */
+fun formatRate(secondsPerHour: Double): String {
+    val sign = if (secondsPerHour < 0) "-" else "+"
+    return "$sign${formatDecimal(kotlin.math.abs(secondsPerHour), 0)} с/год"
+}
+
+private const val SECONDS_PER_MINUTE = 60
+private const val SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
+private const val SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR

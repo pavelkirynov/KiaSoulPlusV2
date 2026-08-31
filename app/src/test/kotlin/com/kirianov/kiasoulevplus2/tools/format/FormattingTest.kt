@@ -47,8 +47,24 @@ class FormattingTest {
 
     @Test
     fun `the clock is padded to two digits`() {
-        assertEquals("00:00", formatClock(0))
-        assertEquals("09:05", formatClock(9 * 60 + 5))
-        assertEquals("23:59", formatClock(23 * 60 + 59))
+        assertEquals("00:00:00", formatClock(0))
+        assertEquals("09:05:07", formatClock(9 * 3600 + 5 * 60 + 7))
+        assertEquals("23:59:59", formatClock(24 * 3600 - 1))
+    }
+
+    /** Без знака не видно, спішить годинник чи відстає. */
+    @Test
+    fun `drift always keeps its sign`() {
+        assertEquals("+0 с", formatDriftSigned(0))
+        assertEquals("+42 с", formatDriftSigned(42))
+        assertEquals("-42 с", formatDriftSigned(-42))
+        assertEquals("+3 хв 12 с", formatDriftSigned(192))
+        assertEquals("-3 хв 12 с", formatDriftSigned(-192))
+    }
+
+    @Test
+    fun `the clock rate keeps its sign too`() {
+        assertEquals("+145 с/год", formatRate(145.0))
+        assertEquals("-145 с/год", formatRate(-145.0))
     }
 }
