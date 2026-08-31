@@ -16,12 +16,7 @@
 
 package com.kirianov.kiasoulevplus2.services.AndroidAuto
 
-import com.kirianov.kiasoulevplus2.Data.ClockDiagnosis
-import com.kirianov.kiasoulevplus2.Data.ClockStatus
 import com.kirianov.kiasoulevplus2.Data.State
-import com.kirianov.kiasoulevplus2.tools.format.formatClock
-import com.kirianov.kiasoulevplus2.tools.format.formatDriftSigned
-import com.kirianov.kiasoulevplus2.tools.format.formatRate
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import com.kirianov.kiasoulevplus2.tools.format.formatDuration
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
@@ -113,24 +108,8 @@ object CarMediaModel {
             row("current", "Струм", measureOrNull(bms.batteryCurrent.takeIf { bms.hasData }, 1, "А")),
             row("odometer", "Пробіг", measureOrNull(vehicle.odometerKm.takeIf { vehicle.hasOdometer }, 1, "км")),
             row("ambient", "За бортом", measureOrNull(vehicle.ambientTempC.takeIf { vehicle.hasAmbientTemp }, 1, "°C")),
-            row("clock", clockTitle(state.calculated.clock), vehicle.clockSecondsOfDay?.let(::formatClock)),
         )
     }
-
-    /**
-     * Стан годинника пишеться просто в назву рядка: у списку хоста більше нікуди
-     * його подіти, а знати про збитий годинник треба саме в машині.
-     */
-    private fun clockTitle(clock: ClockStatus): String = when (clock.diagnosis) {
-        ClockDiagnosis.Unknown, ClockDiagnosis.Fine -> "Годинник авто"
-        ClockDiagnosis.SetWrong ->
-            "Годинник авто — розбіжність ${formatDriftSigned(clock.driftSeconds ?: 0)}"
-        ClockDiagnosis.TimeJumps ->
-            "Годинник авто — стрибків: ${clock.jumpCount}"
-        ClockDiagnosis.RateFault ->
-            "Годинник авто — хід ${formatRate(clock.rateSecondsPerHour ?: 0.0)}"
-    }
-
 
     private fun energy(state: State): List<CarMediaItem> {
         val bms = state.bms

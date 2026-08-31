@@ -14,73 +14,7 @@ data class CalculatedData(
 
     /** Підсумок за обраний діапазон: остання поїздка або останні N кілометрів. */
     val window: WindowStats = WindowStats(),
-
-    /**
-     * Що відомо про годинник магнітоли порівняно з телефоном.
-     *
-     * Навіщо: «час в авто злітає» — це три різні несправності з різним ремонтом,
-     * і відрізняються вони формою розходження. Див. ClockDriftHistory.
-     */
-    val clock: ClockStatus = ClockStatus(),
 )
-
-/**
- * Підсумок спостереження за годинником магнітоли.
- *
- * [rateSecondsPerHour] — наскільки годинник авто біжить швидше за телефон.
- * Саме це число відрізняє несправний кварц від підміни часу по GPS: кварц дає
- * рівномірний хід, підміна — стрибки.
- */
-data class ClockStatus(
-    val driftSeconds: Int? = null,
-    val rateSecondsPerHour: Double? = null,
-    val jumpCount: Int = 0,
-    val observedMs: Long = 0,
-) {
-    val hasDrift: Boolean get() = driftSeconds != null
-
-    /** Розходження, помітне на око: менше — це округлення секунд у кадрі. */
-    val isDrifted: Boolean get() = (driftSeconds ?: 0).let { it > DRIFT_WARNING_SECONDS || it < -DRIFT_WARNING_SECONDS }
-
-    /** Хід, помітно відмінний від нормального: справний кварц не набігає стільки. */
-    val isRunningOff: Boolean
-        get() = rateSecondsPerHour?.let { it > RATE_WARNING_SECONDS_PER_HOUR || it < -RATE_WARNING_SECONDS_PER_HOUR } == true
-
-    /**
-     * Найімовірніша причина, зведена з форми розходження. Саме те, що потрібно, щоб
-     * не шукати далі там, де причини немає.
-     */
-    val diagnosis: ClockDiagnosis
-        get() = when {
-            driftSeconds == null -> ClockDiagnosis.Unknown
-            isRunningOff -> ClockDiagnosis.RateFault
-            jumpCount > 0 -> ClockDiagnosis.TimeJumps
-            isDrifted -> ClockDiagnosis.SetWrong
-            else -> ClockDiagnosis.Fine
-        }
-
-    private companion object {
-        const val DRIFT_WARNING_SECONDS = 120
-        const val RATE_WARNING_SECONDS_PER_HOUR = 20.0
-    }
-}
-
-enum class ClockDiagnosis {
-    /** Кадр 567 ще не приходив. */
-    Unknown,
-
-    /** Годинник збігається з телефоном. */
-    Fine,
-
-    /** Годинник просто виставлений неправильно, але йде нормально. */
-    SetWrong,
-
-    /** Годинник переставляли під час спостереження: підміна часу або перезавантаження. */
-    TimeJumps,
-
-    /** Годинник іде з іншою швидкістю: кварц RTC у магнітолі. GPS тут ні до чого. */
-    RateFault,
-}
 
 /**
  * Енергія, час і пробіг на одному відрізку поїздки.

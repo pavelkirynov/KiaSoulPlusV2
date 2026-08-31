@@ -4,7 +4,6 @@ import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CalculatedData
 import com.kirianov.kiasoulevplus2.Data.CellData
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
-import com.kirianov.kiasoulevplus2.Data.ClockStatus
 import com.kirianov.kiasoulevplus2.Data.TripHistory
 import com.kirianov.kiasoulevplus2.Data.WindowStats
 
@@ -19,7 +18,6 @@ object CalculationEngine {
         cells: CellData,
         history: TripHistory,
         window: ConsumptionWindow,
-        clock: ClockStatus = ClockStatus(),
     ): CalculatedData {
         val valid = cells.cellVoltages.filter { it > MIN_PLAUSIBLE_CELL_VOLTAGE }
         val minCell = valid.minOrNull() ?: 0.0
@@ -32,20 +30,7 @@ object CalculationEngine {
             cellDeltaVolts = if (valid.isEmpty()) 0.0 else maxCell - minCell,
             trip = statsFor(history, ConsumptionWindow.Trip),
             window = statsFor(history, window),
-            clock = clock,
         )
-    }
-
-    /**
-     * Різниця годинників у секундах, найкоротшим шляхом по колу доби.
-     *
-     * Без «по колу» 00:00:01 проти 23:59:59 давало б майже добу замість двох секунд,
-     * і будь-яка поїздка через полуніч виглядала б як збитий годинник.
-     */
-    fun clockDrift(carSeconds: Int?, phoneSeconds: Int?): Int? {
-        if (carSeconds == null || phoneSeconds == null) return null
-        val raw = carSeconds - phoneSeconds
-        return (raw + HALF_DAY_SECONDS).mod(DAY_SECONDS) - HALF_DAY_SECONDS
     }
 
     /**
@@ -69,7 +54,4 @@ object CalculationEngine {
 
     /** Нижче цього порога значення вважається «комірку не зчитано», а не реальною напругою. */
     private const val MIN_PLAUSIBLE_CELL_VOLTAGE = 0.5
-
-    private const val DAY_SECONDS = 24 * 60 * 60
-    private const val HALF_DAY_SECONDS = DAY_SECONDS / 2
 }

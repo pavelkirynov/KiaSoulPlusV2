@@ -110,47 +110,6 @@ class BroadcastDecoderTest {
     }
 
     @Test
-    fun `decodes the car clock`() {
-        val result = BroadcastDecoder.merge(
-            VehicleData(),
-            listOf(frame("567", 0, 21, 47, 30, 0, 0, 0, 0)),
-        )
-
-        assertEquals(21 * 3600 + 47 * 60 + 30, result.clockSecondsOfDay)
-        assertTrue(result.hasClock)
-    }
-
-    /** Midnight is a real reading, so the marker cannot be a number. */
-    @Test
-    fun `midnight is a real clock reading`() {
-        val result = BroadcastDecoder.merge(
-            VehicleData(),
-            listOf(frame("567", 0, 0, 0, 0, 0, 0, 0, 0)),
-        )
-
-        assertEquals(0, result.clockSecondsOfDay)
-        assertTrue(result.hasClock)
-    }
-
-    /** Значення поза межами доби — це сміття в кадрі, а не «північ». */
-    @Test
-    fun `an impossible clock value is ignored`() {
-        val previous = VehicleData(clockSecondsOfDay = 10 * 3600)
-
-        val result = BroadcastDecoder.merge(
-            previous,
-            listOf(frame("567", 0, 47, 99, 0, 0, 0, 0, 0)),
-        )
-
-        assertEquals(10 * 3600, result.clockSecondsOfDay)
-    }
-
-    @Test
-    fun `the clock is unknown until frame 567 arrives`() {
-        assertFalse(VehicleData().hasClock)
-    }
-
-    @Test
     fun `temperature is unknown until frame 653 arrives`() {
         assertFalse(VehicleData().hasAmbientTemp)
     }

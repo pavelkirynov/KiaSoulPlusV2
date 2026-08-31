@@ -254,7 +254,6 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         const val MONITOR_WINDOW_MS = 700L
 
         /** Черга фільтрів «AT CRA» по вікнах. Пробіг питається вдвічі частіше за решту. */
-        val MONITOR_ROTATION =
-            listOf("4F0", "594", "4F0", "598", "4F0", "200", "4F0", "653", "4F0", "581", "4F0", "567")
+        val MONITOR_ROTATION = listOf("4F0", "594", "4F0", "598", "4F0", "200", "4F0", "653", "4F0", "581")
     }
 }

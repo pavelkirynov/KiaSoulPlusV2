@@ -2,7 +2,6 @@ package com.kirianov.kiasoulevplus2.tools.calculations
 
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CellData
-import com.kirianov.kiasoulevplus2.Data.ClockDiagnosis
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
 import com.kirianov.kiasoulevplus2.Data.GeneralData
@@ -13,8 +12,6 @@ import kotlinx.coroutines.cancel
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -26,18 +23,11 @@ class CalculationBlockTest {
     /** Керований годинник: тест не має залежати від реального часу. */
     private var now = 0L
 
-    /** Годинник телефона, секунди від початку доби: теж керований. */
-    private var phoneSeconds = 12 * 3600
-
     @Before
     fun setUp() {
         GeneralData.reset()
         now = 0L
-        phoneSeconds = 12 * 3600
-        CalculationBlock(
-            elapsedMillis = { now },
-            phoneSecondsOfDay = { phoneSeconds },
-        ).start(scope)
+        CalculationBlock(elapsedMillis = { now }).start(scope)
     }
 
     @After
@@ -179,67 +169,5 @@ class CalculationBlockTest {
         assertEquals(2.5, trip.consumedKwh, 0.0001)
         assertEquals(null, trip.kwhPer100Km)
         assertEquals(10.0, trip.averagePowerKw!!, 0.0001)
-    }
-
-    /**
-     * Головне з поля: годинник магнітоли йде з іншою швидкістю. Це кварц RTC, і
-     * вимикання GPS тут не допомагає — саме тому потрібне число, а не «час злітає».
-     */
-    @Test
-    fun `a car clock running fast is reported as a rate fault`() {
-        GeneralData.updateConnection(ConnectionState.Connected, "")
-
-        // Телефон і авто розходяться на 12 с кожні 5 хвилин -> 144 с/год.
-        listOf(0, 1, 2).forEach { step ->
-            now = step * 300_000L
-            phoneSeconds = 12 * 3600 + step * 300
-            GeneralData.updateVehicle(
-                VehicleData(clockSecondsOfDay = 12 * 3600 + step * 300 + step * 12),
-            )
-        }
-
-        val clock = GeneralData.state.value.calculated.clock
-        assertEquals(144.0, clock.rateSecondsPerHour!!, 0.001)
-        assertEquals(0, clock.jumpCount)
-        assertEquals(ClockDiagnosis.RateFault, clock.diagnosis)
-    }
-
-    /** Підмінений час — це стрибок, і вердикт мусить бути іншим. */
-    @Test
-    fun `a time jump is reported as a jump, not as a rate fault`() {
-        GeneralData.updateConnection(ConnectionState.Connected, "")
-
-        now = 0
-        GeneralData.updateVehicle(VehicleData(clockSecondsOfDay = phoneSeconds))
-        now = 30_000
-        GeneralData.updateVehicle(VehicleData(clockSecondsOfDay = phoneSeconds + 3_600))
-
-        val clock = GeneralData.state.value.calculated.clock
-        assertEquals(1, clock.jumpCount)
-        assertEquals(ClockDiagnosis.TimeJumps, clock.diagnosis)
-    }
-
-    /** Нове підключення — нове спостереження: стара серія до нього не належить. */
-    @Test
-    fun `disconnecting clears what was learned about the clock`() {
-        GeneralData.updateConnection(ConnectionState.Connected, "")
-        now = 0
-        GeneralData.updateVehicle(VehicleData(clockSecondsOfDay = phoneSeconds + 600))
-        now = 300_000
-        GeneralData.updateVehicle(VehicleData(clockSecondsOfDay = phoneSeconds + 900))
-        assertNotNull(GeneralData.state.value.calculated.clock.rateSecondsPerHour)
-
-        GeneralData.updateConnection(ConnectionState.Disconnected, "")
-        // Вердикт мусить зникнути одразу, не чекаючи наступного перерахунку.
-        assertNull(GeneralData.state.value.calculated.clock.rateSecondsPerHour)
-        assertNull(GeneralData.state.value.calculated.clock.driftSeconds)
-
-        GeneralData.updateConnection(ConnectionState.Connected, "")
-        now = 400_000
-        GeneralData.updateVehicle(VehicleData(clockSecondsOfDay = phoneSeconds + 901))
-
-        // Одного знімка для швидкості ходу мало — серія почалася заново.
-        assertNull(GeneralData.state.value.calculated.clock.rateSecondsPerHour)
-        assertEquals(901, GeneralData.state.value.calculated.clock.driftSeconds)
     }
 }
