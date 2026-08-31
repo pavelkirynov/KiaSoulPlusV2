@@ -128,4 +128,28 @@ class CalculationEngineTest {
         assertFalse(stats.hasData)
         assertEquals(0.0, stats.distanceKm, 0.0001)
     }
+
+    /**
+     * Збитий годинник магнітоли — найчастіша причина, чому Android Auto не
+     * під'єднується під РЕБ. Різниця має рахуватися найкоротшим шляхом по колу доби.
+     */
+    @Test
+    fun `clock drift is measured the short way round the day`() {
+        // 00:01 проти 23:59 — це дві хвилини, а не 1438.
+        assertEquals(2, CalculationEngine.clockDrift(carMinutes = 1, phoneMinutes = 24 * 60 - 1))
+        assertEquals(-2, CalculationEngine.clockDrift(carMinutes = 24 * 60 - 1, phoneMinutes = 1))
+    }
+
+    @Test
+    fun `clock drift is signed so it says which way the car is off`() {
+        assertEquals(15, CalculationEngine.clockDrift(carMinutes = 12 * 60 + 15, phoneMinutes = 12 * 60))
+        assertEquals(-15, CalculationEngine.clockDrift(carMinutes = 12 * 60, phoneMinutes = 12 * 60 + 15))
+        assertEquals(0, CalculationEngine.clockDrift(carMinutes = 600, phoneMinutes = 600))
+    }
+
+    @Test
+    fun `clock drift is unknown until both clocks are known`() {
+        assertEquals(null, CalculationEngine.clockDrift(carMinutes = null, phoneMinutes = 600))
+        assertEquals(null, CalculationEngine.clockDrift(carMinutes = 600, phoneMinutes = null))
+    }
 }

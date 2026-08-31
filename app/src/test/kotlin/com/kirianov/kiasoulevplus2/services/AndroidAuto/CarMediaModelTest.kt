@@ -139,4 +139,40 @@ class CarMediaModelTest {
             CarMediaModel.childrenOf("что-то-старое", connected()),
         )
     }
+
+    /**
+     * Збитий годинник магнітоли — найчастіша причина, чому Android Auto не
+     * під'єднується під РЕБ. У списку хоста написати це можна лише в назві рядка.
+     */
+    @Test
+    fun `a drifted car clock is called out in the row title`() {
+        val state = connected().let {
+            it.copy(
+                vehicle = it.vehicle.copy(clockMinutesOfDay = 12 * 60),
+                calculated = it.calculated.copy(clockDriftMinutes = -37),
+            )
+        }
+
+        val clockRow = CarMediaModel.childrenOf(CarMediaModel.PERFORMANCE_ID, state)
+            .single { it.id == "clock" }
+
+        assertEquals("12:00", clockRow.subtitle)
+        assertTrue(clockRow.title.contains("37 хв"))
+    }
+
+    /** Хвилина різниці — це округлення, а не збитий годинник. */
+    @Test
+    fun `a clock within a minute is not called out`() {
+        val state = connected().let {
+            it.copy(
+                vehicle = it.vehicle.copy(clockMinutesOfDay = 12 * 60),
+                calculated = it.calculated.copy(clockDriftMinutes = 1),
+            )
+        }
+
+        val clockRow = CarMediaModel.childrenOf(CarMediaModel.PERFORMANCE_ID, state)
+            .single { it.id == "clock" }
+
+        assertEquals("Годинник авто", clockRow.title)
+    }
 }

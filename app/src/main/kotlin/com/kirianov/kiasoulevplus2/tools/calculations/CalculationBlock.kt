@@ -27,6 +27,15 @@ import kotlinx.coroutines.flow.onEach
 
 class CalculationBlock(
     private val elapsedMillis: () -> Long = { System.nanoTime() / 1_000_000 },
+    /**
+     * Час телефона, хвилини від початку доби. Окремо від [elapsedMillis]: той
+     * монотонний і про добу нічого не знає, а тут потрібен саме годинник на стіні,
+     * щоб порівняти його з годинником магнітоли.
+     */
+    private val phoneMinutesOfDay: () -> Int = {
+        val now = java.util.Calendar.getInstance()
+        now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
+    },
 ) {
     private var startedAt: Long? = null
 
@@ -41,15 +50,23 @@ class CalculationBlock(
         val cells: CellData,
         val history: TripHistory,
         val window: ConsumptionWindow,
+        val vehicle: VehicleData,
     )
 
     private fun recalculateOnChange(scope: CoroutineScope) {
         GeneralData.state
-            .map { Inputs(it.bms, it.cells, it.tripHistory, it.consumptionWindow) }
+            .map { Inputs(it.bms, it.cells, it.tripHistory, it.consumptionWindow, it.vehicle) }
             .distinctUntilChanged()
             .onEach {
                 GeneralData.updateCalculated(
-                    CalculationEngine.calculate(it.bms, it.cells, it.history, it.window),
+                    CalculationEngine.calculate(
+                        bms = it.bms,
+                        cells = it.cells,
+                        history = it.history,
+                        window = it.window,
+                        vehicle = it.vehicle,
+                        phoneMinutesOfDay = phoneMinutesOfDay(),
+                    ),
                 )
             }
             .launchIn(scope)

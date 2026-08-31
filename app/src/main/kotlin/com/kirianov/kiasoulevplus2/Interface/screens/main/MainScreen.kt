@@ -22,11 +22,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WindowStats
+import com.kirianov.kiasoulevplus2.tools.format.formatClock
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import com.kirianov.kiasoulevplus2.tools.format.formatDuration
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
@@ -142,7 +144,7 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
                 }
             }
 
-            VehicleCard(state.vehicle)
+            VehicleCard(state.vehicle, calculated.clockDriftMinutes)
         }
 
         if (calculated.maxCellVoltage > 0.0) {
@@ -162,7 +164,7 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
 }
 
 @Composable
-private fun VehicleCard(vehicle: VehicleData) {
+private fun VehicleCard(vehicle: VehicleData, clockDriftMinutes: Int?) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -199,6 +201,24 @@ private fun VehicleCard(vehicle: VehicleData) {
                 MetricRow(
                     "Заряджання",
                     formatMeasurement(vehicle.charging.powerKw, 1, "кВт"),
+                )
+            }
+
+            MetricRow(
+                "Годинник авто",
+                vehicle.clockMinutesOfDay?.let { formatClock(it) } ?: "--",
+            )
+
+            // Коли РЕБ зсуває час по GPS, магнітола перестає пускати Android Auto,
+            // і зі сторони це виглядає як «застосунок відвалився».
+            if (clockDriftMinutes != null && abs(clockDriftMinutes) >= CLOCK_DRIFT_WARNING_MINUTES) {
+                Text(
+                    text = "Годинник авто розійшовся з телефоном на " +
+                        "${abs(clockDriftMinutes)} хв. Саме через це Android Auto може " +
+                        "не під'єднуватись. Виправляється лише в меню магнітоли: " +
+                        "вимкнути синхронізацію часу по GPS і виставити час вручну.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
 
@@ -291,3 +311,6 @@ private fun MetricRow(label: String, value: String) {
 }
 
 private const val NO_VALUE = "--"
+
+/** Менше цього годинник магнітоли й телефона розходяться просто від округлення хвилин. */
+private const val CLOCK_DRIFT_WARNING_MINUTES = 2

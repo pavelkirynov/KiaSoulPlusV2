@@ -17,9 +17,11 @@
 package com.kirianov.kiasoulevplus2.services.AndroidAuto
 
 import com.kirianov.kiasoulevplus2.Data.State
+import com.kirianov.kiasoulevplus2.tools.format.formatClock
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import com.kirianov.kiasoulevplus2.tools.format.formatDuration
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
+import kotlin.math.abs
 
 /**
  * Один рядок медіа-списку.
@@ -45,6 +47,9 @@ object CarMediaModel {
     const val TRIP_ID = "trip"
 
     const val NO_DATA_TEXT = "--"
+
+    /** Менше цього годинники розходяться просто від округлення хвилин. */
+    const val CLOCK_DRIFT_WARNING_MINUTES = 2
 
     /** Розділи кореня. Порядок повторює плитки на машинному екрані. */
     private val SECTIONS = listOf(
@@ -108,7 +113,20 @@ object CarMediaModel {
             row("current", "Струм", measureOrNull(bms.batteryCurrent.takeIf { bms.hasData }, 1, "А")),
             row("odometer", "Пробіг", measureOrNull(vehicle.odometerKm.takeIf { vehicle.hasOdometer }, 1, "км")),
             row("ambient", "За бортом", measureOrNull(vehicle.ambientTempC.takeIf { vehicle.hasAmbientTemp }, 1, "°C")),
+            row("clock", clockTitle(state.calculated.clockDriftMinutes), vehicle.clockMinutesOfDay?.let(::formatClock)),
         )
+    }
+
+    /**
+     * Збитий годинник магнітоли — найчастіша причина, чому Android Auto не
+     * під'єднується під РЕБ. Тому розходження написано просто в назві рядка:
+     * у списку хоста більше нікуди його подіти.
+     */
+    private fun clockTitle(driftMinutes: Int?): String {
+        if (driftMinutes == null || abs(driftMinutes) < CLOCK_DRIFT_WARNING_MINUTES) {
+            return "Годинник авто"
+        }
+        return "Годинник авто — розбіжність ${abs(driftMinutes)} хв"
     }
 
     private fun energy(state: State): List<CarMediaItem> {

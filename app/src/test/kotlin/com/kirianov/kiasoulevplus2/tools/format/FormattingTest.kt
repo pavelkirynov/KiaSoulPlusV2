@@ -44,4 +44,11 @@ class FormattingTest {
         assertNull(parseDecimalInput(""))
         assertNull(parseDecimalInput("abc"))
     }
+
+    @Test
+    fun `the clock is padded to two digits`() {
+        assertEquals("00:00", formatClock(0))
+        assertEquals("09:05", formatClock(9 * 60 + 5))
+        assertEquals("23:59", formatClock(23 * 60 + 59))
+    }
 }

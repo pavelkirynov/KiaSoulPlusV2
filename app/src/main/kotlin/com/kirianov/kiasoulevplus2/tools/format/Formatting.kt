@@ -40,3 +40,17 @@ fun formatOrDash(value: Double?, decimals: Int, unit: String): String =
 /** Розбирає введений користувачем текст, приймаючи і крапку, і кому. */
 fun parseDecimalInput(text: String): Double? =
     text.trim().replace(',', '.').toDoubleOrNull()
+
+/**
+ * Хвилини від початку доби у «ГГ:ХХ». Саме хвилинами, бо кадр 567 віддає годинник
+ * магнітоли, а не мітку часу: дати в ньому немає.
+ */
+fun formatClock(minutesOfDay: Int): String {
+    val normalized = minutesOfDay.mod(MINUTES_PER_DAY)
+    val hours = normalized / MINUTES_PER_HOUR
+    val minutes = normalized % MINUTES_PER_HOUR
+    return "%02d:%02d".format(hours, minutes)
+}
+
+private const val MINUTES_PER_HOUR = 60
+private const val MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR

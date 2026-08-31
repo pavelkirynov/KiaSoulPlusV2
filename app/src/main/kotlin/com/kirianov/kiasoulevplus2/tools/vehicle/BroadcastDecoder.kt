@@ -24,7 +24,8 @@ import com.kirianov.kiasoulevplus2.Data.VehicleData
 object BroadcastDecoder {
 
     /** ID кадрів, які додаток розбирає. Решта в потоці монітора ігнорується. */
-    val KNOWN_IDS = setOf(ODOMETER_AND_SPEED, DISPLAY_SOC, PRECISE_SOC, RANGE, AMBIENT_TEMP, CHARGING)
+    val KNOWN_IDS =
+        setOf(ODOMETER_AND_SPEED, DISPLAY_SOC, PRECISE_SOC, RANGE, AMBIENT_TEMP, CHARGING, CAR_CLOCK)
 
     /** Домішує до [previous] усе, що вдалося розібрати з [frames]. */
     fun merge(previous: VehicleData, frames: List<CanBroadcastFrame>): VehicleData =
@@ -67,6 +68,19 @@ object BroadcastDecoder {
                 ),
             )
 
+            // Годинник магнітоли. Потрібен, щоб побачити, що він збився: коли РЕБ
+            // зсуває час по GPS, магнітола перестає пускати Android Auto.
+            // Значення поза межами доби — це сміття в кадрі, а не «північ».
+            CAR_CLOCK -> {
+                val hour = b.getOrNull(1)
+                val minute = b.getOrNull(2)
+                if (hour == null || minute == null || hour > 23 || minute > 59) {
+                    data
+                } else {
+                    data.copy(clockMinutesOfDay = hour * MINUTES_PER_HOUR + minute)
+                }
+            }
+
             else -> data
         }
     }
@@ -77,4 +91,7 @@ object BroadcastDecoder {
     private const val RANGE = "200"
     private const val AMBIENT_TEMP = "653"
     private const val CHARGING = "581"
+    private const val CAR_CLOCK = "567"
+
+    private const val MINUTES_PER_HOUR = 60
 }
