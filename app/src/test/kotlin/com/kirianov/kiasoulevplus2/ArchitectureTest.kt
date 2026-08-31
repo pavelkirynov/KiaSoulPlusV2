@@ -24,6 +24,7 @@ class ArchitectureTest {
         "tools.storage",
         "tools.probe",
         "tools.vehicle",
+        "tools.ml",
         "tools.format",
         "tools.frames",
     )

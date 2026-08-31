@@ -13,6 +13,8 @@ import com.kirianov.kiasoulevplus2.services.bluetooth.BluetoothBlock
 import com.kirianov.kiasoulevplus2.services.bluetooth.ElmBluetoothManager
 import com.kirianov.kiasoulevplus2.tools.battery.DecoderBlock
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
+import com.kirianov.kiasoulevplus2.tools.ml.FileMlStore
+import com.kirianov.kiasoulevplus2.tools.ml.MlBlock
 import com.kirianov.kiasoulevplus2.tools.probe.ProbeBlock
 import com.kirianov.kiasoulevplus2.tools.storage.SharedPreferencesCellStore
 import com.kirianov.kiasoulevplus2.tools.storage.StorageBlock
@@ -27,6 +29,7 @@ class AppBlocks(context: Context) {
     private val probe = ProbeBlock()
     private val vehicle = VehicleBlock()
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
+    private val prediction = MlBlock(FileMlStore(context.applicationContext))
 
     fun start(scope: CoroutineScope) {
         decoders.start(scope)
@@ -34,6 +37,7 @@ class AppBlocks(context: Context) {
         probe.start(scope)
         vehicle.start(scope)
         storage.start(scope)
+        prediction.start(scope)
         bluetooth.start(scope)
     }
 }

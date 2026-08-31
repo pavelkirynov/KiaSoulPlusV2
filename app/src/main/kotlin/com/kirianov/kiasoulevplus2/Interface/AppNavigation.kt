@@ -26,6 +26,8 @@ import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsViewModel
 import com.kirianov.kiasoulevplus2.Interface.screens.experiments.ProbeScreen
 import com.kirianov.kiasoulevplus2.Interface.screens.experiments.ProbeViewModel
 import com.kirianov.kiasoulevplus2.Interface.screens.main.MainScreen
+import com.kirianov.kiasoulevplus2.Interface.screens.prediction.PredictionScreen
+import com.kirianov.kiasoulevplus2.Interface.screens.prediction.PredictionViewModel
 
 @Composable
 fun AppNavigation() {
@@ -56,6 +58,8 @@ fun AppNavigation() {
             ) {
                 when (currentScreen) {
                     AppScreen.MAIN -> MainScreen()
+                    AppScreen.PREDICTION ->
+                        PredictionScreen(predictionViewModel = viewModel<PredictionViewModel>())
                     AppScreen.CELLS -> CellsScreen(cellsViewModel = viewModel<CellsViewModel>())
                     AppScreen.EXPERIMENTS -> ProbeScreen(probeViewModel = viewModel<ProbeViewModel>())
                     AppScreen.SETTINGS -> ScreenPlaceholder("Калібрування")

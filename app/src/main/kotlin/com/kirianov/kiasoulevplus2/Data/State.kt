@@ -23,6 +23,9 @@ data class State(
     /** Знімки лічильників за поїздку: їх веде блок обчислень. */
     val tripHistory: TripHistory = TripHistory(),
 
+    /** Прогноз залишку ходу і те, що встиг вивчити блок прогнозу. */
+    val ml: MlData = MlData(),
+
     /** Діапазон, за який рахувати витрату. Обирає користувач на екрані. */
     val consumptionWindow: ConsumptionWindow = ConsumptionWindow.Trip,
 
