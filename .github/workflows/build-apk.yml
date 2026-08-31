@@ -54,12 +54,27 @@ jobs:
         # Перевірка в шелі, а не в `if`: контекст secrets у step-level `if`
         # недоступний, а власний env кроку в його ж `if` ще не існує.
         run: |
-          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > app/debug.keystore
-            echo "Ключ підпису відновлено: оновлення стане поверх попередньої версії."
-          else
+          if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then
             echo "Секрета DEBUG_KEYSTORE_BASE64 немає — збірку буде підписано типовим"
             echo "ключем Gradle. Таку збірку доведеться ставити після видалення старої."
+            exit 0
+          fi
+
+          # tr прибирає переноси рядків і пробіли, які додає копіювання через буфер.
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '[:space:]' \
+            | base64 -d > app/debug.keystore 2>/dev/null || true
+
+          # Перевірка справжнім keytool. Неповний секрет дає валідний base64, але
+          # обрізане сховище, і тоді збірка падає аж на підписі з голим
+          # «EOFException», з якого причину не видно взагалі.
+          if keytool -list -keystore app/debug.keystore -storepass android >/dev/null 2>&1; then
+            echo "Ключ підпису відновлено ($(wc -c < app/debug.keystore) байт):"
+            echo "оновлення стане поверх попередньої версії."
+          else
+            rm -f app/debug.keystore
+            echo "::warning::DEBUG_KEYSTORE_BASE64 пошкоджений або неповний — APK буде"
+            echo "::warning::підписано типовим ключем Gradle. Найчастіша причина:"
+            echo "::warning::рядок base64 скопійовано не повністю. Перезаписати секрет."
           fi
 
       - name: Assemble
