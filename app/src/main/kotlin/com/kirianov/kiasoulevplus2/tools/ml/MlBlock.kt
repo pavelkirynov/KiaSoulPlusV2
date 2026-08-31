@@ -255,7 +255,12 @@ class MlBlock(
 
     private fun publish() {
         val vehicle = GeneralData.state.value.vehicle
-        val conditions = RangeEstimator.recentConditions(recent.toList())
+        // Середні умови — з останніх відрізків, а клімат — живий, просто з шини:
+        // пічку могли щойно ввімкнути, і прогноз має подорожчати одразу, а не за
+        // чверть години, коли вона всередниться у відрізках.
+        val conditions = RangeEstimator.recentConditions(recent.toList()).let { aggregated ->
+            climateShareOf(vehicle)?.let { aggregated.copy(climateShare = it) } ?: aggregated
+        }
         val prediction = socOf(vehicle)?.let { soc ->
             RangeEstimator.predict(consumption, capacity, quality, soc, conditions)
         }

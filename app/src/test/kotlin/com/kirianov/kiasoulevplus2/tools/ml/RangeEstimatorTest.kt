@@ -83,6 +83,59 @@ class RangeEstimatorTest {
         assertTrue("на морозі запас має бути помітно меншим", rangeAt(-8.0) < rangeAt(20.0) * 0.85)
     }
 
+    /**
+     * Вивчене про клімат мусить доходити до прогнозу. Це не самоочевидно: ознаку
+     * легко додати в навчання й забути в передбаченні — тоді взимку з увімкненою
+     * пічкою прогноз буде оптимістичним рівно на її ціну, і жоден тест навчання
+     * цього не помітить.
+     */
+    @Test
+    fun `a running heater shortens the range it predicts`() {
+        val car = VirtualCar()
+        val consumption = ConsumptionModel()
+
+        // Навчання: та сама погода, різний клімат, чесна частка з кадру 200.
+        val off = car.week(100, ambientTempC = 8.0).map { it.copy(climateShare = 0.0) }
+        val on = car.week(100, ambientTempC = 8.0, startAtMs = 2_000_000L).map { segment ->
+            val hours = segment.durationMs / 3_600_000.0
+            val total = segment.energyKwh + 3.0 * hours
+            segment.copy(energyKwh = total, tractionKwh = total, climateShare = 3.0 * hours / total)
+        }
+        (off + on).sortedBy { it.startedAtMs }.forEach(consumption::learn)
+
+        val capacity = CapacityModel()
+        fun range(share: Double?) = RangeEstimator.predict(
+            consumption, capacity, PredictionQuality(),
+            preciseSocPercent = 90.0,
+            recent = DriveConditions.steady(60.0, ambientTempC = 8.0, climateShare = share),
+        )!!
+
+        val heaterOff = range(0.0)
+        val heaterOn = range(0.3)
+
+        assertTrue(
+            "з пічкою запас мав скоротитися: ${heaterOn.rangeKm} проти ${heaterOff.rangeKm}",
+            heaterOn.rangeKm < heaterOff.rangeKm * 0.9,
+        )
+        // І сценарії теж мусять нести клімат із собою, а не вдавати літо.
+        assertTrue(
+            "сценарій 90 км/год має знати про пічку",
+            heaterOn.scenarios.first { it.speedKmh == 90.0 }.rangeKm <
+                heaterOff.scenarios.first { it.speedKmh == 90.0 }.rangeKm,
+        )
+    }
+
+    /** «Як їхали недавно» має нести і клімат: він частина цих умов. */
+    @Test
+    fun `recent conditions carry the climate along`() {
+        val car = VirtualCar()
+        val segments = car.week(20).map { it.copy(climateShare = 0.25) }
+
+        val conditions = RangeEstimator.recentConditions(segments)
+
+        assertEquals(0.25, conditions.climateShare ?: 0.0, 1e-9)
+    }
+
     /** Порожня батарея — не привід малювати кілометри. */
     @Test
     fun `an empty battery predicts nothing`() {

@@ -60,7 +60,14 @@ object RangeEstimator {
             whPerKm = whPerKm,
             measuredBand = measured != null,
             scenarios = SCENARIO_SPEEDS_KMH.map { speed ->
-                val steady = DriveConditions.steady(speed, recent.ambientTempC, recent.batteryTempC)
+                // Клімат їде разом з водієм: якщо пічка працює зараз, вона працюватиме
+                // і на дев'яноста. Сценарій змінює швидкість, а не погоду в салоні.
+                val steady = DriveConditions.steady(
+                    speed,
+                    recent.ambientTempC,
+                    recent.batteryTempC,
+                    recent.climateShare,
+                )
                 val scenarioWhPerKm = consumption.predictWhPerKm(steady)
                 RangeScenario(
                     speedKmh = speed,
@@ -115,6 +122,8 @@ object RangeEstimator {
         var ambientWeight = 0.0
         var battery = 0.0
         var batteryWeight = 0.0
+        var climate = 0.0
+        var climateWeight = 0.0
 
         moving.forEach { segment ->
             val w = segment.distanceKm
@@ -130,6 +139,10 @@ object RangeEstimator {
                 battery += it * w
                 batteryWeight += w
             }
+            segment.climateShare?.let {
+                climate += it * w
+                climateWeight += w
+            }
         }
 
         if (weight <= 0.0) return DriveConditions.steady(fallbackSpeedKmh)
@@ -140,6 +153,7 @@ object RangeEstimator {
             speedVarianceMps = variance / weight,
             ambientTempC = if (ambientWeight > 0.0) ambient / ambientWeight else null,
             batteryTempC = if (batteryWeight > 0.0) battery / batteryWeight else null,
+            climateShare = if (climateWeight > 0.0) climate / climateWeight else null,
         )
     }
 
