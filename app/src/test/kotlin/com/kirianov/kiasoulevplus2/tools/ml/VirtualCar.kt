@@ -14,11 +14,18 @@ import kotlin.random.Random
  */
 class VirtualCar(
     val auxKw: Double = 0.85,
-    val rollingKw: Double = 2.10,
-    val aeroKw: Double = 0.75,
-    val heatingKw: Double = 1.60,
+    val rollingKw: Double = 2.20,
+    val aeroKw: Double = 0.62,
+    val heatingKw: Double = 2.00,
+    /** Корисна ємність перепакованого пакета, кВт·год. */
+    val capacityKwh: Double = 45.0,
     private val seed: Int = 42,
 ) {
+
+    /** Запас ходу на повному пакеті за сталої швидкості, км. */
+    fun trueRangeKm(speedKmh: Double, ambientTempC: Double = 20.0): Double =
+        capacityKwh * 1000.0 / trueWhPerKm(speedKmh, ambientTempC)
+
 
     private val random = Random(seed)
 

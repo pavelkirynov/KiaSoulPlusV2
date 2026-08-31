@@ -252,6 +252,7 @@ class MlBlock(
                     blocks = quality.blocks,
                     usableCapacityKwh = capacity.usableCapacityKwh,
                     capacityVersusNominalPercent = capacity.capacityVersusNominalPercent,
+                    timesLargerThanOriginal = capacity.timesLargerThanOriginal,
                     floorSocPercent = capacity.floorSocPercent,
                     ceilingSocPercent = capacity.ceilingSocPercent,
                     auxPowerKw = consumption.auxPowerKw,

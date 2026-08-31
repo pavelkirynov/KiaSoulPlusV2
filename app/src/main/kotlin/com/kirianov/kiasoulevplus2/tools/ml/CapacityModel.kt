@@ -79,17 +79,20 @@ class CapacityModel(
         get() = energyBetween(floorSocPercent, ceilingSocPercent)
 
     /**
-     * Вивчена ємність відносно паспортної, %.
-     *
-     * Читати обережно. SOC у BMS Hyundai/Kia, найпевніше, нормований на **поточну**
-     * ємність пакета, а не на паспортну. Якщо так, то кВт·год на відсоток із віком
-     * майже не змінюється, і це число роками стоятиме близько сотні — тобто воно
-     * чесно годиться для перерахунку SOC у кіловат-години (а це саме те, що треба
-     * запасу ходу) і не годиться як показник зносу. Справжній SOH лежить у окремому
-     * запиті 21 05; знайти його можна екраном «Експерименти».
+     * Вивчена ємність відносно очікуваної від перепаковки, %. Сто означає «пакет
+     * саме такий, як думали»; менше — комірки віддають менше, ніж заявлено.
      */
     val capacityVersusNominalPercent: Double
         get() = usableCapacityKwh / NOMINAL_CAPACITY_KWH * 100.0
+
+    /**
+     * У скільки разів пакет більший за рідний, з паспорта якого BMS досі рахує
+     * відсотки. Це і є множник, на який systematically помиляється приладова панель:
+     * коли вона показує «десять відсотків», енергії лишилося приблизно вдвічі більше
+     * за те, на що вона розрахована.
+     */
+    val timesLargerThanOriginal: Double
+        get() = usableCapacityKwh / Vehicle.ORIGINAL_CAPACITY_KWH
 
     /** Відносна невизначеність ємності — входить в інтервал запасу ходу. */
     val relativeSigma: Double
@@ -202,8 +205,8 @@ class CapacityModel(
     }
 
     companion object {
-        /** Паспортна ємність Soul EV 27 кВт·год: точка відліку і апріорне значення. */
-        const val NOMINAL_CAPACITY_KWH = 27.0
+        /** Апріорна корисна ємність перепакованого пакета. Див. `Vehicle`. */
+        const val NOMINAL_CAPACITY_KWH = Vehicle.USABLE_CAPACITY_KWH
 
         /**
          * Менший розмах SOC не годиться: точний SOC приходить раз на ~хвилину і сам є
@@ -224,8 +227,13 @@ class CapacityModel(
 
         const val DEFAULT_FLOOR_PERCENT = 4.0
         const val DEFAULT_CEILING_PERCENT = 99.0
-        const val MAX_FLOOR_PERCENT = 15.0
-        const val MIN_WINDOW_PERCENT = 50.0
+        /**
+         * Межі навмисно широкі. На перепакованій батареї BMS рахує шкалу за паспортом
+         * рідного пакета, тож її нуль і сотня можуть стояти геть не там, де в нових
+         * комірок. Вузький затиск тут воював би з тим, що модель щойно виміряла.
+         */
+        const val MAX_FLOOR_PERCENT = 25.0
+        const val MIN_WINDOW_PERCENT = 40.0
         const val MIN_SLOPE = 0.5
 
         const val DEFAULT_RELATIVE_SIGMA = 0.25

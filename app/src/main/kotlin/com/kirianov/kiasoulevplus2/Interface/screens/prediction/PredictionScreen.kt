@@ -151,8 +151,9 @@ private fun BatteryCard(model: MlModelInfo, prediction: MlPrediction?) {
         ) {
             Text(text = "Батарея", fontSize = 18.sp)
 
-            MetricRow("Корисна ємність", formatOrDash(model.usableCapacityKwh, 1, "кВт·год"))
-            MetricRow("Від паспортної", formatOrDash(model.capacityVersusNominalPercent, 0, "%"))
+            MetricRow("Виміряна ємність", formatOrDash(model.usableCapacityKwh, 1, "кВт·год"))
+            MetricRow("Від очікуваної", formatOrDash(model.capacityVersusNominalPercent, 0, "%"))
+            MetricRow("Більше за рідний пакет", formatOrDash(model.timesLargerThanOriginal, 2, "×"))
             MetricRow("Дно шкали", formatOrDash(model.floorSocPercent, 1, "% SOC"))
             MetricRow("Стеля шкали", formatOrDash(model.ceilingSocPercent, 1, "% SOC"))
             if (prediction != null) {
@@ -160,10 +161,18 @@ private fun BatteryCard(model: MlModelInfo, prediction: MlPrediction?) {
             }
 
             Text(
-                text = "«Від паспортної» — не знос батареї: SOC у BMS, найпевніше, сам " +
-                    "порахований від поточної ємності. Для перерахунку відсотків у " +
-                    "кіловат-години це число правильне, а справжній SOH лежить в " +
-                    "окремому запиті 21 05 — його можна пошукати на «Експериментах».",
+                text = "Батарея перепакована, а BMS рахує відсоток за паспортом рідного " +
+                    "пакета — звідси й розбіжності з панеллю. Тут ємність не взята з " +
+                    "даташита, а виміряна: із пар «скільки з'їхав SOC / скільки на це " +
+                    "пішло енергії».",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Text(
+                text = "Важливо про відсоток: він майже збігається з панельним і розходиться " +
+                    "лише на одиниці — бо і той, і той лінійно розтягують ту саму шкалу. " +
+                    "У рази панель помиляється не у відсотках, а в кіловат-годинах і " +
+                    "кілометрах, і саме їх це виправляє.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -285,7 +294,7 @@ private fun ActionsCard(
 
 private fun confidenceText(confidence: MlConfidence, measuredBand: Boolean): String {
     val base = when (confidence) {
-        MlConfidence.None -> "Модель ще нічого не бачила: показано фізичне наближення для Soul EV 27 кВт·год"
+        MlConfidence.None -> "Модель ще нічого не бачила: показано фізичне наближення за розмірами авто"
         MlConfidence.Learning -> "Модель учиться: числу вже можна вірити, але межі широкі"
         MlConfidence.Fair -> "Модель навчена: тримайтеся нижньої межі, і не помилитеся"
         MlConfidence.Good -> "Модель стабільна: інтервал вузький, промахи малі"

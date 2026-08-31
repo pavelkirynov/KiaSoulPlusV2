@@ -18,7 +18,7 @@ class RangeEstimatorTest {
     @Test
     fun `predicts the range a known car will actually cover`() {
         val car = VirtualCar()
-        val capacityKwh = 24.0
+        val capacityKwh = 45.0
         val (consumption, capacity, quality) = trainedOn(car, capacityKwh)
 
         val prediction = RangeEstimator.predict(
@@ -48,7 +48,7 @@ class RangeEstimatorTest {
     @Test
     fun `driving faster gets you less far`() {
         val car = VirtualCar()
-        val (consumption, capacity, quality) = trainedOn(car, 24.0)
+        val (consumption, capacity, quality) = trainedOn(car, 45.0)
 
         val prediction = RangeEstimator.predict(
             consumption, capacity, quality,
@@ -121,7 +121,7 @@ class RangeEstimatorTest {
     @Test
     fun `the interval narrows once there is data`() {
         val car = VirtualCar()
-        val (consumption, capacity, quality) = trainedOn(car, 24.0)
+        val (consumption, capacity, quality) = trainedOn(car, 45.0)
 
         val prediction = RangeEstimator.predict(
             consumption, capacity, quality,
@@ -169,7 +169,7 @@ class RangeEstimatorTest {
             if (predicted != null) quality.observe(segment, predicted)
         }
 
-        listOf(90.0 to 55.0, 80.0 to 40.0, 95.0 to 50.0, 70.0 to 30.0, 85.0 to 45.0, 60.0 to 20.0)
+        listOf(90.0 to 55.0, 80.0 to 40.0, 95.0 to 50.0, 70.0 to 30.0, 85.0 to 45.0, 60.0 to 20.0, 100.0 to 35.0, 75.0 to 15.0)
             .forEachIndexed { index, (from, to) ->
                 capacity.learn(from, to, capacityKwh * (from - to) / 100.0, atMs = index * 86_400_000L)
             }
