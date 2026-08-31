@@ -30,6 +30,7 @@ package com.kirianov.kiasoulevplus2.tools.ml
 
 import kotlin.math.abs
 import kotlin.math.exp
+import kotlin.math.sign
 import kotlin.math.sqrt
 
 class OnlineRegression(
@@ -111,29 +112,50 @@ class OnlineRegression(
      * Спершу рахується залишок за **поточними** коефіцієнтами — це і є перевірка
      * «спитали до того, як показали відповідь», і саме з неї береться помилка моделі.
      *
-     * Повертає false, якщо спостереження відкинуте як викид: один зіпсований кадр
-     * CAN не має права зсунути модель.
+     * Дике значення не відкидається, а **обрізається** (винзоризація Хьюбера):
+     * рядок ознак лишається в матриці, але потягнути відгук далі, ніж на
+     * [OUTLIER_SIGMA] розкидів, спостереження не може.
+     *
+     * Різниця не косметична. Відкидання прибирає рядок цілком, і прибирає
+     * **вибірково**: коли в авто змінюється опір коченню, найбільші розбіжності —
+     * на високій швидкості, тобто ворота відсіюють саме ті відрізки, які єдині й
+     * могли б цю зміну показати. Модель тоді повзе до нової правди роками. Обрізання
+     * ж не втрачає жодного відрізка: кожен вносить свою геометрію, а вплив
+     * зіпсованого обмежений.
+     *
+     * Розкид при цьому рахується за **справжнім** залишком, а не за обрізаним. Тому
+     * стійка розбіжність сама розширює межу обрізання, ворота відчиняються, і модель
+     * доганяє зміну тим швидше, чим вона більша.
      */
     fun observe(x: DoubleArray, y: Double, weight: Double, atMs: Long): Boolean {
         require(x.size == size) { "ознак має бути $size" }
         if (weight <= 0.0 || !weight.isFinite() || !y.isFinite()) return false
         if (x.any { !it.isFinite() }) return false
 
-        // Спершу старіння, і лише потім перевірка на викид. Порядок тут важливий:
-        // після довгої перерви накопичена впевненість мусить осісти, інакше модель
-        // оголосила б викидами саме ті спостереження, які принесли зміну — нові шини,
-        // іншу пору року, іншого водія — і назавжди замкнулася б на застарілому.
+        // Спершу старіння, і лише потім усе інше: після довгої перерви накопичена
+        // впевненість мусить осісти, інакше межа обрізання лишалася б вузькою саме
+        // тоді, коли світ найімовірніше змінився.
         decayTo(atMs)
 
-        val residual = y - predict(x)
+        val predicted = predict(x)
+        val residual = y - predicted
 
-        val sigma = residualSigma
-        val trusted = observations >= OUTLIER_GUARD_AFTER && sigma > 0.0
-        if (trusted && abs(residual) > OUTLIER_SIGMA * sigma) return false
+        // Розкид не може бути меншим за оголошений типовий: інакше на дуже рівних
+        // даних межа обрізання схлопнулась би майже в нуль, і модель проголосила б
+        // упевненість, якої не буває, — а тоді будь-яка справжня зміна виглядала б
+        // викидом і пробивалася б крізь обрізання роками.
+        val sigma = maxOf(residualSigma, noiseSigma * MIN_SIGMA_SHARE)
+        val limit = OUTLIER_SIGMA * sigma
+        val trusted = observations >= OUTLIER_GUARD_AFTER
+        val target = if (trusted && abs(residual) > limit) {
+            predicted + limit * sign(residual)
+        } else {
+            y
+        }
 
         for (row in 0 until size) {
             val weighted = weight * x[row]
-            moment[row] += weighted * y
+            moment[row] += weighted * target
             for (column in 0 until size) {
                 gram[row * size + column] += weighted * x[column]
             }
@@ -258,8 +280,11 @@ class OnlineRegression(
         /** Скільки спостережень спершу приймати беззастережно, щоб було з чим порівнювати. */
         const val OUTLIER_GUARD_AFTER = 12.0
 
-        /** За скількома розкидами вважати спостереження зіпсованим. */
+        /** Далі за скільки розкидів спостереження вже не пускають тягнути модель. */
         const val OUTLIER_SIGMA = 4.0
+
+        /** Нижня межа розкиду як частка оголошеного типового шуму. */
+        const val MIN_SIGMA_SHARE = 0.5
     }
 }
 

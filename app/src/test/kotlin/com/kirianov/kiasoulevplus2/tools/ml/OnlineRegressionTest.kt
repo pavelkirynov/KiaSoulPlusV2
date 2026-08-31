@@ -61,9 +61,15 @@ class OnlineRegressionTest {
         assertTrue(regression.readiness(0) > 0.8)
     }
 
-    /** Викид відкидається, а не вчить модель неправди. */
+    /**
+     * Викид обрізається, а не вчить модель неправди.
+     *
+     * Саме обрізається, а не відкидається. Відкидання прибирало б рядок ознак
+     * цілком, і прибирало б вибірково — насамперед там, де розбіжність найбільша.
+     * Для стійкої зміни це означало б відбір проти найінформативніших даних.
+     */
     @Test
-    fun `a wild observation is refused`() {
+    fun `a wild observation is capped, not obeyed`() {
         val regression = regression(prior = doubleArrayOf(0.0, 0.0), sigma = doubleArrayOf(10.0, 10.0))
         repeat(40) { index ->
             val x = index % 5 + 1.0
@@ -71,13 +77,12 @@ class OnlineRegressionTest {
         }
 
         val before = regression.predict(doubleArrayOf(1.0, 3.0))
-        val accepted = regression.observe(doubleArrayOf(1.0, 3.0), 900.0, weight = 1.0, atMs = 99_000L)
+        regression.observe(doubleArrayOf(1.0, 3.0), 900.0, weight = 1.0, atMs = 99_000L)
 
-        assertFalse(accepted)
-        // Час усе одно минув, тож накопичене трохи постаріло — але дикого значення
-        // модель не всмоктала: передбачення лишилося там, де було.
+        // Дике значення в 150 разів більше за правду зрушило передбачення
+        // на частки відсотка — саме цього від обрізання й чекають.
         assertEquals(6.0, before, 0.05)
-        assertEquals(before, regression.predict(doubleArrayOf(1.0, 3.0)), 1e-6)
+        assertEquals(before, regression.predict(doubleArrayOf(1.0, 3.0)), before * 0.05)
     }
 
     /** Збережене й підняте з файлу має давати ті самі коефіцієнти. */

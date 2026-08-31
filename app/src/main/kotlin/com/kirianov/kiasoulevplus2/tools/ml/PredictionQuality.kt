@@ -59,9 +59,29 @@ class NoiseModel(
     fun sigmaFor(meanSpeedMps: Double, distanceMeters: Double): Double =
         sqrt(varianceFor(meanSpeedMps, distanceMeters))
 
-    /** Вага відрізка у навчанні: обернена до його ж очікуваної дисперсії. */
-    fun weightFor(meanSpeedMps: Double, distanceMeters: Double): Double =
-        1.0 / varianceFor(meanSpeedMps, distanceMeters)
+    /**
+     * Вага відрізка у навчанні. Рахується за **сталими** коефіцієнтами, а не за
+     * вивченими, і це принципово.
+     *
+     * Спокуса взяти сюди вивчену дисперсію велика — це ж класичне зважування,
+     * обернене до дисперсії. Але вивчена дисперсія росте на промахах моделі, і
+     * виходить замкнене коло: у авто змінилися шини, модель почала промахуватися,
+     * дисперсія зросла, вага нових відрізків упала вчетверо — і модель заглушила
+     * рівно ті дані, які єдині й могли її переучити. У вимірюванні це видно прямо:
+     * старі відрізки важили 3.2, нові — 0.74, і нова правда пробивалася роками.
+     *
+     * Тому вага залежить лише від геометрії відрізка: довгий спокійний важить більше
+     * за короткий швидкий, бо в ньому більше незалежних вимірів і менше невизначеності
+     * від невидимого рельєфу. Це властивість самого відрізка, і модель на неї не
+     * впливає ніяк.
+     *
+     * Вивчена ж дисперсія лишається там, де вона доречна, — у ширині інтервалу.
+     */
+    fun weightFor(meanSpeedMps: Double, distanceMeters: Double): Double {
+        val grade = if (distanceMeters > 0.0) meanSpeedMps * meanSpeedMps / distanceMeters else 0.0
+        val structural = PRIOR_BASE_VARIANCE + PRIOR_GRADE_VARIANCE * grade
+        return (REFERENCE_VARIANCE / structural).coerceIn(MIN_WEIGHT, MAX_WEIGHT)
+    }
 
     /** Наскільки горбисто їздить цей водій, метри набору висоти на корінь із кілометра. */
     val terrainRoughness: Double
@@ -92,6 +112,13 @@ class NoiseModel(
         const val PRIOR_GRADE_VARIANCE = 32.0
 
         const val MIN_VARIANCE = 0.05
+
+        /** Дисперсія типового відрізка: відносно неї й міряються ваги. */
+        const val REFERENCE_VARIANCE = 2.0
+
+        /** Вага гуляє в рази, а не в порядки: жоден відрізок не можна знеголосити. */
+        const val MIN_WEIGHT = 0.25
+        const val MAX_WEIGHT = 4.0
 
         private const val METRES_PER_KWH_CLIMB = 5.0e-3
         private const val SECONDS_PER_HOUR = 3600.0

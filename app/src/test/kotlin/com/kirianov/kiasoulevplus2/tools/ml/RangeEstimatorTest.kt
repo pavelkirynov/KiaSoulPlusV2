@@ -162,7 +162,9 @@ class RangeEstimatorTest {
         val capacity = CapacityModel()
         val quality = PredictionQuality()
 
-        car.week(segments = 140).forEach { segment ->
+        // З шумом і рельєфом: на бездоганно чистих даних інтервал вийшов би
+        // неправдоподібно вузьким, бо промахуватися моделі просто нема на чому.
+        car.week(segments = 140, hillNoiseKw = 0.5, measurementNoiseKw = 0.25).forEach { segment ->
             val predicted = consumption.learn(segment)
             if (predicted != null) quality.observe(segment, predicted)
         }

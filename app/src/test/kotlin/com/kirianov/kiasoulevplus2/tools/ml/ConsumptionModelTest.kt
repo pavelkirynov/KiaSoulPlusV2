@@ -32,13 +32,25 @@ class ConsumptionModelTest {
         }
     }
 
-    /** Вивчений постійний відбір має збігтися з тим, що закладали. */
+    /**
+     * Вивчений постійний відбір має збігтися з тим, що закладали.
+     *
+     * У даних навмисно є затори. Без них відбір із самої лише їзди не виділяється:
+     * на швидкостях від 25 км/год і вище він невідрізнимий від опору коченню, і
+     * чесна відповідь моделі — лишитися при фізиці. Саме тому повільні відрізки
+     * тут не сміття, а найцінніше, що є.
+     */
     @Test
     fun `learns the constant draw of the car`() {
         val car = VirtualCar(auxKw = 1.20)
         val model = ConsumptionModel()
 
         car.week(segments = 150).forEach(model::learn)
+        repeat(50) { index ->
+            model.learn(
+                car.segment(speedKmh = 6.0, distanceKm = 0.4, atMs = 2_000_000L + index * 600_000L),
+            )
+        }
 
         assertEquals(1.20, model.auxPowerKw, 0.25)
     }
@@ -80,9 +92,14 @@ class ConsumptionModelTest {
     /**
      * Одне зіпсоване читання CAN не має права зсунути модель: інакше досить однієї
      * поганої секунди на шині, щоб запас ходу поїхав.
+     *
+     * «Не має права зсунути» тут не означає «відкидається». Дике значення
+     * обрізається: рядок ознак лишається в матриці, але потягнути відгук далі
+     * кількох розкидів воно не може. Тому зсув не нульовий, а мізерний — і, на
+     * відміну від відкидання, це не створює відбору проти незручних даних.
      */
     @Test
-    fun `a single broken segment does not move the model`() {
+    fun `a single broken segment barely moves the model`() {
         val car = VirtualCar()
         val model = ConsumptionModel()
         car.week(segments = 120).forEach(model::learn)
@@ -92,7 +109,7 @@ class ConsumptionModelTest {
         model.learn(broken)
         val after = model.predictWhPerKm(DriveConditions.steady(60.0))
 
-        assertEquals("викид мав бути відкинутий", before, after, 1e-9)
+        assertEquals("вплив викиду мав лишитися мізерним", before, after, before * 0.02)
     }
 
     /** Заряджання — не їзда: у ньому нема руху, і вчитися витраті на ньому нема чого. */
