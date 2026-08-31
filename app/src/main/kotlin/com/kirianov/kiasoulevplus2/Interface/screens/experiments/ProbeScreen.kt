@@ -39,7 +39,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kirianov.kiasoulevplus2.Data.MonitorCapture
 import com.kirianov.kiasoulevplus2.Data.ProbeResult
+import com.kirianov.kiasoulevplus2.Data.VehicleData
+import com.kirianov.kiasoulevplus2.tools.frames.MonitorLineParser
 
 /** Команди, з яких варто почати пошук. Усі — лише читання. */
 private val presets = listOf(
@@ -147,8 +150,71 @@ fun ProbeScreen(probeViewModel: ProbeViewModel) {
             Text(text = "Ще нічого не надсилали.", style = MaterialTheme.typography.bodyMedium)
         }
         state.probe.results.forEach { ResultCard(it) }
+
+        BroadcastCard(monitor = state.can.monitor, vehicle = state.vehicle)
     }
 }
+
+/**
+ * Сирі рядки останнього вікна монітора поруч із тим, що з них вийшло.
+ *
+ * Це головний спосіб звірити пробіг зі щитком: якщо число не збігається,
+ * видно і кадр, з якого воно рахувалося, і чи взагалі кадр 4F0 доїхав.
+ */
+@Composable
+private fun BroadcastCard(monitor: MonitorCapture?, vehicle: VehicleData) {
+    Text(text = "Широкомовні кадри", style = MaterialTheme.typography.titleSmall)
+
+    if (monitor == null) {
+        Text(
+            text = "Шину ще не слухали. Кадри знімаються раз на кілька циклів опитування.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        return
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = if (vehicle.hasOdometer) {
+                    "Пробіг з кадру 4F0: ${vehicle.odometerKm} км"
+                } else {
+                    "Кадр 4F0 ще не розібрано"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            // Показуються ВСІ ID, а не лише відомі: саме так на екрані знаходяться
+            // нові кадри — наприклад лічильники поїздок A і B, яких ще немає в декодері.
+            val frames = monitor.lines
+                .mapNotNull(MonitorLineParser::parse)
+                .distinctBy { it.id }
+                .sortedBy { it.id }
+
+            MonoBlock(
+                title = "Кадри на шині: ${frames.size} різних ID у ${monitor.lines.size} рядках",
+                text = frames.take(FRAMES_SHOWN).joinToString("\n") { frame ->
+                    frame.id + "  " + frame.bytes.joinToString(" ") { "%02X".format(it) }
+                }.ifEmpty { "жодного кадру не розібрано" },
+            )
+
+            MonoBlock(
+                title = "Сирі рядки, перші $RAW_LINES_SHOWN",
+                text = monitor.lines.take(RAW_LINES_SHOWN).joinToString("\n")
+                    .ifEmpty { "порожньо" },
+            )
+        }
+    }
+}
+
+/** Більше рядків на екрані все одно не прочитати, а гальмує помітно. */
+private const val RAW_LINES_SHOWN = 20
+
+/** Скільки різних ID показувати: на шині їх десятки. */
+private const val FRAMES_SHOWN = 25
 
 @Composable
 private fun ResultCard(result: ProbeResult) {
