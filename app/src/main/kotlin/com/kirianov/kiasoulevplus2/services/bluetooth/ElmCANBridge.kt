@@ -83,43 +83,65 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
     /**
      * Вікно режиму монітора: збирає сирі рядки широкомовних кадрів протягом [windowMs].
      *
+     * ЧОМУ ФІЛЬТР ОБОВ'ЯЗКОВИЙ. Без «AT CRA <id>» адаптер за півсекунди захлинається
+     * усім трафіком шини й віддає «BUFFER FULL», а до того — кадри навперемішки,
+     * обрізані посередині. Тому за одне вікно слухаємо рівно один [filterId].
+     *
+     * ЧОМУ H1 І CAF0. З типовими для запит-відповіді налаштуваннями монітор віддає
+     * кадри БЕЗ CAN ID (H0) і дописує до них службові індекси «0:», «1:» ISO-TP
+     * (CAF1). Саме так і виглядали перші зняті вікна: суцільні дані без ID.
+     *
      * Виконується під тим самим блокуванням, що й звичайні запити: монітор і
      * запит-відповідь на одному сокеті несумісні.
      *
-     * Вихід із монітора виконується ЗАВЖДИ, навіть при помилці. Якщо не надіслати
-     * пробіл і не добитися промпта через AT AR, адаптер лишається в моніторі — і всі
-     * подальші запити 22 xx перестають працювати до перепідключення.
+     * Вихід із монітора виконується ЗАВЖДИ, навіть при помилці: інакше адаптер
+     * лишається в моніторі й усі подальші запити 21/22 не працюють до перепідключення.
      */
-    suspend fun monitorBroadcast(windowMs: Long): List<String> = busMutex.withLock {
+    suspend fun monitorBroadcast(windowMs: Long, filterId: String): List<String> = busMutex.withLock {
         if (!isInitialized) initUnlocked()
 
-        val lines = mutableListOf<String>()
+        val buffer = StringBuilder()
         try {
             adapter.flushInput()
+            adapter.sendCommand("AT CRA $filterId")
+            adapter.sendCommand("AT H1")
+            adapter.sendCommand("AT CAF0")
             adapter.writeRaw("AT MA\r")
 
-            // Вікно міряється справжнім годинником, а не сумою таймаутів: рядок
-            // приходить швидше за таймаут, і сума обрізала б вікно надто рано.
+            // Вікно міряється справжнім годинником, а не сумою таймаутів.
             val deadline = System.currentTimeMillis() + windowMs
-            var silentReads = 0
-            while (System.currentTimeMillis() < deadline && silentReads < MONITOR_SILENT_READS) {
-                val line = adapter.readLine(MONITOR_LINE_TIMEOUT_MS)
-                if (line.isNullOrBlank()) {
-                    silentReads++
+            var silentPolls = 0
+            while (System.currentTimeMillis() < deadline && silentPolls < MONITOR_SILENT_POLLS) {
+                val chunk = adapter.readAvailable()
+                if (chunk.isEmpty()) {
+                    silentPolls++
+                    delay(MONITOR_POLL_MS)
                 } else {
-                    silentReads = 0
-                    lines += line
+                    silentPolls = 0
+                    buffer.append(chunk)
+                    // Після переповнення адаптер сам зупиняє монітор: далі буде сміття.
+                    if (buffer.contains(BUFFER_FULL)) break
                 }
             }
         } finally {
             leaveMonitor()
         }
-        return@withLock lines
+        return@withLock splitCompleteLines(buffer.toString())
     }
 
     /**
-     * Пробіл зупиняє AT MA, далі треба дочекатися промпта. Без цього адаптер
-     * лишається в моніторі назавжди.
+     * Ріже буфер на рядки й ВІДКИДАЄ незавершений хвіст: якщо вікно закінчилося
+     * посеред кадру, половина кадру виглядала б як повний і дала б зсунуті байти.
+     */
+    private fun splitCompleteLines(buffer: String): List<String> {
+        val lines = buffer.split('\r', '\n')
+        val complete = if (buffer.endsWith("\r") || buffer.endsWith("\n")) lines else lines.dropLast(1)
+        return complete.map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    /**
+     * Пробіл зупиняє AT MA, далі треба дочекатися промпта, зняти фільтр і повернути
+     * H0/CAF1 — інакше звичайні запити почнуть приходити з чужим форматом.
      */
     private suspend fun leaveMonitor() {
         runCatching { adapter.writeRaw(" ") }
@@ -130,8 +152,13 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
             if (!answer.isNullOrBlank()) break
         }
 
-        // Знімаємо можливий фільтр, щоб він не вплинув на наступні запити.
-        runCatching { adapter.sendCommand("AT CRA") }
+        // Якщо відкотити налаштування не вдалося, адаптер лишився з H1/CAF0 — тоді
+        // звичайні відповіді прийдуть із заголовками, і декодер побачить сміття.
+        // Дешевше змусити повну переініціалізацію, ніж потім шукати причину.
+        val restored = listOf("AT CRA", "AT H0", "AT CAF1").all { command ->
+            runCatching { adapter.sendCommand(command) }.isSuccess
+        }
+        if (!restored) isInitialized = false
     }
 
     fun reset() {
@@ -145,16 +172,19 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
         const val RESET_DELAY_MS = 1000L
         const val PROTOCOL_DELAY_MS = 200L
 
-        /** Скільки чекати на один рядок у моніторі: кадри йдуть щільно. */
-        const val MONITOR_LINE_TIMEOUT_MS = 60L
+        /** Пауза між читаннями буфера, коли адаптер мовчить. */
+        const val MONITOR_POLL_MS = 20L
 
         /** Скільки разів добиватися промпта після виходу з монітора. */
         const val MONITOR_EXIT_ATTEMPTS = 5
 
         /**
-         * Скільки порожніх читань підряд вважати «шина молчить».
-         * При вимкненому зажиганні широкомовних кадрів немає, і чекати все вікно немає сенсу.
+         * Скільки порожніх читань підряд вважати «шина мовчить».
+         * При вимкненому запалюванні широкомовних кадрів немає, і чекати все вікно немає сенсу.
          */
-        const val MONITOR_SILENT_READS = 5
+        const val MONITOR_SILENT_POLLS = 15
+
+        /** Адаптер сам зупиняє монітор, коли не встигає віддавати кадри. */
+        const val BUFFER_FULL = "BUFFER FULL"
     }
 }

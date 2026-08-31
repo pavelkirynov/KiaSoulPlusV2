@@ -190,12 +190,13 @@ private fun BroadcastCard(monitor: MonitorCapture?, vehicle: VehicleData) {
             // Показуються ВСІ ID, а не лише відомі: саме так на екрані знаходяться
             // нові кадри — наприклад лічильники поїздок A і B, яких ще немає в декодері.
             val frames = monitor.lines
-                .mapNotNull(MonitorLineParser::parse)
+                .mapNotNull { MonitorLineParser.parse(it, monitor.filterId) }
                 .distinctBy { it.id }
                 .sortedBy { it.id }
 
             MonoBlock(
-                title = "Кадри на шині: ${frames.size} різних ID у ${monitor.lines.size} рядках",
+                title = "Фільтр ${monitor.filterId}: " +
+                    "${frames.size} різних ID у ${monitor.lines.size} рядках",
                 text = frames.take(FRAMES_SHOWN).joinToString("\n") { frame ->
                     frame.id + "  " + frame.bytes.joinToString(" ") { "%02X".format(it) }
                 }.ifEmpty { "жодного кадру не розібрано" },

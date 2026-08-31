@@ -25,7 +25,7 @@ class VehicleBlock {
             .distinctUntilChanged()
             .onEach { capture ->
                 val frames = capture.lines
-                    .mapNotNull(MonitorLineParser::parse)
+                    .mapNotNull { MonitorLineParser.parse(it, capture.filterId) }
                     .filter { it.id in BroadcastDecoder.KNOWN_IDS }
 
                 if (frames.isEmpty()) return@onEach

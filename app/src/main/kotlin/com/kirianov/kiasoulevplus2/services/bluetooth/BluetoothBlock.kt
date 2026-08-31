@@ -155,6 +155,9 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
 
     private var pollTick = 0L
 
+    /** Номер вікна монітора: за ним обирається наступний фільтр із черги. */
+    private var monitorWindow = 0L
+
     private suspend fun pollOnce() {
         val inputBms = GeneralData.state.value.inputBms
         val header = inputBms.customHeader.ifEmpty { BmsCommands.HEADER_BMS }
@@ -186,15 +189,20 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
      * з'єднання: витрата в кВт·год рахується й без цих кадрів.
      */
     private suspend fun captureBroadcast() {
+        // Один ID за вікно: без фільтра адаптер захлинається трафіком шини й віддає
+        // «BUFFER FULL» замість кадрів. 4F0 стоїть через один, бо пробіг і швидкість
+        // потрібні для витрати на 100 км, а решта змінюється повільно.
+        val filterId = MONITOR_ROTATION[(monitorWindow++ % MONITOR_ROTATION.size).toInt()]
+
         val lines = try {
-            canBridge.monitorBroadcast(MONITOR_WINDOW_MS)
+            canBridge.monitorBroadcast(MONITOR_WINDOW_MS, filterId)
         } catch (e: IOException) {
             GeneralData.updateDebugInfo(
                 "Не вдалося послухати шину: ${e.localizedMessage ?: "немає відповіді"}",
             )
             return
         }
-        if (lines.isNotEmpty()) GeneralData.publishMonitorLines(lines)
+        if (lines.isNotEmpty()) GeneralData.publishMonitorLines(lines, filterId)
     }
 
     private suspend fun readCellFrames(header: String, commands: List<String>): List<String> =
@@ -242,7 +250,10 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         /** Одне вікно монітора на кожні стільки циклів опитування. */
         const val MONITOR_EVERY_N_POLLS = 4L
 
-        /** Скільки слухати шину за одне вікно: кадри 4F0 і 594 йдуть часто. */
+        /** Скільки слухати шину за одне вікно: з фільтром кадр приходить кілька разів. */
         const val MONITOR_WINDOW_MS = 700L
+
+        /** Черга фільтрів «AT CRA» по вікнах. Пробіг питається вдвічі частіше за решту. */
+        val MONITOR_ROTATION = listOf("4F0", "594", "4F0", "598", "4F0", "200", "4F0", "653", "4F0", "581")
     }
 }

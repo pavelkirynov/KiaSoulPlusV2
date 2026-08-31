@@ -106,7 +106,7 @@ class GeneralDataTest {
     @Test
     fun `monitor lines are kept apart from the battery frames`() {
         GeneralData.publishBatteryFrames(listOf("21 01"), listOf("61 01 AA"))
-        GeneralData.publishMonitorLines(listOf("4F0 00 00 00 00 00 B3 C1 1C"))
+        GeneralData.publishMonitorLines(listOf("4F0 00 00 00 00 00 B3 C1 1C"), "4F0")
 
         val can = GeneralData.state.value.can
         assertEquals(listOf("61 01 AA"), can.batteryFrames?.responses)
@@ -115,10 +115,10 @@ class GeneralDataTest {
 
     @Test
     fun `every monitor window gets its own sequence`() {
-        GeneralData.publishMonitorLines(listOf("4F0 00"))
+        GeneralData.publishMonitorLines(listOf("4F0 00"), "4F0")
         val first = GeneralData.state.value.can.monitor?.sequence
 
-        GeneralData.publishMonitorLines(listOf("4F0 00"))
+        GeneralData.publishMonitorLines(listOf("4F0 00"), "4F0")
         val second = GeneralData.state.value.can.monitor?.sequence
 
         assertNotNull(first)

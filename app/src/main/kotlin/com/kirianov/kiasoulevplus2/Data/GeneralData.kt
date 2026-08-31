@@ -53,9 +53,9 @@ object GeneralData {
             )
         }
 
-    fun publishMonitorLines(lines: List<String>) =
+    fun publishMonitorLines(lines: List<String>, filterId: String) =
         _state.update {
-            it.copy(can = it.can.copy(monitor = MonitorCapture(lines, ++sequence)))
+            it.copy(can = it.can.copy(monitor = MonitorCapture(lines, filterId, ++sequence)))
         }
 
     fun publishCellFrames(commands: List<String>, responses: List<String>) =

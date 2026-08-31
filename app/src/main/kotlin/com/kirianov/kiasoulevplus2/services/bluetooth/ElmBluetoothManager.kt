@@ -133,33 +133,19 @@ class ElmBluetoothManager : ElmAdapter {
     }
 
     /**
-     * Читає один рядок до \r. Саме це потрібно в режимі монітора: промпт там
-     * не приходить, і звичайне читання «до промпта» просто висіло б до таймауту.
+     * Віддає все, що вже прийшло, не чекаючи ні рядка, ні промпта.
+     *
+     * У моніторі промпта немає, а читання «до \r» з таймаутом повертало обрізану
+     * половину кадру як повний рядок — байти зсувалися й пробіг виходив сміттям.
      */
-    override suspend fun readLine(timeoutMs: Long): String? = withContext(Dispatchers.IO) {
+    override suspend fun readAvailable(): String = withContext(Dispatchers.IO) {
         val inp = input ?: throw IOException("Bluetooth-потік читання закритий")
-        val line = StringBuilder()
-        var waited = 0L
+        val available = inp.available()
+        if (available <= 0) return@withContext ""
 
-        while (waited < timeoutMs) {
-            if (inp.available() <= 0) {
-                delay(POLL_INTERVAL_MS)
-                waited += POLL_INTERVAL_MS
-                continue
-            }
-
-            val symbol = inp.read()
-            if (symbol < 0) break
-
-            val character = symbol.toChar()
-            if (character == '\r' || character == '\n') {
-                if (line.isNotEmpty()) return@withContext line.toString()
-            } else {
-                line.append(character)
-            }
-        }
-
-        line.takeIf { it.isNotEmpty() }?.toString()
+        val buffer = ByteArray(minOf(available, READ_BUFFER_SIZE))
+        val bytesRead = inp.read(buffer)
+        if (bytesRead <= 0) "" else String(buffer, 0, bytesRead, Charsets.ISO_8859_1)
     }
 
     override suspend fun flushInput() = withContext(Dispatchers.IO) {
