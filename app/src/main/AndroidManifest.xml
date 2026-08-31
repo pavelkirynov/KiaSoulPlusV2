@@ -22,6 +22,7 @@
         android:required="true" />
 
     <application
+        android:name=".App"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -43,6 +44,22 @@
                     рівня 1 і відповідає змісту застосунка.
                 -->
                 <category android:name="androidx.car.app.category.CHARGING" />
+            </intent-filter>
+        </service>
+
+        <!--
+            Медіа-браузер для Android Auto.
+
+            Template-сервіс вище хост показує лише для застосунків з Play Market або
+            коли в налаштуваннях Android Auto увімкнені «невідомі джерела». Медіа-браузер
+            такого обмеження не має: хост знаходить будь-який встановлений сервіс із цим
+            intent-filter. Тому показники віддаються як «медіатека».
+        -->
+        <service
+            android:name=".services.AndroidAuto.CarMediaService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 

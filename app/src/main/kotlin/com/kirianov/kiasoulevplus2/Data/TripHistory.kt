@@ -5,10 +5,14 @@ package com.kirianov.kiasoulevplus2.Data
  *
  * [elapsedMs] — монотонний час від початку поїздки, а не годинник: переведення
  * часу або зміна часового поясу не мають зіпсувати розрахунок.
+ *
+ * [odometerKm] — null, поки пробіг невідомий. Саме null, а не нуль: лічильники BMS
+ * приходять раніше за перше вікно монітора, і знімок із нулем робив пройдену
+ * відстань рівною всьому пробігу авто — звідси й «середня швидкість 3899209 км/год».
  */
 data class TripSample(
     val elapsedMs: Long,
-    val odometerKm: Double,
+    val odometerKm: Double?,
     val dischargedKwh: Double,
     val chargedKwh: Double,
 )
@@ -45,21 +49,35 @@ data class TripHistory(
 
     /** Найраніший знімок діапазону, або null, якщо історії ще немає. */
     fun startOf(window: ConsumptionWindow): TripSample? {
-        val latest = samples.lastOrNull() ?: return null
+        if (samples.isEmpty()) return null
         val distance = window.distanceKm ?: return samples.first()
 
-        val from = latest.odometerKm - distance
+        val latest = lastKnownOdometer() ?: return samples.first()
+        val from = latest - distance
         // Останній знімок, зроблений до потрібної відмітки пробігу.
-        return samples.lastOrNull { it.odometerKm <= from } ?: samples.first()
+        return samples.lastOrNull { it.odometerKm != null && it.odometerKm <= from }
+            ?: samples.first()
     }
 
     /** Чи набралося в історії достатньо пробігу, щоб діапазон був повним. */
     fun covers(window: ConsumptionWindow): Boolean {
         val distance = window.distanceKm ?: return samples.isNotEmpty()
-        val latest = samples.lastOrNull() ?: return false
-        val earliest = samples.first()
-        return latest.odometerKm - earliest.odometerKm >= distance
+        val travelled = travelledKm() ?: return false
+        return travelled >= distance
     }
+
+    /**
+     * Пройдена відстань за наявними знімками: між першим і останнім, де пробіг відомий.
+     * Знімки без пробігу в розрахунок відстані не входять взагалі.
+     */
+    fun travelledKm(from: TripSample? = null): Double? {
+        val range = if (from == null) samples else samples.dropWhile { it !== from }
+        val known = range.mapNotNull { it.odometerKm }
+        if (known.size < 2) return null
+        return (known.last() - known.first()).coerceAtLeast(0.0)
+    }
+
+    private fun lastKnownOdometer(): Double? = samples.lastOrNull { it.odometerKm != null }?.odometerKm
 
     companion object {
         /**

@@ -17,10 +17,28 @@ android {
         versionName = "1.0"
     }
 
+    // Постійний ключ підпису для debug.
+    //
+    // Без нього кожна збірка в CI підписувалася новим ключем, який Gradle створює
+    // на чистому раннері. Android відмовляє в оновленні застосунку, підписаного
+    // іншим ключем (INSTALL_FAILED_UPDATE_INCOMPATIBLE), тому щоразу доводилося
+    // спершу видаляти стару версію. З постійним ключем оновлення ставиться поверх.
+    //
+    // Ключ лише для debug: підписувати ним реліз не можна.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
             isShrinkResources = false
+            signingConfig = signingConfigs.getByName("debug")
         }
         release {
             isMinifyEnabled = false
@@ -67,6 +85,8 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.car.app)
+    // MediaBrowserServiceCompat: спосіб показати застосунок в Android Auto без Play Market.
+    implementation(libs.androidx.media)
 
     // Used directly by GeneralData and the bluetooth services; module.toml relied on
     // these arriving transitively.

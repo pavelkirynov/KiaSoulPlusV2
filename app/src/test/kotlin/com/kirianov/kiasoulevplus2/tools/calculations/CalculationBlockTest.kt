@@ -47,6 +47,32 @@ class CalculationBlockTest {
         )
     }
 
+    /**
+     * Регресія на «середня швидкість 3899209 км/год»: лічильники BMS приходять раніше
+     * за перше вікно монітора, і знімок із нульовим пробігом робив пройдену відстань
+     * рівною всьому пробігу авто.
+     */
+    @Test
+    fun `a sample without an odometer does not become the whole car mileage`() {
+        GeneralData.updateConnection(ConnectionState.Connected, "")
+
+        // Лічильники BMS уже є, пробігу ще немає — так і буває перші секунди.
+        reading(discharged = 6000.0)
+        assertEquals(null, GeneralData.state.value.tripHistory.samples.first().odometerKm)
+
+        now = 60_000L
+        reading(discharged = 6000.7, km = 188_459.6)
+        now = 120_000L
+        reading(discharged = 6001.4, km = 188_469.6)
+
+        val trip = GeneralData.state.value.calculated.trip
+        assertEquals("Відстань узята від нульового знімка", 10.0, trip.distanceKm, 0.001)
+        assertEquals(1.4, trip.consumedKwh, 0.0001)
+
+        // 10 км за 2 хв — це 300 км/год, а не мільйони: перевіряємо порядок величини.
+        assertTrue("Середня швидкість зійшла з розуму", trip.averageSpeedKmh!! < 1_000.0)
+    }
+
     @Test
     fun `power still follows the readings`() {
         GeneralData.updateBms(BmsData(displaySoc = 80.0, batteryVoltage = 366.0, batteryCurrent = -50.0))

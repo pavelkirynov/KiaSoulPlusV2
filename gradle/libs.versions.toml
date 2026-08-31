@@ -10,6 +10,7 @@ material3 = "1.3.1"
 # than the 34 declared in module.toml, so the last 2.8.x release is used instead.
 lifecycle = "2.8.7"
 carApp = "1.4.0"
+media = "1.7.0"
 junit = "4.13.2"
 
 [plugins]
@@ -20,6 +21,7 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-car-app = { module = "androidx.car.app:app", version.ref = "carApp" }
+androidx-media = { module = "androidx.media:media", version.ref = "media" }
 androidx-compose-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "compose" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
 androidx-compose-ui = { module = "androidx.compose.ui:ui", version.ref = "compose" }

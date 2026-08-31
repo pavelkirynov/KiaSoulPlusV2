@@ -75,7 +75,9 @@ class CalculationBlock(
                 GeneralData.addTripSample(
                     TripSample(
                         elapsedMs = now - since,
-                        odometerKm = reading.vehicle.odometerKm,
+                        // null, а не нуль: інакше перший знімок, знятий до першого
+                        // вікна монітора, робив відстань рівною всьому пробігу авто.
+                        odometerKm = reading.vehicle.odometerKm.takeIf { reading.vehicle.hasOdometer },
                         dischargedKwh = reading.bms.cumulativeEnergyDischargedKwh,
                         chargedKwh = reading.bms.cumulativeEnergyChargedKwh,
                     ),

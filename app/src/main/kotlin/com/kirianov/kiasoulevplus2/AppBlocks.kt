@@ -36,8 +36,4 @@ class AppBlocks(context: Context) {
         storage.start(scope)
         bluetooth.start(scope)
     }
-
-    fun stop() {
-        bluetooth.disconnect()
-    }
 }

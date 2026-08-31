@@ -42,7 +42,9 @@ object CalculationEngine {
         val start = history.startOf(window) ?: return WindowStats()
 
         return WindowStats(
-            distanceKm = (latest.odometerKm - start.odometerKm).coerceAtLeast(0.0),
+            // Відстань беремо лише зі знімків, де пробіг відомий: знімок із «пробіг
+            // невідомий» не має права зробити відстань рівною всьому пробігу авто.
+            distanceKm = history.travelledKm(from = start) ?: 0.0,
             durationMs = (latest.elapsedMs - start.elapsedMs).coerceAtLeast(0L),
             consumedKwh = (latest.dischargedKwh - start.dischargedKwh).coerceAtLeast(0.0),
             recoveredKwh = (latest.chargedKwh - start.chargedKwh).coerceAtLeast(0.0),

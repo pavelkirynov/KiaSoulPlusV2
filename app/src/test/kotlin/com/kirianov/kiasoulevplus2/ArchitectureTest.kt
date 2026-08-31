@@ -38,10 +38,11 @@ class ArchitectureTest {
     private val sharedUtilities = listOf("tools.format", "tools.frames")
 
     /**
-     * Файли в корені пакета: MainActivity та місце, де перелічені всі блоки.
+     * Файли в корені пакета: App (піднімає блоки на весь час життя процесу),
+     * MainActivity та місце, де перелічені всі блоки.
      * Їм за визначенням видно всіх — на те вони й точка збірки.
      */
-    private val compositionRoot = listOf("MainActivity.kt", "AppBlocks.kt")
+    private val compositionRoot = listOf("App.kt", "MainActivity.kt", "AppBlocks.kt")
 
     @Test
     fun `no block imports another block`() {

@@ -17,7 +17,7 @@ class TripHistoryTest {
             .plus(sample(1000, 1000.5, discharged = 100.1))
 
         assertEquals(2, history.samples.size)
-        assertEquals(1000.5, history.samples.last().odometerKm, 0.0001)
+        assertEquals(1000.5, history.samples.last().odometerKm!!, 0.0001)
     }
 
     /**
@@ -49,7 +49,7 @@ class TripHistoryTest {
     fun `the trip window starts at the first sample`() {
         val history = TripHistory().plus(sample(0, 1000.0)).plus(sample(1000, 1005.0))
 
-        assertEquals(1000.0, history.startOf(ConsumptionWindow.Trip)!!.odometerKm, 0.0001)
+        assertEquals(1000.0, history.startOf(ConsumptionWindow.Trip)!!.odometerKm!!, 0.0001)
     }
 
     @Test
@@ -61,14 +61,14 @@ class TripHistoryTest {
             .plus(sample(3000, 1010.0))
 
         // Останні 5 км -> відмітка 1005; останній знімок до неї — 1004.
-        assertEquals(1004.0, history.startOf(ConsumptionWindow.Last5Km)!!.odometerKm, 0.0001)
+        assertEquals(1004.0, history.startOf(ConsumptionWindow.Last5Km)!!.odometerKm!!, 0.0001)
     }
 
     @Test
     fun `a distance window falls back to the trip start when the trip is shorter`() {
         val history = TripHistory().plus(sample(0, 1000.0)).plus(sample(1000, 1002.0))
 
-        assertEquals(1000.0, history.startOf(ConsumptionWindow.Last20Km)!!.odometerKm, 0.0001)
+        assertEquals(1000.0, history.startOf(ConsumptionWindow.Last20Km)!!.odometerKm!!, 0.0001)
         assertFalse(history.covers(ConsumptionWindow.Last20Km))
     }
 
