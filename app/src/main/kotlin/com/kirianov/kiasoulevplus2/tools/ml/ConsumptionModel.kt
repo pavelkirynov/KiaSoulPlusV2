@@ -36,6 +36,8 @@ data class DriveConditions(
     val speedVarianceMps: Double = 0.0,
     val ambientTempC: Double? = null,
     val batteryTempC: Double? = null,
+    /** Частка витрати, яку з'їдає клімат, за словами самого авто. */
+    val climateShare: Double? = null,
 ) {
     val meanSpeedKmh: Double get() = meanSpeedMps * KMH_PER_MPS
 
@@ -43,7 +45,12 @@ data class DriveConditions(
         private const val KMH_PER_MPS = 3.6
 
         /** Рівний хід зі сталою швидкістю: для сценаріїв «а якщо їхати 90». */
-        fun steady(speedKmh: Double, ambientTempC: Double? = null, batteryTempC: Double? = null): DriveConditions {
+        fun steady(
+            speedKmh: Double,
+            ambientTempC: Double? = null,
+            batteryTempC: Double? = null,
+            climateShare: Double? = null,
+        ): DriveConditions {
             val mps = speedKmh / KMH_PER_MPS
             return DriveConditions(
                 meanSpeedMps = mps,
@@ -51,6 +58,7 @@ data class DriveConditions(
                 speedVarianceMps = 0.0,
                 ambientTempC = ambientTempC,
                 batteryTempC = batteryTempC,
+                climateShare = climateShare,
             )
         }
 
@@ -60,6 +68,7 @@ data class DriveConditions(
             speedVarianceMps = segment.speedVarianceMps,
             ambientTempC = segment.ambientTempC,
             batteryTempC = segment.batteryTempC,
+            climateShare = segment.climateShare,
         )
     }
 }
@@ -81,7 +90,7 @@ data class DriveConditions(
  */
 internal object ConsumptionFeatures {
 
-    const val SIZE = 7
+    const val SIZE = 8
 
     /** Опорна швидкість: усі ознаки рахуються від v/10 м/с. */
     private const val SPEED_REFERENCE_MPS = Vehicle.SPEED_REFERENCE_MPS
@@ -103,11 +112,15 @@ internal object ConsumptionFeatures {
 
     private const val VARIANCE_SCALE = 100.0
 
+    /** Поки авто про клімат не казало, вважаємо, що він вимкнений. */
+    private const val ASSUMED_CLIMATE_SHARE = 0.0
+
     val NAMES = listOf(
         "постійний відбір",
         "опір коченню",
         "опір повітря",
-        "обігрів",
+        "клімат",
+        "обігрів понад те",
         "холодна батарея",
         "кондиціонер",
         "рвана їзда",
@@ -117,6 +130,7 @@ internal object ConsumptionFeatures {
         Vehicle.AUX_KW,
         Vehicle.ROLLING_KW,
         Vehicle.DRAG_KW,
+        Vehicle.CLIMATE_KW_PER_SHARE,
         Vehicle.HEATING_KW,
         Vehicle.COLD_BATTERY_KW,
         Vehicle.COOLING_KW,
@@ -124,12 +138,15 @@ internal object ConsumptionFeatures {
     )
 
     /**
-     * Обігрів має широку σ навмисно: стану клімату застосунок не бачить, і температура
-     * за бортом — лише його замінник. Пічка на цьому авто тягне кілька кіловат, тобто
-     * більше за решту доданків разом, тож нехай дані розпоряджаються цим коефіцієнтом
-     * вільно.
+     * Клімат має найширшу σ: частка з кадру 200 — пряме свідчення, але перерахунок
+     * її в кіловати лінійний лише в першому наближенні, тож хай дані порядкують.
+     *
+     * «Обігрів понад те» лишився як запасний доданок за температурою: він потрібен,
+     * поки кадр 200 ще не приходив, і ловить те, чого частка не пояснила. Його
+     * апріорне значення тому вдвічі менше за колишнє — головну роботу тепер робить
+     * пряме спостереження, а не здогад із погоди.
      */
-    val PRIOR_SIGMA = doubleArrayOf(0.40, 0.60, 0.20, 1.00, 0.10, 0.60, 1.00)
+    val PRIOR_SIGMA = doubleArrayOf(0.40, 0.60, 0.20, 6.00, 0.80, 0.10, 0.60, 1.00)
 
     /** Типовий розкид залишків, кВт: у стількох спостереженнях цінується апріорі. */
     const val NOISE_SIGMA = 1.5
@@ -144,6 +161,7 @@ internal object ConsumptionFeatures {
             1.0,
             speed,
             cube,
+            conditions.climateShare ?: ASSUMED_CLIMATE_SHARE,
             max(0.0, HEATING_BELOW_C - ambient) / TEMPERATURE_SCALE,
             max(0.0, COLD_BATTERY_BELOW_C - battery) / TEMPERATURE_SCALE,
             max(0.0, ambient - COOLING_ABOVE_C) / TEMPERATURE_SCALE,

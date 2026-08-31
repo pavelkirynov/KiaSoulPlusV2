@@ -162,7 +162,39 @@ class ConsumptionModelTest {
 
         val readiness = model.readiness.byFeature.toMap()
         assertTrue("опір повітря мав вивчитися: $readiness", readiness.getValue("опір повітря") > 0.5)
-        assertTrue("обігріву модель не бачила: $readiness", readiness.getValue("обігрів") < 0.2)
+        assertTrue("обігріву модель не бачила: $readiness", readiness.getValue("обігрів понад те") < 0.2)
+    }
+
+    /**
+     * Клімат тепер видно прямо: кадр 200 каже, скільки кілометрів він з'їдає.
+     * Модель мусить брати саме це свідчення, а не гадати з погоди — інакше тепла
+     * зима з увімкненою пічкою й холодна з вимкненою виглядали б однаково.
+     */
+    @Test
+    fun `learns what the climate costs from the car's own word`() {
+        val car = VirtualCar()
+        val model = ConsumptionModel()
+
+        // Однакова погода, різний клімат: відрізнити їх можна тільки за часткою.
+        val hvacOff = car.week(segments = 100, ambientTempC = 10.0)
+            .map { it.copy(climateShare = 0.0) }
+        val hvacOn = car.week(segments = 100, ambientTempC = 10.0, startAtMs = 2_000_000L)
+            .map { segment ->
+                val hours = segment.durationMs / 3_600_000.0
+                // Пічка додає рівно 3 кВт, і авто чесно каже про це часткою.
+                val extra = 3.0 * hours
+                val total = segment.energyKwh + extra
+                segment.copy(energyKwh = total, tractionKwh = total, climateShare = extra / total)
+            }
+        (hvacOff + hvacOn).sortedBy { it.startedAtMs }.forEach(model::learn)
+
+        val cold = model.predictPowerKw(DriveConditions.steady(60.0, ambientTempC = 10.0, climateShare = 0.0))
+        val warm = model.predictPowerKw(
+            DriveConditions.steady(60.0, ambientTempC = 10.0, climateShare = 0.3),
+        )
+
+        assertTrue("з увімкненим кліматом має виходити дорожче: $cold проти $warm", warm > cold + 1.0)
+        assertTrue("і модель мала це вивчити з частки", model.readiness.byFeature.toMap().getValue("клімат") > 0.5)
     }
 
     /** Рвана їзда дорожча за рівну з тією самою середньою швидкістю. */

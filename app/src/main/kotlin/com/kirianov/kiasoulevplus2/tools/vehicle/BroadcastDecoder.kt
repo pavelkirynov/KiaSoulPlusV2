@@ -47,8 +47,12 @@ object BroadcastDecoder {
                 preciseSocPercent = ((b[5] shl 8) + b[4]) / 256.0,
             )
 
+            // Байт 0 — приріст запасу ходу з вимкненим кліматом. Довго лежав без
+            // діла: це єдиний прямий слід клімату на шині, і моделі витрати він
+            // потрібніший за здогад із температури.
             RANGE -> if (b.size < 8) data else data.copy(
                 rangeKm = (b[2] shl 1) + (b[1] shr 7),
+                climateExtraKm = b[0] / 10.0,
             )
 
             AMBIENT_TEMP -> if (b.size < 8) data else data.copy(

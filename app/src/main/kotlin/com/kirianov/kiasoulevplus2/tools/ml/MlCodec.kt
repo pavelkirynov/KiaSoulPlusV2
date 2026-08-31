@@ -22,7 +22,7 @@ internal object MlCodec {
      * збирається наново з журналу. Саме заради цього журнал і зберігає сирі моменти,
      * а не готові ознаки.
      */
-    const val FEATURE_SET = "consumption-v1-capacity-cubic"
+    const val FEATURE_SET = "consumption-v2-climate"
 
     // --- Відрізок ---------------------------------------------------------------
 
@@ -42,6 +42,7 @@ internal object MlCodec {
             "cov" to segment.coverage,
             "tamb" to segment.ambientTempC,
             "tbat" to segment.batteryTempC,
+            "clim" to segment.climateShare,
             "soc0" to segment.socStartPercent,
             "soc1" to segment.socEndPercent,
             "dsoc0" to segment.displaySocStartPercent,
@@ -74,6 +75,7 @@ internal object MlCodec {
             coverage = values.double("cov") ?: 1.0,
             ambientTempC = values.double("tamb"),
             batteryTempC = values.double("tbat"),
+            climateShare = values.double("clim"),
             socStartPercent = values.double("soc0"),
             socEndPercent = values.double("soc1"),
             displaySocStartPercent = values.double("dsoc0"),
@@ -95,6 +97,8 @@ internal object MlCodec {
             "noise" to encodeRegression(snapshot.consumption.noise),
             "capacityEnergy" to encodeRegression(snapshot.capacity.energy),
             "capacityBuffer" to encodeRegression(snapshot.capacity.buffer),
+            "capacityMeasuredKwh" to snapshot.capacity.measuredEnergyKwh,
+            "capacityMeasuredSpan" to snapshot.capacity.measuredSpanPercent,
             "ratios" to snapshot.quality.ratios,
             "bandMultiplier" to snapshot.quality.coverageMultiplier,
             "blocks" to snapshot.quality.blocksSeen,
@@ -116,7 +120,12 @@ internal object MlCodec {
         return ModelSnapshot(
             featureSetId = values["featureSet"] as? String ?: "",
             consumption = ConsumptionSnapshot(consumption, noise),
-            capacity = CapacitySnapshot(capacityEnergy, capacityBuffer),
+            capacity = CapacitySnapshot(
+                energy = capacityEnergy,
+                buffer = capacityBuffer,
+                measuredEnergyKwh = values.double("capacityMeasuredKwh") ?: 0.0,
+                measuredSpanPercent = values.double("capacityMeasuredSpan") ?: 0.0,
+            ),
             quality = QualitySnapshot(
                 ratios = ratios,
                 coverageMultiplier = values.double("bandMultiplier") ?: 1.0,

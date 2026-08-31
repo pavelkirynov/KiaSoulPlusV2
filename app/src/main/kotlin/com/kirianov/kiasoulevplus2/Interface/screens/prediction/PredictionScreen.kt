@@ -151,7 +151,9 @@ private fun BatteryCard(model: MlModelInfo, prediction: MlPrediction?) {
         ) {
             Text(text = "Батарея", fontSize = 18.sp)
 
-            MetricRow("Виміряна ємність", formatOrDash(model.usableCapacityKwh, 1, "кВт·год"))
+            MetricRow("Робоча ємність", formatOrDash(model.usableCapacityKwh, 1, "кВт·год"))
+            MetricRow("Середня ємність", formatOrDash(model.averageCapacityKwh, 1, "кВт·год"))
+            MetricRow("Пройдено шкали", formatMeasurement(model.measuredScalePercent, 0, "%"))
             MetricRow("Від очікуваної", formatOrDash(model.capacityVersusNominalPercent, 0, "%"))
             MetricRow("Більше за рідний пакет", formatOrDash(model.timesLargerThanOriginal, 2, "×"))
             MetricRow("Дно шкали", formatOrDash(model.floorSocPercent, 1, "% SOC"))
@@ -161,10 +163,20 @@ private fun BatteryCard(model: MlModelInfo, prediction: MlPrediction?) {
             }
 
             Text(
-                text = "Батарея перепакована, а BMS рахує відсоток за паспортом рідного " +
-                    "пакета — звідси й розбіжності з панеллю. Тут ємність не взята з " +
-                    "даташита, а виміряна: із пар «скільки з'їхав SOC / скільки на це " +
-                    "пішло енергії».",
+                text = "Батарея перепакована літій-залізо-фосфатними комірками, а BMS рахує " +
+                    "відсоток за паспортом рідних нікелевих — звідси й розбіжності з панеллю. " +
+                    "Ємність тут не взята з даташита, а виміряна: із пар «скільки з'їхав SOC / " +
+                    "скільки на це пішло енергії».",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Text(
+                text = "«Робоча» — інтеграл вивченої кривої по дозволеному BMS вікну. " +
+                    "«Середня» — та сама енергія, поділена на пройдені відсотки, без жодної " +
+                    "моделі: незалежна перевірка, і коли два числа сходяться, кривій можна " +
+                    "вірити. Розходяться вони закономірно: середня рахує лише ті ділянки " +
+                    "шкали, якими ви їздили, а на цих комірках середина щільніша за краї — " +
+                    "тож у того, хто тримає заряд між 40 і 70 %, вона завищує.",
                 style = MaterialTheme.typography.bodySmall,
             )
 

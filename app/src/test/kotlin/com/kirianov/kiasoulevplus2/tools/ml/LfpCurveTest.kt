@@ -181,6 +181,83 @@ class LfpCurveTest {
         }
     }
 
+    /**
+     * «Середня ємність» — скільки кіловат-годин у машині насправді, порахованих
+     * найтупішим можливим способом: уся виміряна енергія, поділена на пройдені
+     * відсотки шкали. Жодної кривої, жодних корзин.
+     *
+     * Саме через свою тупість це число й цінне: воно ні на що не спирається, тож
+     * збіг із вивченою кривою означає, що крива не вигадана.
+     */
+    @Test
+    fun `the plain average agrees with the learned curve`() {
+        val model = trainedOverWholeScale()
+
+        val average = model.averageCapacityKwh
+        assertTrue("середня ємність мала порахуватися", average != null)
+        assertEquals("має вийти близько до справжньої ємності", TOTAL_KWH, average!!, TOTAL_KWH * 0.15)
+        assertEquals(
+            "два незалежні розрахунки мають зійтися",
+            model.usableCapacityKwh,
+            average,
+            average * 0.15,
+        )
+        assertTrue("шкали мало пройти багато", model.measuredScalePercent > 1000.0)
+    }
+
+    /**
+     * У чому середня ємність поступається кривій, і про це варто знати.
+     *
+     * Це середня густина **по тих ділянках шкали, якими їздили**, а не по всій
+     * шкалі. На LFP середина енергетично щільніша за краї, тож у того, хто тримає
+     * заряд між сорока й сімдесятьма, середня читатиметься завищено — і це не збій,
+     * а чесна властивість найпростішого розрахунку.
+     *
+     * Крива такої вади не має: вона знає, де саме була кожна сесія. Тому на екрані
+     * стоять обидва числа, а не одне.
+     */
+    @Test
+    fun `the plain average leans towards wherever the driver keeps the charge`() {
+        val middleOnly = CapacityModel()
+        val random = Random(3)
+        var at = 0L
+        // Людина тримає заряд між 40 і 70 %: у найщільнішій частині шкали.
+        repeat(140) {
+            val span = 8.0 + random.nextDouble() * 7.0
+            val from = 40.0 + span + random.nextDouble() * (70.0 - span - 40.0)
+            middleOnly.learn(from, from - span, energyBetween(from - span, from), atMs = at)
+            at += 2L * 24 * 3600 * 1000
+        }
+
+        val average = middleOnly.averageCapacityKwh!!
+        assertTrue(
+            "їзда самою серединою мала завищити середню: $average проти $TOTAL_KWH",
+            average > TOTAL_KWH * 1.15,
+        )
+        // А крива при цьому лишається в межах розумного, бо знає, де були сесії.
+        assertTrue(
+            "крива не мала повестися так само: ${middleOnly.usableCapacityKwh}",
+            middleOnly.usableCapacityKwh < average,
+        )
+    }
+
+    /** Поки шкали пройдено мало, середнє нічого не означає — і його не показують. */
+    @Test
+    fun `the average stays silent until enough of the scale has been covered`() {
+        val model = CapacityModel()
+
+        assertTrue("на порожньому місці середнього нема", model.averageCapacityKwh == null)
+
+        model.learn(60.0, 50.0, energyBetween(50.0, 60.0), atMs = 0L)
+        assertTrue("однієї сесії замало", model.averageCapacityKwh == null)
+
+        var at = 1L
+        listOf(90.0 to 75.0, 75.0 to 60.0, 50.0 to 35.0, 35.0 to 20.0).forEach { (from, to) ->
+            model.learn(from, to, energyBetween(to, from), atMs = at++)
+        }
+        assertTrue("а після половини шкали вже є", model.averageCapacityKwh != null)
+    }
+
     private fun trainedOverWholeScale(): CapacityModel {
         val model = CapacityModel()
         val random = Random(7)

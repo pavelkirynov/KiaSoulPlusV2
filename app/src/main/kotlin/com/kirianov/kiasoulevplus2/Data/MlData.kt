@@ -96,6 +96,16 @@ data class MlSegment(
     val ambientTempC: Double? = null,
     val batteryTempC: Double? = null,
 
+    /**
+     * Яку частку витрати з'їдає клімат, за словами самого авто. Кадр 200 каже,
+     * на скільки кілометрів виріс би запас ходу з вимкненим кліматом; звідси
+     * частка = приріст / (запас + приріст).
+     *
+     * Це пряме свідчення, а не здогад: температура за бортом показує погоду, а не
+     * те, чи ввімкнена пічка. null, поки кадр 200 не приходив.
+     */
+    val climateShare: Double? = null,
+
     /** SOC з BMS на кінцях відрізка. */
     val socStartPercent: Double? = null,
     val socEndPercent: Double? = null,
@@ -191,6 +201,15 @@ data class MlModelInfo(
 
     /** Вивчена корисна ємність батареї, кВт·год. Не константа з даташита. */
     val usableCapacityKwh: Double? = null,
+
+    /**
+     * Скільки кВт·год виходить на повний прохід шкали від ста до нуля — сира сума
+     * виміряного, без жодної моделі. Незалежна перевірка вивченої кривої.
+     */
+    val averageCapacityKwh: Double? = null,
+
+    /** Скільки відсотків шкали загалом пройшло через вимірювання. */
+    val measuredScalePercent: Double = 0.0,
 
     /** Вивчена ємність відносно очікуваної від перепаковки, %. */
     val capacityVersusNominalPercent: Double? = null,

@@ -251,6 +251,8 @@ class MlBlock(
                     learnedKm = learnedKm,
                     blocks = quality.blocks,
                     usableCapacityKwh = capacity.usableCapacityKwh,
+                    averageCapacityKwh = capacity.averageCapacityKwh,
+                    measuredScalePercent = capacity.measuredScalePercent,
                     capacityVersusNominalPercent = capacity.capacityVersusNominalPercent,
                     timesLargerThanOriginal = capacity.timesLargerThanOriginal,
                     floorSocPercent = capacity.floorSocPercent,
@@ -287,6 +289,20 @@ class MlBlock(
         else -> GeneralData.state.value.bms.displaySoc.takeIf { it >= 0.0 }
     }
 
+    /**
+     * Яку частку витрати з'їдає клімат. Авто саме каже, на скільки кілометрів виріс
+     * би запас із вимкненим кліматом, — звідси частка = приріст / (запас + приріст).
+     *
+     * null, поки кадр 200 не приходив: вигадувати нуль не можна, бо «клімат
+     * вимкнений» і «ще не знаємо» — різні речі, і модель має розрізняти їх.
+     */
+    private fun climateShareOf(vehicle: VehicleData): Double? {
+        if (!vehicle.hasClimateExtra || !vehicle.hasRange) return null
+        val total = vehicle.rangeKm + vehicle.climateExtraKm
+        if (total <= 0.0) return null
+        return (vehicle.climateExtraKm / total).coerceIn(0.0, 1.0)
+    }
+
     private fun sampleOf(state: State, elapsedMs: Long): MlSample? {
         val bms = state.bms
         if (!bms.hasData) return null
@@ -300,6 +316,7 @@ class MlBlock(
             speedKmh = vehicle.speedKmh.takeIf { vehicle.hasSpeed },
             ambientTempC = vehicle.ambientTempC.takeIf { vehicle.hasAmbientTemp },
             batteryTempC = bms.batteryTempC,
+            climateShare = climateShareOf(vehicle),
             socPercent = vehicle.preciseSocPercent.takeIf { vehicle.hasPreciseSoc },
             // Панельний SOC із BMS оновлюється щосекунди, а кадр 594 — раз на хвилину.
             displaySocPercent = bms.displaySoc.takeIf { it >= 0.0 },

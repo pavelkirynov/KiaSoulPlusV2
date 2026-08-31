@@ -75,7 +75,38 @@ class CapacityModel(
     ),
 ) {
 
+    /** Сира сума виміряної енергії й пройденої шкали — без жодної моделі. */
+    private var measuredEnergyKwh = 0.0
+    private var measuredSpanPercent = 0.0
+
     val observations: Double get() = energy.effectiveSamples
+
+    /**
+     * Скільки кіловат-годин виходить на повний прохід шкали від ста до нуля —
+     * просто сума всієї виміряної енергії, поділена на суму пройдених відсотків.
+     *
+     * Це навмисно **найтупіший можливий** розрахунок: жодної кривої, жодних корзин,
+     * жодних припущень про краї шкали. Через те воно й корисне — це незалежна
+     * перевірка всього іншого. Якщо це число й `usableCapacityKwh` сходяться, кривій
+     * можна вірити; якщо розійшлися — видно одразу.
+     *
+     * Але знати про його ваду теж треба: це середнє **по тих ділянках шкали, якими
+     * їздили**, а не по всій шкалі. На LFP середина щільніша за краї, тож у того,
+     * хто тримає заряд між сорока й сімдесятьма, воно читатиметься завищено. Крива
+     * такої вади не має, бо пам'ятає, де саме була кожна сесія, — і саме тому на
+     * екрані стоять обидва числа.
+     *
+     * null, поки шкали пройдено замало.
+     */
+    val averageCapacityKwh: Double?
+        get() = if (measuredSpanPercent >= MIN_SPAN_FOR_AVERAGE) {
+            measuredEnergyKwh / measuredSpanPercent * 100.0
+        } else {
+            null
+        }
+
+    /** Скільки відсотків шкали загалом пройшло через вимірювання. */
+    val measuredScalePercent: Double get() = measuredSpanPercent
 
     /** Точний SOC, на якому панель показує нуль: справжнє дно шкали, %. */
     val floorSocPercent: Double
@@ -145,12 +176,17 @@ class CapacityModel(
 
         // Вага одна на сесію: довший проміжок і так важить більше, бо накриває
         // більше корзин і накриває їх повніше.
-        return energy.observe(
+        val accepted = energy.observe(
             featuresFor(socEndPercent, socStartPercent),
             energyKwh,
             weight = 1.0,
             atMs = atMs,
         )
+        if (accepted) {
+            measuredEnergyKwh += abs(energyKwh)
+            measuredSpanPercent += abs(drop)
+        }
+        return accepted
     }
 
     /**
@@ -209,11 +245,18 @@ class CapacityModel(
         return (energyRemainingKwh(preciseSocPercent) / total * 100.0).coerceIn(0.0, 100.0)
     }
 
-    fun snapshot(): CapacitySnapshot = CapacitySnapshot(energy.snapshot(), buffer.snapshot())
+    fun snapshot(): CapacitySnapshot = CapacitySnapshot(
+        energy = energy.snapshot(),
+        buffer = buffer.snapshot(),
+        measuredEnergyKwh = measuredEnergyKwh,
+        measuredSpanPercent = measuredSpanPercent,
+    )
 
     fun restore(snapshot: CapacitySnapshot): Boolean {
         val energyRestored = energy.restore(snapshot.energy)
         val bufferRestored = buffer.restore(snapshot.buffer)
+        measuredEnergyKwh = snapshot.measuredEnergyKwh
+        measuredSpanPercent = snapshot.measuredSpanPercent
         return energyRestored && bufferRestored
     }
 
@@ -262,6 +305,12 @@ class CapacityModel(
          * замало, щоб через рік завадити їй показати справжній горб.
          */
         const val SMOOTHNESS = 1.0
+
+        /**
+         * Поки шкали пройдено менше, ніж половину, середнє ще нічого не означає:
+         * пів сотні відсотків можуть цілком лягти на одну ділянку кривої.
+         */
+        const val MIN_SPAN_FOR_AVERAGE = 50.0
 
         /**
          * Менший розмах SOC не годиться: точний SOC приходить раз на ~хвилину і сам є
@@ -371,4 +420,8 @@ data class CapacityObservation(
 class CapacitySnapshot(
     val energy: RegressionSnapshot,
     val buffer: RegressionSnapshot,
+    /** Сира сума виміряної енергії, кВт·год. */
+    val measuredEnergyKwh: Double = 0.0,
+    /** Сира сума пройдених відсотків шкали. */
+    val measuredSpanPercent: Double = 0.0,
 )

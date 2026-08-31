@@ -51,6 +51,8 @@ data class MlSample(
     val speedKmh: Double? = null,
     val ambientTempC: Double? = null,
     val batteryTempC: Double? = null,
+    /** Частка витрати, яку з'їдає клімат: кадр 200 каже це прямо. */
+    val climateShare: Double? = null,
     val socPercent: Double? = null,
     val displaySocPercent: Double? = null,
     val charging: Boolean = false,
@@ -160,6 +162,7 @@ class SegmentBuilder(
                 speedMps = meanSpeedMps(sample),
                 ambientTempC = sample.ambientTempC,
                 batteryTempC = sample.batteryTempC,
+                climateShare = sample.climateShare,
                 countedMs = countedMs,
                 elapsedMs = dtMs,
             )
@@ -226,6 +229,7 @@ class SegmentBuilder(
                 coverage = bucket.coverage(),
                 ambientTempC = bucket.meanAmbient(),
                 batteryTempC = bucket.meanBattery(),
+                climateShare = bucket.meanClimateShare(),
                 socStartPercent = socStart,
                 socEndPercent = if (moving) socEnd else lastSample.socPercent,
                 displaySocStartPercent = displaySocStart,
@@ -282,12 +286,15 @@ class SegmentBuilder(
         private var ambientMs = 0L
         private var sumBattery = 0.0
         private var batteryMs = 0L
+        private var sumClimate = 0.0
+        private var climateMs = 0L
 
         fun add(
             meanPowerKw: Double,
             speedMps: Double?,
             ambientTempC: Double?,
             batteryTempC: Double?,
+            climateShare: Double?,
             countedMs: Long,
             elapsedMs: Long,
         ) {
@@ -313,6 +320,10 @@ class SegmentBuilder(
                 sumBattery += it * countedMs
                 batteryMs += countedMs
             }
+            climateShare?.let {
+                sumClimate += it * countedMs
+                climateMs += countedMs
+            }
 
             measuredMs += countedMs
             this.elapsedMs += elapsedMs
@@ -333,6 +344,8 @@ class SegmentBuilder(
             ambientMs += other.ambientMs
             sumBattery += other.sumBattery
             batteryMs += other.batteryMs
+            sumClimate += other.sumClimate
+            climateMs += other.climateMs
         }
 
         fun clear() {
@@ -350,6 +363,8 @@ class SegmentBuilder(
             ambientMs = 0L
             sumBattery = 0.0
             batteryMs = 0L
+            sumClimate = 0.0
+            climateMs = 0L
         }
 
         private val speedWeight: Double get() = speedMs.toDouble().coerceAtLeast(1.0)
@@ -367,6 +382,8 @@ class SegmentBuilder(
         fun meanAmbient(): Double? = if (ambientMs > 0L) sumAmbient / ambientMs else null
 
         fun meanBattery(): Double? = if (batteryMs > 0L) sumBattery / batteryMs else null
+
+        fun meanClimateShare(): Double? = if (climateMs > 0L) sumClimate / climateMs else null
     }
 
     companion object {
