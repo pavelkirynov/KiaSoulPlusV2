@@ -133,6 +133,53 @@ class ConsumptionModelTest {
         assertNull(model.learn(descent))
     }
 
+    /**
+     * Найпідступніший спуск — накат: тяги немає зовсім, сама рекуперація, чиста
+     * витрата від'ємна. Частка «рекуперація/тяга» при нульовій тязі формально
+     * нуль, і без окремої обробки такий відрізок пройшов би повз захист і навчив
+     * би модель, що їзда повертає енергію.
+     */
+    @Test
+    fun `coasting downhill with no traction at all is refused`() {
+        val model = ConsumptionModel()
+        val coast = VirtualCar().segment(speedKmh = 60.0)
+            .copy(energyKwh = -0.5, tractionKwh = 0.0, regenKwh = 0.5)
+
+        assertNull(model.learn(coast))
+    }
+
+    /** З гори з від'ємною чистою витратою: рекуперації більше, ніж тяги. */
+    @Test
+    fun `negative net consumption downhill is refused`() {
+        val model = ConsumptionModel()
+        val downhill = VirtualCar().segment(speedKmh = 60.0)
+            .copy(energyKwh = -0.6, tractionKwh = 0.2, regenKwh = 0.8)
+
+        assertNull(model.learn(downhill))
+    }
+
+    /**
+     * Пряма відповідь на «качусь із гори, і в мене від'ємна витрата»: скільки б
+     * спусків підряд не трапилося, прогноз для рівної дороги не має поповзти
+     * в бік «безкоштовно».
+     */
+    @Test
+    fun `a mountain pass does not bend the prediction toward free driving`() {
+        val car = VirtualCar()
+        val model = ConsumptionModel()
+        car.week(segments = 120).forEach(model::learn)
+        val before = model.predictWhPerKm(DriveConditions.steady(60.0))
+
+        repeat(20) { index ->
+            model.learn(
+                car.segment(speedKmh = 70.0, atMs = 100_000_000L + index * 600_000L)
+                    .copy(energyKwh = -0.4, tractionKwh = 0.1, regenKwh = 0.5),
+            )
+        }
+
+        assertEquals(before, model.predictWhPerKm(DriveConditions.steady(60.0)), 1e-9)
+    }
+
     /** Передбачення робиться ДО навчання: інакше «помилка» була б самообманом. */
     @Test
     fun `the reported prediction is made before the answer is seen`() {

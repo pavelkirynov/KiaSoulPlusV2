@@ -143,8 +143,17 @@ data class MlSegment(
      * Яку частку тяги повернула рекуперація. Висока частка — це спуск, а спуск
      * модель бачити не вміє: висоти в застосунку немає. Такий відрізок краще
      * зважити нижче, ніж навчити на ньому неправди.
+     *
+     * Накат — рекуперація без жодної тяги — це крайній випадок того самого спуску,
+     * а не нуль: ділення тут повернуло б 0/0 або ∞, і формальний нуль тихо провів
+     * би такий відрізок повз захист у навчання.
      */
-    val regenFraction: Double get() = if (tractionKwh > 0.0) regenKwh / tractionKwh else 0.0
+    val regenFraction: Double
+        get() = when {
+            tractionKwh > 0.0 -> regenKwh / tractionKwh
+            regenKwh > 0.0 -> Double.POSITIVE_INFINITY
+            else -> 0.0
+        }
 
     private companion object {
         const val MS_PER_HOUR = 3_600_000.0

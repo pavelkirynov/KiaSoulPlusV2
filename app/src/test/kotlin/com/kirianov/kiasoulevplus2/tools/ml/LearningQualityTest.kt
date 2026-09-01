@@ -2,6 +2,7 @@ package com.kirianov.kiasoulevplus2.tools.ml
 
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -240,6 +241,21 @@ class LearningQualityTest {
             "самої лише траси замало для відбору: $readiness",
             readiness.getValue("постійний відбір") < 0.75,
         )
+    }
+
+    /**
+     * Блок, який закрився з від'ємною енергією (затяжний спуск), — не «відношення
+     * побачили/передбачили», а безглуздя. Він не має ані ставати відношенням, ані
+     * псувати вивчену ширину інтервалу.
+     */
+    @Test
+    fun `a downhill block with negative energy does not poison the band`() {
+        val quality = PredictionQuality()
+        val downhill = VirtualCar().segment(speedKmh = 60.0, distanceKm = 12.0)
+            .copy(energyKwh = -1.0, tractionKwh = 0.2, regenKwh = 1.2)
+
+        assertNull(quality.observe(downhill, predictedPowerKw = 8.0))
+        assertEquals("зіпсований блок не має рахуватися", 0, quality.blocks)
     }
 
     private fun snapshotOf(model: ConsumptionModel) = ModelSnapshot(
