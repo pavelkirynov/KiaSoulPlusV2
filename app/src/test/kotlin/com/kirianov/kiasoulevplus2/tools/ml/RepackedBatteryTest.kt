@@ -13,8 +13,8 @@ import org.junit.Test
  * вивчити, скільки кіловат-годин насправді припадає на відсоток BMS, і рахувати
  * запас ходу та реальний заряд від виміряного, а не від паспорта.
  *
- * Числа тут — з реальної машини: 40–50 кВт·год корисної ємності й 200–300 км ходу
- * залежно від того, як їхати.
+ * Числа тут — з реальної машини: пакет близько 51 кВт·год за словами того, хто його
+ * збирав, і 200–300 км ходу залежно від того, як їхати.
  */
 class RepackedBatteryTest {
 
@@ -24,7 +24,7 @@ class RepackedBatteryTest {
      */
     @Test
     fun `learns the capacity of the pack that is actually installed`() {
-        val realCapacityKwh = 45.0
+        val realCapacityKwh = 51.0
         val capacity = CapacityModel()
 
         chargeSessions().forEachIndexed { index, (from, to) ->
@@ -54,7 +54,7 @@ class RepackedBatteryTest {
     @Test
     fun `predicts the range of the real pack, not the one the dashboard assumes`() {
         val car = VirtualCar()
-        val (consumption, capacity, quality) = trained(car, realCapacityKwh = 45.0)
+        val (consumption, capacity, quality) = trained(car, realCapacityKwh = 51.0)
 
         val mixed = RangeEstimator.recentConditions(car.week(60, hillNoiseKw = 0.4))
         val prediction = RangeEstimator.predict(consumption, capacity, quality, 100.0, mixed)!!
@@ -75,16 +75,16 @@ class RepackedBatteryTest {
     /**
      * Крива, а не пряма. Нові комірки живуть за іншою кривою напруги, тож відсоток
      * BMS «важить» неоднаково вздовж шкали: унизу в ньому лишається більше енергії,
-     * ніж думає панель. Саме для цього в моделі є квадратичні доданки — перевіряємо,
-     * що вони справді ловлять форму, а не лише середнє.
+     * ніж думає панель. Саме для цього ємність зібрана з корзин — перевіряємо, що
+     * вони справді ловлять форму, а не лише середнє.
      */
     @Test
     fun `follows a scale that is not linear`() {
-        // dQ/du = 50 − 10·u : унизу відсоток дорожчий, угорі дешевший. Разом 45 кВт·год.
+        // dQ/du = 56 − 10·u : унизу відсоток дорожчий, угорі дешевший. Разом 51 кВт·год.
         fun trueEnergyBetween(fromPercent: Double, toPercent: Double): Double {
             val from = fromPercent / 100.0
             val to = toPercent / 100.0
-            return 50.0 * (to - from) - 10.0 * (to * to - from * from) / 2.0
+            return 56.0 * (to - from) - 10.0 * (to * to - from * from) / 2.0
         }
 
         val capacity = CapacityModel()
@@ -104,8 +104,8 @@ class RepackedBatteryTest {
             "унизу шкали відсоток мав вийти дорожчим",
             capacity.kwhPerPercentAt(15.0) > capacity.kwhPerPercentAt(85.0) * 1.10,
         )
-        assertEquals(0.485, capacity.kwhPerPercentAt(15.0), 0.05)
-        assertEquals(0.415, capacity.kwhPerPercentAt(85.0), 0.05)
+        assertEquals(0.545, capacity.kwhPerPercentAt(15.0), 0.05)
+        assertEquals(0.475, capacity.kwhPerPercentAt(85.0), 0.05)
     }
 
     /**
@@ -134,7 +134,7 @@ class RepackedBatteryTest {
         fun trueEnergyBetween(fromPercent: Double, toPercent: Double): Double {
             val from = fromPercent / 100.0
             val to = toPercent / 100.0
-            return 54.0 * (to - from) - 18.0 * (to * to - from * from) / 2.0
+            return 61.0 * (to - from) - 20.0 * (to * to - from * from) / 2.0
         }
 
         var at = 0L
@@ -173,7 +173,7 @@ class RepackedBatteryTest {
     @Test
     fun `covers the real envelope of this car`() {
         val car = VirtualCar()
-        val (consumption, capacity, quality) = trained(car, realCapacityKwh = 45.0)
+        val (consumption, capacity, quality) = trained(car, realCapacityKwh = 51.0)
 
         val mixed = RangeEstimator.recentConditions(car.week(60, hillNoiseKw = 0.4))
         val summer = RangeEstimator.predict(consumption, capacity, quality, 100.0, mixed)!!

@@ -104,6 +104,28 @@ class CapacityModelTest {
         assertTrue(model.realPercent(50.0) in 40.0..55.0)
     }
 
+    /**
+     * Модель мусить розрізняти «виміряв» і «поки припускаю». Без цього щойно
+     * встановлений застосунок показує дно шкали 4 % так само впевнено, як і за рік
+     * їзди, — а це число з апріорної прямої, а не про це авто.
+     */
+    @Test
+    fun `an untrained model admits its numbers are only assumptions`() {
+        val model = CapacityModel()
+
+        assertFalse("ємності ще не міряли", model.capacityMeasured)
+        assertFalse("краї шкали ще не міряли", model.scaleMeasured)
+        // Саме те число, яке бачить власник на свіжому встановленні.
+        assertEquals(4.0, model.floorSocPercent, 0.1)
+
+        model.learn(90.0, 60.0, 13.5, atMs = 0L)
+        assertTrue("одна сесія — вже вимір", model.capacityMeasured)
+        assertFalse("а краї шкали з неї не беруться", model.scaleMeasured)
+
+        model.learnBuffer(displaySocPercent = 60.0, preciseSocPercent = 61.0, atMs = DAY_MS)
+        assertTrue("пара «панель / точний» міряє краї", model.scaleMeasured)
+    }
+
     /** Сесія складає відрізки, поки SOC не пройде помітний шмат шкали. */
     @Test
     fun `a session gathers segments until the charge moved enough`() {

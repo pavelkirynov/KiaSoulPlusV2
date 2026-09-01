@@ -151,22 +151,29 @@ private fun BatteryCard(model: MlModelInfo, prediction: MlPrediction?) {
         ) {
             Text(text = "Батарея", fontSize = 18.sp)
 
-            MetricRow("Робоча ємність", formatOrDash(model.usableCapacityKwh, 1, "кВт·год"))
+            // «≈» означає «це ще припущення, а не вимір». Ряди вузькі, тож позначка
+            // мусить бути короткою; що вона значить, сказано текстом нижче.
+            val assumed = if (model.capacityMeasured) "" else "≈ "
+            val assumedScale = if (model.scaleMeasured) "" else "≈ "
+
+            MetricRow("Робоча ємність", assumed + formatOrDash(model.usableCapacityKwh, 1, "кВт·год"))
             MetricRow("Середня ємність", formatOrDash(model.averageCapacityKwh, 1, "кВт·год"))
             MetricRow("Пройдено шкали", formatMeasurement(model.measuredScalePercent, 0, "%"))
-            MetricRow("Від очікуваної", formatOrDash(model.capacityVersusNominalPercent, 0, "%"))
-            MetricRow("Більше за рідний пакет", formatOrDash(model.timesLargerThanOriginal, 2, "×"))
-            MetricRow("Дно шкали", formatOrDash(model.floorSocPercent, 1, "% SOC"))
-            MetricRow("Стеля шкали", formatOrDash(model.ceilingSocPercent, 1, "% SOC"))
+            MetricRow("Від очікуваної", assumed + formatOrDash(model.capacityVersusNominalPercent, 0, "%"))
+            MetricRow("Більше за рідний пакет", assumed + formatOrDash(model.timesLargerThanOriginal, 2, "×"))
+            MetricRow("Дно шкали", assumedScale + formatOrDash(model.floorSocPercent, 1, "% SOC"))
+            MetricRow("Стеля шкали", assumedScale + formatOrDash(model.ceilingSocPercent, 1, "% SOC"))
             if (prediction != null) {
                 MetricRow("Реальний заряд", formatMeasurement(prediction.realPercent, 1, "%"))
             }
 
             Text(
-                text = "Батарея перепакована літій-залізо-фосфатними комірками, а BMS рахує " +
-                    "відсоток за паспортом рідних нікелевих — звідси й розбіжності з панеллю. " +
-                    "Ємність тут не взята з даташита, а виміряна: із пар «скільки з'їхав SOC / " +
-                    "скільки на це пішло енергії».",
+                text = "Батарея перепакована іншими літій-іонними комірками — близько 51 " +
+                    "кВт·год проти рідних 27, — а BMS рахує відсоток за паспортом рідних. " +
+                    "Звідси й розбіжності з панеллю. Ємність тут не взята з даташита, а " +
+                    "виміряна: із пар «скільки з'їхав SOC / скільки на це пішло енергії». " +
+                    "Знак «≈» біля числа означає, що його ще не виміряно — це те, з чого " +
+                    "модель починає.",
                 style = MaterialTheme.typography.bodySmall,
             )
 
@@ -174,11 +181,22 @@ private fun BatteryCard(model: MlModelInfo, prediction: MlPrediction?) {
                 text = "«Робоча» — інтеграл вивченої кривої по дозволеному BMS вікну. " +
                     "«Середня» — та сама енергія, поділена на пройдені відсотки, без жодної " +
                     "моделі: незалежна перевірка, і коли два числа сходяться, кривій можна " +
-                    "вірити. Розходяться вони закономірно: середня рахує лише ті ділянки " +
-                    "шкали, якими ви їздили, а на цих комірках середина щільніша за краї — " +
-                    "тож у того, хто тримає заряд між 40 і 70 %, вона завищує.",
+                    "вірити. Розходитися вони можуть закономірно: середня рахує лише ті " +
+                    "ділянки шкали, якими ви їздили, тож якщо крива нерівна, а заряд ви " +
+                    "тримаєте між 40 і 70 %, вона зміститься в бік середини шкали.",
                 style = MaterialTheme.typography.bodySmall,
             )
+
+            if (!model.scaleMeasured) {
+                Text(
+                    text = "Дно і стеля шкали поки не виміряні: 4.0 і 99.2 % — це початкове " +
+                        "припущення, а не властивість саме вашої батареї. Щоб їх виміряти, " +
+                        "потрібні пари «панельний відсоток / точний SOC» у різних кінцях " +
+                        "шкали: поїздіть із застосунком і на високому, і на низькому заряді, " +
+                        "і числа стануть вашими.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
 
             Text(
                 text = "Важливо про відсоток: він майже збігається з панельним і розходиться " +

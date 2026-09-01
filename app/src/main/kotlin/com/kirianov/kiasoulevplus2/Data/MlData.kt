@@ -233,6 +233,13 @@ data class MlModelInfo(
     val floorSocPercent: Double? = null,
     val ceilingSocPercent: Double? = null,
 
+    /**
+     * Чи це вже виміряні числа, чи ще апріорні припущення. Показувати припущення
+     * як вимір — найкоротший шлях втратити довіру до всього екрана.
+     */
+    val capacityMeasured: Boolean = false,
+    val scaleMeasured: Boolean = false,
+
     /** Вивчений постійний відбір (електроніка, клімат на стоянці), кВт. */
     val auxPowerKw: Double? = null,
 

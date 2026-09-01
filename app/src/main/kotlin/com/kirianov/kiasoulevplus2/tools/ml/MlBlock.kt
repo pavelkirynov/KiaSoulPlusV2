@@ -280,6 +280,8 @@ class MlBlock(
                     timesLargerThanOriginal = capacity.timesLargerThanOriginal,
                     floorSocPercent = capacity.floorSocPercent,
                     ceilingSocPercent = capacity.ceilingSocPercent,
+                    capacityMeasured = capacity.capacityMeasured,
+                    scaleMeasured = capacity.scaleMeasured,
                     auxPowerKw = consumption.auxPowerKw,
                     maeWhPerKm = consumption.meanAbsoluteErrorWhPerKm(),
                     terrainRoughness = consumption.noise.terrainRoughness,

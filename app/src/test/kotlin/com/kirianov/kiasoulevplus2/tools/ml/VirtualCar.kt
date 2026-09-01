@@ -17,8 +17,8 @@ class VirtualCar(
     val rollingKw: Double = 2.20,
     val aeroKw: Double = 0.62,
     val heatingKw: Double = 2.00,
-    /** Корисна ємність перепакованого пакета, кВт·год. */
-    val capacityKwh: Double = 45.0,
+    /** Ємність перепакованого пакета, кВт·год: число від того, хто його збирав. */
+    val capacityKwh: Double = 51.0,
     private val seed: Int = 42,
 ) {
 
