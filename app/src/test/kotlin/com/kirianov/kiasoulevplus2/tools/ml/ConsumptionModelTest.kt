@@ -159,6 +159,62 @@ class ConsumptionModelTest {
     }
 
     /**
+     * Місто — це розгін і гальмування: тяга і рекуперація впереміш. Такі відрізки
+     * мусять ПРИЙМАТИСЯ (захист від спусків їх не стосується: у місті рекуперація
+     * повертає помітно менше половини тяги), і вчитися модель має саме чистої
+     * витрати — з уже врахованим поверненням. Це не «занижене» число, яке треба
+     * виправляти: саме стільки енергії насправді покидає батарею, і саме з нього
+     * рахується запас ходу.
+     */
+    @Test
+    fun `city stop-and-go with regeneration teaches the true net consumption`() {
+        val car = VirtualCar()
+        val model = ConsumptionModel()
+
+        var accepted = 0
+        car.week(segments = 120)
+            .map { segment ->
+                // Та сама чиста енергія, але тепер видно складники: гальмування
+                // повернуло приблизно третину того, що з'їла тяга.
+                val regen = segment.energyKwh * 0.45
+                segment.copy(tractionKwh = segment.energyKwh + regen, regenKwh = regen)
+            }
+            .forEach { if (model.learn(it) != null) accepted++ }
+
+        assertTrue("міські відрізки з рекуперацією мали прийнятися: $accepted", accepted > 110)
+        val truth = car.trueWhPerKm(45.0)
+        assertEquals(
+            "вивчитися мала чиста витрата, а не тяга",
+            truth,
+            model.predictWhPerKm(DriveConditions.steady(45.0)),
+            truth * 0.05,
+        )
+    }
+
+    /**
+     * Рвана міська їзда з тією самою СЕРЕДНЬОЮ швидкістю дорожча за рівну: опір
+     * повітря росте як куб, а рекуперація повертає не все. Модель бачить це через
+     * ⟨v³⟩ і розкид швидкості, тож «повільно і смикано» не має плутатися з
+     * «повільно і рівно».
+     */
+    @Test
+    fun `jerky city driving costs more than steady driving at the same average speed`() {
+        val car = VirtualCar()
+        val model = ConsumptionModel()
+        car.week(segments = 150).forEach(model::learn)
+
+        val jerky = DriveConditions.of(car.segment(speedKmh = 30.0, speedSpreadKmh = 12.0))
+        val steady = DriveConditions.steady(30.0)
+
+        val jerkyWhPerKm = model.predictWhPerKm(jerky)
+        val steadyWhPerKm = model.predictWhPerKm(steady)
+        assertTrue(
+            "рвана їзда мала вийти дорожчою: $jerkyWhPerKm проти $steadyWhPerKm",
+            jerkyWhPerKm > steadyWhPerKm * 1.02,
+        )
+    }
+
+    /**
      * Пряма відповідь на «качусь із гори, і в мене від'ємна витрата»: скільки б
      * спусків підряд не трапилося, прогноз для рівної дороги не має поповзти
      * в бік «безкоштовно».
