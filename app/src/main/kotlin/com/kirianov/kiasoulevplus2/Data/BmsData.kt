@@ -16,6 +16,15 @@ data class BmsData(
      */
     val cumulativeEnergyChargedKwh: Double = 0.0,
     val cumulativeEnergyDischargedKwh: Double = 0.0,
+
+    /**
+     * Ті самі лічильники, але в амперу-годинах. Показуються поруч із кВт·год
+     * навмисно: їх відношення мусить дати середню напругу пакета, і саме ця
+     * перехресна перевірка викриває читання не тих байтів. Раніше як кВт·год
+     * показувалися саме ці числа.
+     */
+    val cumulativeChargedAh: Double = 0.0,
+    val cumulativeDischargedAh: Double = 0.0,
 ) {
     val hasData: Boolean get() = displaySoc >= 0.0
 

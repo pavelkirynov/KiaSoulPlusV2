@@ -20,21 +20,31 @@ object BmsResponseDecoder {
     private const val VOLTAGE_HIGH_INDEX = 14    // беззнакове 16-бітне, * 10
     private const val TEMP_MAX_INDEX = 16        // знакове 8-бітне, °C
 
-    // Лічильники за весь час життя батареї: по чотири байти, десяті кВт·год.
-    private const val ENERGY_CHARGED_INDEX = 32
-    private const val ENERGY_DISCHARGED_INDEX = 36
+    // Лічильники за весь час життя батареї. Лежать поспіль, по чотири байти,
+    // усі в десятих своєї одиниці:
+    //
+    //   32  прийнято, Ач        36  віддано, Ач
+    //   40  прийнято, кВт·год   44  віддано, кВт·год
+    //
+    // ЧОМУ ЦЕ ВАЖЛИВО. Спершу як кВт·год читалися саме зсуви 32 і 36, тобто
+    // амперу-години. Помилку видно перехресною перевіркою: кВт·год поділити на Ач
+    // мусить дати середню напругу пакета. На реальних даних це 366.8 В для заряду
+    // і 353.4 В для розряду — обидва в межах робочої напруги Soul EV, і зарядна
+    // вище за розрядну, як і має бути. З Ач на місці кВт·год витрата на 100 км
+    // виходила завищеною приблизно в 2.7 раза.
+    private const val CHARGED_AH_INDEX = 32
+    private const val DISCHARGED_AH_INDEX = 36
+    private const val CHARGED_KWH_INDEX = 40
+    private const val DISCHARGED_KWH_INDEX = 44
 
     /** Найбільший індекс основних показників: коротший кадр розбирати немає сенсу. */
     private const val MIN_FRAME_SIZE = TEMP_MAX_INDEX + 1
-
-    /** Лічильники лежать далі за основні показники і в короткому кадрі їх просто немає. */
-    private const val MIN_FRAME_SIZE_WITH_COUNTERS = ENERGY_DISCHARGED_INDEX + 4
 
     /**
      * Понад цю межу значення лічильника не може бути фізичним і означає, що ми
      * прочитали не ті байти. Краще показати прочерк, ніж правдоподібне сміття.
      */
-    private const val MAX_PLAUSIBLE_LIFETIME_KWH = 1_000_000.0
+    private const val MAX_PLAUSIBLE_LIFETIME_COUNTER = 1_000_000.0
 
     /**
      * Повертає BmsData з кадру. Якщо кадр коротший за очікуваний — повертає
@@ -48,19 +58,22 @@ object BmsResponseDecoder {
             batteryVoltage = FrameParser.unsigned16(bytes, VOLTAGE_HIGH_INDEX) / 10.0,
             batteryCurrent = FrameParser.signed16(bytes, CURRENT_HIGH_INDEX) / 10.0,
             batteryTempC = FrameParser.signed8(bytes, TEMP_MAX_INDEX).toDouble(),
-            cumulativeEnergyChargedKwh = energyAt(bytes, ENERGY_CHARGED_INDEX),
-            cumulativeEnergyDischargedKwh = energyAt(bytes, ENERGY_DISCHARGED_INDEX),
+            cumulativeChargedAh = counterAt(bytes, CHARGED_AH_INDEX),
+            cumulativeDischargedAh = counterAt(bytes, DISCHARGED_AH_INDEX),
+            cumulativeEnergyChargedKwh = counterAt(bytes, CHARGED_KWH_INDEX),
+            cumulativeEnergyDischargedKwh = counterAt(bytes, DISCHARGED_KWH_INDEX),
         )
     }
 
     /**
-     * Лічильники читаються окремо від решти: короткий кадр не повинен позбавляти
-     * додаток заряду й напруги, які лежать на початку і вже прочитані.
+     * Лічильники читаються окремо від решти й КОЖЕН перевіряє свою довжину:
+     * короткий кадр не повинен позбавляти додаток ні заряду з напругою, які лежать
+     * на початку, ні тих лічильників, які до кадру все ж увійшли.
      */
-    private fun energyAt(bytes: List<Int>, index: Int): Double {
-        if (bytes.size < MIN_FRAME_SIZE_WITH_COUNTERS) return 0.0
+    private fun counterAt(bytes: List<Int>, index: Int): Double {
+        if (bytes.size < index + 4) return 0.0
 
         val value = FrameParser.unsigned32(bytes, index) / 10.0
-        return if (value <= MAX_PLAUSIBLE_LIFETIME_KWH) value else 0.0
+        return if (value <= MAX_PLAUSIBLE_LIFETIME_COUNTER) value else 0.0
     }
 }

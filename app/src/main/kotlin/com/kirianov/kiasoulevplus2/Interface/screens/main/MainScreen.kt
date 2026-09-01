@@ -139,6 +139,18 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
                         "Прийнято",
                         formatMeasurement(bms.cumulativeEnergyChargedKwh, 1, "кВт·год"),
                     )
+
+                    // Ампер-години поруч навмисно: їх відношення до кВт·год дає
+                    // середню напругу пакета, і саме цим звіряється, що прочитані
+                    // ті байти. Раніше як кВт·год показувалися саме ці числа.
+                    MetricRow(
+                        "Віддано, заряд",
+                        formatMeasurement(bms.cumulativeDischargedAh, 1, "А·год"),
+                    )
+                    MetricRow(
+                        "Прийнято, заряд",
+                        formatMeasurement(bms.cumulativeChargedAh, 1, "А·год"),
+                    )
                 }
             }
 
