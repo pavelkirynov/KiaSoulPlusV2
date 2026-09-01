@@ -183,8 +183,14 @@ class RepackedBatteryTest {
         )!!
 
         assertTrue("змішана їзда: ${summer.rangeKm} км", summer.rangeKm in 200.0..300.0)
-        assertTrue("зима на трасі: ${winterHighway.rangeKm} км", winterHighway.rangeKm in 150.0..250.0)
-        assertTrue("взимку має бути коротше", winterHighway.rangeKm < summer.rangeKm)
+        // Смуга широка навмисно: модель училася на теплій погоді, тож морозний
+        // доданок у неї ще апріорний, і зимовий прогноз тут свідомо оптимістичний.
+        // Тримається саме властивість — зима коштує помітно дорожче, — а не число.
+        assertTrue("зима на трасі: ${winterHighway.rangeKm} км", winterHighway.rangeKm in 150.0..270.0)
+        assertTrue(
+            "взимку на трасі має бути помітно коротше: ${winterHighway.rangeKm} проти ${summer.rangeKm}",
+            winterHighway.rangeKm < summer.rangeKm * 0.9,
+        )
 
         assertTrue("витрата має бути правдоподібною: ${summer.whPerKm}", summer.whPerKm in 140.0..230.0)
         assertTrue("на 80 % SOC — приблизно чотири п'ятих шляху", run {

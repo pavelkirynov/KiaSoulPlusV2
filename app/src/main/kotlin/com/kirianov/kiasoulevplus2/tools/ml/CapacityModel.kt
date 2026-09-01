@@ -57,7 +57,7 @@ class CapacityModel(
      */
     private val energy: OnlineRegression = OnlineRegression(
         size = BINS,
-        prior = DoubleArray(BINS) { NOMINAL_CAPACITY_KWH / BINS },
+        prior = DoubleArray(BINS) { PRIOR_FULL_SCALE_KWH / BINS },
         priorSigma = DoubleArray(BINS) { PRIOR_BIN_SIGMA_KWH },
         noiseSigma = 0.5,
         forgetMs = OnlineRegression.FORGET_TWO_YEARS_MS,
@@ -276,7 +276,7 @@ class CapacityModel(
         return if (total.isFinite() && total > 0.0) {
             total
         } else {
-            NOMINAL_CAPACITY_KWH * (toSocPercent - fromSocPercent) / 100.0
+            PRIOR_FULL_SCALE_KWH * (toSocPercent - fromSocPercent) / 100.0
         }
     }
 
@@ -333,8 +333,12 @@ class CapacityModel(
     }
 
     companion object {
-        /** Апріорна корисна ємність перепакованого пакета. Див. `Vehicle`. */
+        /**
+         * Апріорна корисна ємність: енергія **дозволеного вікна**, від нуля на
+         * панелі до сотні. Саме це й міряє зарядка від нуля до ста. Див. `Vehicle`.
+         */
         const val NOMINAL_CAPACITY_KWH = Vehicle.USABLE_CAPACITY_KWH
+
 
         /** На скільки шматків ділиться шкала. Десять відсотків на корзину. */
         const val BINS = 10
@@ -373,6 +377,15 @@ class CapacityModel(
         /** Панель зазвичай показує нуль, коли в BMS ще лишається кілька відсотків. */
         const val PRIOR_BUFFER_OFFSET = -4.2
         const val PRIOR_BUFFER_SLOPE = 1.05
+
+        /**
+         * Апріорна ємність, розтягнута на всю шкалу BMS: корзини описують шкалу
+         * цілком, а вікно — лише її частину. Панель розтягує вікно в нуль-сто з
+         * нахилом `PRIOR_BUFFER_SLOPE`, тож уся шкала апріорі важить рівно в стільки
+         * ж разів більше. Так апріорне вікно інтегрується точно у виміряне зарядкою
+         * число, а не в дев'яносто п'ять його відсотків.
+         */
+        const val PRIOR_FULL_SCALE_KWH = NOMINAL_CAPACITY_KWH * PRIOR_BUFFER_SLOPE
 
         /** Пряму буферів будуємо лише за серединою шкали, без «поличок» на краях. */
         const val BUFFER_FIT_FROM_PERCENT = 10.0
