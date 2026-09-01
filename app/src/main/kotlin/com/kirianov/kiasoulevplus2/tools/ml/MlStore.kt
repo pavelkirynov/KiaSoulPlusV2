@@ -15,7 +15,6 @@
 
 package com.kirianov.kiasoulevplus2.tools.ml
 
-import android.content.Context
 import com.kirianov.kiasoulevplus2.Data.MlSegment
 import java.io.File
 import java.io.IOException
@@ -29,8 +28,6 @@ interface MlStore {
 }
 
 class FileMlStore(private val directory: File) : MlStore {
-
-    constructor(context: Context) : this(context.applicationContext.filesDir)
 
     private val modelFile get() = File(directory, MODEL_FILE)
     private val logFile get() = File(directory, LOG_FILE)

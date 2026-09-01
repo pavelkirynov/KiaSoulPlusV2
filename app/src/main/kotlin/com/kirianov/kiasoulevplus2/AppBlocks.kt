@@ -30,7 +30,9 @@ class AppBlocks(context: Context) {
     private val probe = ProbeBlock()
     private val vehicle = VehicleBlock()
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
-    private val prediction = MlBlock(FileMlStore(context.applicationContext))
+    // Каталог, а не Context: так сховище моделей лишається чистим Kotlin і
+    // перевіряється тестами без емулятора, як і решта логіки проєкту.
+    private val prediction = MlBlock(FileMlStore(context.applicationContext.filesDir))
     private val foreground = ForegroundBlock(context.applicationContext)
 
     fun start(scope: CoroutineScope) {
