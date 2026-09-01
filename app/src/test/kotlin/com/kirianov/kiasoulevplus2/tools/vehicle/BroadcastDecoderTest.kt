@@ -85,6 +85,36 @@ class BroadcastDecoderTest {
         assertEquals(201, result.rangeKm)
     }
 
+    /**
+     * Байт 0 того самого кадру каже, скільки кілометрів з'їдає клімат просто зараз.
+     * Це єдине пряме свідчення про пічку на всій шині — температура за бортом лише
+     * натякає на неї.
+     */
+    @Test
+    fun `decodes what the climate is costing right now`() {
+        // b0 = 0x2A = 42 -> 4.2 км з'їдає клімат
+        val result = BroadcastDecoder.merge(
+            VehicleData(),
+            listOf(frame("200", 0x2A, 0x80, 0x64, 0, 0, 0, 0, 0)),
+        )
+
+        assertEquals(4.2, result.climateExtraKm, 1e-9)
+        assertTrue(result.hasClimateExtra)
+        assertEquals("запас ходу має читатися як і раніше", 201, result.rangeKm)
+    }
+
+    /** Вимкнений клімат — це чесний нуль, а не «немає даних». */
+    @Test
+    fun `a switched off climate reads as nought, not as missing`() {
+        val result = BroadcastDecoder.merge(
+            VehicleData(),
+            listOf(frame("200", 0, 0x80, 0x64, 0, 0, 0, 0, 0)),
+        )
+
+        assertEquals(0.0, result.climateExtraKm, 1e-9)
+        assertTrue("нуль — це теж дані", result.hasClimateExtra)
+    }
+
     @Test
     fun `decodes the ambient temperature below zero`() {
         // b5 = 0x46 = 70 -> 70/2 - 40 = -5.0 °C

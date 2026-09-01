@@ -81,6 +81,19 @@ object GeneralData {
 
     fun clearTripHistory() = _state.update { it.copy(tripHistory = TripHistory()) }
 
+    // --- Прогноз залишку ходу: пише блок прогнозу ------------------------------
+
+    fun updateMl(transform: (MlData) -> MlData) = _state.update { it.copy(ml = transform(it.ml)) }
+
+    // --- Запити до блока прогнозу: пише інтерфейс ------------------------------
+
+    fun requestMlRetrain() = updateMl { it.copy(request = MlRequest.Retrain) }
+
+    fun requestMlReset() = updateMl { it.copy(request = MlRequest.Reset) }
+
+    /** Викликає блок прогнозу, коли прийняв запит до виконання. */
+    fun clearMlRequest() = updateMl { it.copy(request = MlRequest.None) }
+
     // --- Вибір діапазону: пише інтерфейс ---------------------------------------
 
     fun selectConsumptionWindow(window: ConsumptionWindow) =

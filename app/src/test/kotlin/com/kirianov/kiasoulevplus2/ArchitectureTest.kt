@@ -19,11 +19,13 @@ class ArchitectureTest {
         "Interface",
         "services.bluetooth",
         "services.AndroidAuto",
+        "services.foreground",
         "tools.battery",
         "tools.calculations",
         "tools.storage",
         "tools.probe",
         "tools.vehicle",
+        "tools.ml",
         "tools.format",
         "tools.frames",
     )

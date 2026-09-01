@@ -22,6 +22,17 @@ data class VehicleData(
     /** Залишок ходу за бортовим компьютером, км. Кадр 200. */
     val rangeKm: Int = 0,
 
+    /**
+     * Наскільки виріс би запас ходу з вимкненим кліматом, км. Кадр 200, байт 0.
+     *
+     * Це єдине пряме свідчення про клімат, яке взагалі є на шині: стану печки чи
+     * кондиціонера авто не передає, а тут воно саме каже, у скільки кілометрів
+     * обходиться клімат просто зараз. Для моделі витрати це набагато краще за
+     * здогад із температури за бортом — вона показує погоду, а не те, чи ввімкнена
+     * пічка.
+     */
+    val climateExtraKm: Double = NO_DATA,
+
     /** Температура за бортом, °C. Кадр 653. Власна познака: −40 °C теж дійсне значення. */
     val ambientTempC: Double = NO_TEMPERATURE,
 
@@ -33,6 +44,7 @@ data class VehicleData(
     val hasDisplaySoc: Boolean get() = displaySocPercent >= 0.0
     val hasPreciseSoc: Boolean get() = preciseSocPercent >= 0.0
     val hasRange: Boolean get() = rangeKm > 0
+    val hasClimateExtra: Boolean get() = climateExtraKm >= 0.0
     val hasAmbientTemp: Boolean get() = ambientTempC > NO_TEMPERATURE
 
     companion object {
