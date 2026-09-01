@@ -282,6 +282,7 @@ class MlBlock(
                     ceilingSocPercent = capacity.ceilingSocPercent,
                     capacityMeasured = capacity.capacityMeasured,
                     scaleMeasured = capacity.scaleMeasured,
+                    scaleCurve = capacity.scaleCurve(),
                     auxPowerKw = consumption.auxPowerKw,
                     maeWhPerKm = consumption.meanAbsoluteErrorWhPerKm(),
                     terrainRoughness = consumption.noise.terrainRoughness,

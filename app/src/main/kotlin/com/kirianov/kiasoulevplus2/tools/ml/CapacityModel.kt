@@ -32,6 +32,7 @@
 package com.kirianov.kiasoulevplus2.tools.ml
 
 import com.kirianov.kiasoulevplus2.Data.MlSegment
+import com.kirianov.kiasoulevplus2.Data.ScalePoint
 import kotlin.math.abs
 
 class CapacityModel(
@@ -217,6 +218,41 @@ class CapacityModel(
         buffer.observe(doubleArrayOf(1.0, precise), display, weight = 1.0, atMs = atMs)
     }
 
+    /**
+     * Точний SOC, який стоїть за відсотком на панелі.
+     *
+     * Панель лінійно розтягує вікно [дно, стеля] у нуль-сто, тож зворотний перехід —
+     * проста інтерполяція між тими самими краями. Це не спрощення: воно тотожно
+     * дорівнює оберненню прямої «панель ↔ BMS», з якої дно і стелю й виведено, але
+     * не ламається, коли нахил ще апріорний.
+     */
+    fun preciseForDisplay(displayPercent: Double): Double {
+        val floor = floorSocPercent
+        val ceiling = ceilingSocPercent
+        val share = (displayPercent / 100.0).coerceIn(0.0, 1.0)
+        return floor + share * (ceiling - floor)
+    }
+
+    /** Реальний відсоток, який відповідає відсотку на панелі. */
+    fun realPercentForDisplay(displayPercent: Double): Double =
+        realPercent(preciseForDisplay(displayPercent))
+
+    /**
+     * Крива «панель → реально» для показу: та сама залежність, яку модель вивчила,
+     * у вигляді точок від нуля до ста.
+     *
+     * Кінці нерухомі за побудовою — нуль на панелі це нуль реальних, сто це сто, —
+     * бо шкала на екрані свідомо збігається з дозволеним BMS вікном. Уся інформація
+     * тут у **прогині** між кінцями: він і показує, де панель поспішає, а де відстає.
+     */
+    fun scaleCurve(points: Int = CURVE_POINTS): List<ScalePoint> {
+        val count = points.coerceAtLeast(2)
+        return (0 until count).map { index ->
+            val display = index * 100.0 / (count - 1)
+            ScalePoint(dialPercent = display, realPercent = realPercentForDisplay(display))
+        }
+    }
+
     /** Скільки кВт·год важить один відсоток у цій точці шкали. */
     fun kwhPerPercentAt(socPercent: Double): Double {
         val bin = binOf(socPercent)
@@ -352,6 +388,9 @@ class CapacityModel(
         const val MAX_FLOOR_PERCENT = 25.0
         const val MIN_WINDOW_PERCENT = 40.0
         const val MIN_SLOPE = 0.5
+
+        /** Стільки точок вистачає, щоб крива на екрані була гладкою. */
+        const val CURVE_POINTS = 21
 
         const val DEFAULT_RELATIVE_SIGMA = 0.25
         const val MIN_RELATIVE_SIGMA = 0.02

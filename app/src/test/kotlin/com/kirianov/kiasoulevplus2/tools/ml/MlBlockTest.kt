@@ -47,6 +47,22 @@ class MlBlockTest {
         assertTrue("модель мала порахувати відрізки", GeneralData.state.value.ml.model.segments > 0)
     }
 
+    /**
+     * Крива для екрана мусить доїжджати до стану. Ознаку легко порахувати в моделі
+     * й забути віддати нагору — тоді графік буде порожній, а жоден тест моделі цього
+     * не побачить.
+     */
+    @Test
+    fun `the dial to real curve reaches the screen`() {
+        startBlock()
+        drive(seconds = 20)
+
+        val curve = GeneralData.state.value.ml.model.scaleCurve
+        assertTrue("крива мала доїхати до стану: ${curve.size}", curve.size >= 2)
+        assertEquals(0.0, curve.first().dialPercent, 1e-9)
+        assertEquals(100.0, curve.last().dialPercent, 1e-9)
+    }
+
     /** Прогноз має з'явитися, щойно відомий заряд, — не чекаючи тижня навчання. */
     @Test
     fun `a prediction appears as soon as the charge is known`() {

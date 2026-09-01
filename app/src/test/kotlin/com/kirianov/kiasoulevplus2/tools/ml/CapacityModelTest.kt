@@ -126,6 +126,64 @@ class CapacityModelTest {
         assertTrue("пара «панель / точний» міряє краї", model.scaleMeasured)
     }
 
+    /**
+     * Крива для графіка «панель проти реальності». Кінці прибиті за побудовою — і це
+     * не формальність, а вимога: нуль і сто на екрані мусять бути тим самим нулем і
+     * сотнею, які дозволяє BMS.
+     */
+    @Test
+    fun `the dial to real curve is pinned at both ends and never falls`() {
+        val curve = CapacityModel().scaleCurve()
+
+        assertEquals(CapacityModel.CURVE_POINTS, curve.size)
+        assertEquals(0.0, curve.first().dialPercent, 1e-9)
+        assertEquals(0.0, curve.first().realPercent, 0.01)
+        assertEquals(100.0, curve.last().dialPercent, 1e-9)
+        assertEquals(100.0, curve.last().realPercent, 0.01)
+
+        // Заряд не може падати, коли стрілка росте.
+        curve.zipWithNext().forEach { (lower, upper) ->
+            assertTrue(
+                "крива мала лишитися зростаючою: ${lower.realPercent} -> ${upper.realPercent}",
+                upper.realPercent >= lower.realPercent - 1e-9,
+            )
+        }
+    }
+
+    /**
+     * І головне, заради чого графік узагалі є: кривина шкали мусить бути на ньому
+     * видна. На пакеті, де відсоток унизу дорожчий, середина панелі відповідає
+     * помітно більшому реальному заряду.
+     */
+    @Test
+    fun `a bent scale shows up as a bend in the curve`() {
+        val model = CapacityModel()
+
+        // dQ/du = 56 − 10·u: унизу шкали відсоток дорожчий, угорі дешевший.
+        fun energyBetween(fromPercent: Double, toPercent: Double): Double {
+            val from = fromPercent / 100.0
+            val to = toPercent / 100.0
+            return 56.0 * (to - from) - 10.0 * (to * to - from * from) / 2.0
+        }
+
+        var at = 0L
+        listOf(
+            100.0 to 70.0, 70.0 to 40.0, 40.0 to 10.0, 90.0 to 45.0,
+            60.0 to 20.0, 95.0 to 60.0, 50.0 to 12.0, 85.0 to 35.0,
+        ).forEach { (from, to) ->
+            model.learn(from, to, energyBetween(to, from), atMs = at)
+            at += DAY_MS
+        }
+
+        val middle = model.realPercentForDisplay(50.0)
+        assertTrue("кривина мала підняти реальний відсоток: $middle", middle > 51.0)
+        assertTrue("але не в рази — кінці ж прибиті: $middle", middle < 60.0)
+
+        // Обидва кінці лишилися на місці навіть після навчання.
+        assertEquals(0.0, model.realPercentForDisplay(0.0), 0.01)
+        assertEquals(100.0, model.realPercentForDisplay(100.0), 0.01)
+    }
+
     /** Сесія складає відрізки, поки SOC не пройде помітний шмат шкали. */
     @Test
     fun `a session gathers segments until the charge moved enough`() {

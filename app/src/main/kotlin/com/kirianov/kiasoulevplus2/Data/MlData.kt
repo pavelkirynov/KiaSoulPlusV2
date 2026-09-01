@@ -192,6 +192,18 @@ data class MlPrediction(
 )
 
 /** Залишок ходу, якщо всю дорогу їхати з однією швидкістю. */
+/**
+ * Точка кривої «панель → реально»: скільки справжніх відсотків стоїть за відсотком
+ * на приладовій панелі.
+ *
+ * Кінці нерухомі: 0 → 0 і 100 → 100, бо шкала на екрані свідомо збігається з
+ * дозволеним BMS вікном. Цікавий саме прогин між ними.
+ */
+data class ScalePoint(
+    val dialPercent: Double,
+    val realPercent: Double,
+)
+
 data class RangeScenario(
     val speedKmh: Double,
     val rangeKm: Double,
@@ -239,6 +251,9 @@ data class MlModelInfo(
      */
     val capacityMeasured: Boolean = false,
     val scaleMeasured: Boolean = false,
+
+    /** Вивчена крива «відсоток на панелі → справжній відсоток», від 0 до 100. */
+    val scaleCurve: List<ScalePoint> = emptyList(),
 
     /** Вивчений постійний відбір (електроніка, клімат на стоянці), кВт. */
     val auxPowerKw: Double? = null,
