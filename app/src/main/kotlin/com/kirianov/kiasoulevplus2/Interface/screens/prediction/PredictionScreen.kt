@@ -52,6 +52,8 @@ fun PredictionScreen(predictionViewModel: PredictionViewModel = viewModel()) {
 
         ml.prediction?.let { ScenarioCard(it) }
 
+        EnergyCurveCard(ml.model, ml.prediction)
+
         BatteryCard(ml.model, ml.prediction)
 
         ScaleCurveCard(ml.model, ml.prediction, state.vehicle)

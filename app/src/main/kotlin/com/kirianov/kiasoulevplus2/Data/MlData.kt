@@ -228,6 +228,35 @@ data class ScalePoint(
     val realPercent: Double,
 )
 
+/**
+ * Точка кривої «скільки кВт·год стоїть за відсотком шкали».
+ *
+ * Не пряма: одна й та сама одиниця шкали важить різну кількість енергії в різних
+ * місцях, і саме тому останні відсотки «тануть» швидше за перші.
+ */
+data class EnergyPoint(
+    val socPercent: Double,
+    val energyKwh: Double,
+)
+
+/**
+ * Де на шкалі стоїть відомий залишок енергії.
+ *
+ * Пошук саме по кривій, а не перерахунок через модель: крива вже побудована, і
+ * взяте з неї положення ляже рівно на лінію графіка, а не поруч із нею.
+ */
+fun List<EnergyPoint>.socAtEnergy(energyKwh: Double): Double? {
+    if (size < 2) return null
+
+    val pair = zipWithNext().firstOrNull { (a, b) -> energyKwh in a.energyKwh..b.energyKwh }
+        ?: return if (energyKwh <= first().energyKwh) first().socPercent else last().socPercent
+
+    val (a, b) = pair
+    val span = b.energyKwh - a.energyKwh
+    if (span <= 0.0) return a.socPercent
+    return a.socPercent + (energyKwh - a.energyKwh) / span * (b.socPercent - a.socPercent)
+}
+
 data class RangeScenario(
     val speedKmh: Double,
     val rangeKm: Double,
@@ -255,6 +284,9 @@ data class MlModelInfo(
 
     /** Скільки відсотків шкали загалом пройшло через вимірювання. */
     val measuredScalePercent: Double = 0.0,
+
+    /** Крива «кВт·год проти відсотка», виміряна на цій батареї. */
+    val energyCurve: List<EnergyPoint> = emptyList(),
 
     /** Вивчена ємність відносно очікуваної від перепаковки, %. */
     val capacityVersusNominalPercent: Double? = null,

@@ -289,6 +289,7 @@ class MlBlock(
                     capacityMeasured = capacity.capacityMeasured,
                     scaleMeasured = capacity.scaleMeasured,
                     scaleCurve = capacity.scaleCurve(),
+                    energyCurve = capacity.energyCurve(),
                     auxPowerKw = consumption.auxPowerKw,
                     maeWhPerKm = consumption.meanAbsoluteErrorWhPerKm(),
                     terrainRoughness = consumption.noise.terrainRoughness,

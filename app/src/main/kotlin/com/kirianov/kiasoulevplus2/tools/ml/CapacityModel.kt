@@ -32,6 +32,7 @@
 package com.kirianov.kiasoulevplus2.tools.ml
 
 import com.kirianov.kiasoulevplus2.Data.MlSegment
+import com.kirianov.kiasoulevplus2.Data.EnergyPoint
 import com.kirianov.kiasoulevplus2.Data.ScalePoint
 import kotlin.math.abs
 
@@ -277,6 +278,29 @@ class CapacityModel(
             total
         } else {
             PRIOR_FULL_SCALE_KWH * (toSocPercent - fromSocPercent) / 100.0
+        }
+    }
+
+    /**
+     * Крива «кВт·год проти відсотка»: скільки корисної енергії лежить між справжнім
+     * дном і кожною точкою шкали.
+     *
+     * Чому це не пряма і навіщо крива взагалі. Ємність тут міряється корзинами по
+     * шкалі, і корзини виходять різної ваги: біля дна й біля стелі відсоток шкали
+     * коштує менше енергії, ніж у середині. Одним числом ємності це не передати, а
+     * на кривій одразу видно, де відсотки «тануть» швидше.
+     */
+    fun energyCurve(points: Int = CURVE_POINTS): List<EnergyPoint> {
+        if (!capacityMeasured) return emptyList()
+
+        val count = points.coerceAtLeast(2)
+        val floor = floorSocPercent
+        val ceiling = ceilingSocPercent
+        if (ceiling <= floor) return emptyList()
+
+        return (0 until count).map { index ->
+            val soc = floor + index * (ceiling - floor) / (count - 1)
+            EnergyPoint(socPercent = soc, energyKwh = energyBetween(floor, soc))
         }
     }
 

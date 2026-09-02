@@ -297,6 +297,16 @@ class CapacityModelTest {
         return observation!!
     }
 
+    /** Батарея відомої ємності, вивчена десятком заїздів по різних частинах шкали. */
+    private fun trainedOnKnownCapacity(capacityKwh: Double): CapacityModel {
+        val model = CapacityModel()
+        sessions().forEachIndexed { index, (from, to) ->
+            val energy = capacityKwh * (from - to) / 100.0
+            model.learn(from, to, energy, atMs = index * DAY_MS)
+        }
+        return model
+    }
+
     private fun sessions() = listOf(
         90.0 to 60.0,
         75.0 to 40.0,
@@ -312,5 +322,42 @@ class CapacityModelTest {
 
     private companion object {
         const val DAY_MS = 24L * 60 * 60 * 1000
+    }
+
+    /**
+     * Крива «кВт·год проти відсотка» мусить рости монотонно від нуля на дні до
+     * повної ємності на стелі: це та сама виміряна енергія, лише накопичена.
+     */
+    @Test
+    fun `the energy curve rises from zero to the learned capacity`() {
+        val model = trainedOnKnownCapacity(51.0)
+
+        val curve = model.energyCurve()
+
+        assertTrue("крива мусить бути", curve.size >= 2)
+        assertEquals(0.0, curve.first().energyKwh, 0.001)
+        assertEquals(model.usableCapacityKwh, curve.last().energyKwh, 0.5)
+
+        curve.zipWithNext().forEach { (a, b) ->
+            assertTrue("енергія не може падати з відсотком", b.energyKwh >= a.energyKwh)
+            assertTrue("відсоток мусить рости", b.socPercent > a.socPercent)
+        }
+    }
+
+    /** Кінці кривої — справжні дно й стеля, а не нуль і сто зі шкали панелі. */
+    @Test
+    fun `the curve spans the real floor and ceiling`() {
+        val model = trainedOnKnownCapacity(51.0)
+
+        val curve = model.energyCurve()
+
+        assertEquals(model.floorSocPercent, curve.first().socPercent, 0.001)
+        assertEquals(model.ceilingSocPercent, curve.last().socPercent, 0.001)
+    }
+
+    /** Поки ємність не міряли, малювати нема чого — краще порожньо, ніж вигадане. */
+    @Test
+    fun `an unmeasured battery has no curve`() {
+        assertTrue(CapacityModel().energyCurve().isEmpty())
     }
 }
