@@ -4,6 +4,13 @@
 // Єдина точка, через яку в додатку йдуть CAN-запити: тримає стан ініціалізації адаптера,
 // сам переініціалізує його після збою і кидає IOException, коли зв'язок втрачено.
 //
+// ЧОМУ ТУТ ЖИВЕ ВІДНОВЛЕННЯ:
+// Адаптер має власний стан, який переживає застосунок. Найгірший його різновид —
+// «лишився в режимі монітора»: він безперервно віддає кадри й не друкує промпт,
+// тож ані запити не проходять, ані перезапуск застосунку не допомагає. Тому кожна
+// ініціалізація починається з зупинки монітора й чекання тишi, а вихід із вікна
+// перевіряє, що потік справді стих, — і якщо ні, змушує повне скидання.
+//
 // ЧОМУ ТУТ М'ЮТЕКС:
 // Запит — це дві посилки поспіль: «AT SH <заголовок>» і сама команда. Якщо між ними
 // вклиниться інший запит зі своїм заголовком, команда піде не тому блоку, а відповіді
@@ -61,7 +68,22 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
     private suspend fun initUnlocked() {
         isInitialized = false
 
-        adapter.sendCommand("AT Z")           // повне скидання
+        // Адаптер міг лишитися в режимі монітора: застосунок закрили, телефон
+        // заснув або зв'язок обірвався рівно посеред вікна. Сам адаптер про це не
+        // знає й далі сипле кадри — без промпта, без кінця. «AT Z» у такому потоці
+        // просто тонув, і саме тому перезапуск застосунку нічого не лікував: завис
+        // не застосунок, а адаптер, і новий процес упирався в те саме.
+        //
+        // Тому спершу зупиняємо монітор одним символом і чекаємо тишу, і лише
+        // потім говоримо. Друга спроба — бо перший символ міг піти в той момент,
+        // коли адаптер віддавав кадр, і загубитися.
+        quietDown()
+        try {
+            adapter.sendCommand("AT Z")       // повне скидання
+        } catch (e: IOException) {
+            quietDown()
+            adapter.sendCommand("AT Z")
+        }
         delay(RESET_DELAY_MS)
         adapter.sendCommand("AT E0")          // вимикаємо ехо
         delay(SHORT_DELAY_MS)
@@ -144,12 +166,15 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
      * H0/CAF1 — інакше звичайні запити почнуть приходити з чужим форматом.
      */
     private suspend fun leaveMonitor() {
-        runCatching { adapter.writeRaw(" ") }
-        runCatching { adapter.flushInput() }
+        val quiet = quietDown()
 
+        var promptSeen = false
         for (attempt in 1..MONITOR_EXIT_ATTEMPTS) {
             val answer = runCatching { adapter.sendCommand("AT AR") }.getOrNull()
-            if (!answer.isNullOrBlank()) break
+            if (!answer.isNullOrBlank()) {
+                promptSeen = true
+                break
+            }
         }
 
         // Якщо відкотити налаштування не вдалося, адаптер лишився з H1/CAF0 — тоді
@@ -158,7 +183,23 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
         val restored = listOf("AT CRA", "AT H0", "AT CAF1").all { command ->
             runCatching { adapter.sendCommand(command) }.isSuccess
         }
-        if (!restored) isInitialized = false
+
+        // Потік, який так і не стих, означає, що монітор досі працює: пробіл не
+        // дійшов. Далі всі запити 21/22 отримували б кадри замість відповідей, а
+        // читання «до промпта» впиралося б у свій бюджет на кожній команді. Тому
+        // наступний запит мусить пройти повне скидання.
+        if (!quiet || !promptSeen || !restored) isInitialized = false
+    }
+
+    /**
+     * Зупиняє монітор і чекає, поки потік стихне.
+     *
+     * Будь-який символ зупиняє «AT MA» — надсилаємо пробіл. Далі важливий саме
+     * результат сушіння: якщо потік не стих, адаптер до запитів не готовий.
+     */
+    private suspend fun quietDown(): Boolean {
+        runCatching { adapter.writeRaw(STOP_MONITOR) }
+        return runCatching { adapter.flushInput() }.getOrDefault(false)
     }
 
     fun reset() {
@@ -175,8 +216,16 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
         /** Пауза між читаннями буфера, коли адаптер мовчить. */
         const val MONITOR_POLL_MS = 20L
 
-        /** Скільки разів добиватися промпта після виходу з монітора. */
-        const val MONITOR_EXIT_ATTEMPTS = 5
+        /**
+         * Скільки разів добиватися промпта після виходу з монітора.
+         *
+         * Три, а не п'ять: кожна спроба тепер має свій бюджет часу, і п'ять
+         * невдалих затягували б одне опитування довше, ніж вартий той пробіг.
+         */
+        const val MONITOR_EXIT_ATTEMPTS = 3
+
+        /** Будь-який символ зупиняє «AT MA»; пробіл найбезпечніший. */
+        const val STOP_MONITOR = " "
 
         /**
          * Скільки порожніх читань підряд вважати «шина мовчить».

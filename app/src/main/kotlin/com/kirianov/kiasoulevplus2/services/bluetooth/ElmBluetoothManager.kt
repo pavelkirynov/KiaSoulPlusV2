@@ -3,12 +3,15 @@
 //
 // ЩО ВІН РОБИТЬ:
 // 1. Встановлює RFCOMM/SPP з'єднання трьома способами (Insecure, Secure, Reflection).
-// 2. sendCommand(): надсилає текстову команду і читає відповідь до промпта '>'.
-// 3. Кидає IOException, якщо сокет помер або адаптер мовчить, — щоб той, хто викликав,
-//    міг відрізнити «немає зв'язку» від «зв'язок є, але відповідь порожня».
+// 2. Віддає операції над відкритими потоками в ElmStream і нічого не читає сам.
+// 3. Кидає IOException, якщо сокета немає, — щоб той, хто викликав, міг відрізнити
+//    «немає зв'язку» від «зв'язок є, але відповідь порожня».
 //
 // ЧОГО ВІН НЕ РОБИТЬ:
 // - НЕ знає, що означають відповіді, і не чіпає GeneralData.
+// - НЕ крутить циклів читання: усі вони, разом зі своїми бюджетами часу, живуть
+//   в ElmStream, де їх видно тестам. Тут лишилася тільки Bluetooth-частина, яку
+//   перевірити нічим, крім самого авто.
 // ====================================================================================
 
 package com.kirianov.kiasoulevplus2.services.bluetooth
@@ -18,8 +21,6 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
 import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -31,8 +32,10 @@ import kotlinx.coroutines.withContext
 class ElmBluetoothManager : ElmAdapter {
 
     private var socket: BluetoothSocket? = null
-    private var input: InputStream? = null
-    private var output: OutputStream? = null
+
+    /** Протокол над відкритими потоками. null означає «сокета немає». */
+    @Volatile
+    private var stream: ElmStream? = null
 
     private val connectMutex = Mutex()
 
@@ -100,98 +103,49 @@ class ElmBluetoothManager : ElmAdapter {
 
     private fun attachStreams(newSocket: BluetoothSocket): Boolean = try {
         socket = newSocket
-        input = newSocket.inputStream
-        output = newSocket.outputStream
-        input != null && output != null
+        val input = newSocket.inputStream
+        val output = newSocket.outputStream
+        stream = if (input != null && output != null) ElmStream(input, output) else null
+        stream != null
     } catch (e: IOException) {
         false
     }
 
+    private fun link(): ElmStream = stream ?: throw IOException("Bluetooth-потік закритий")
+
     /**
-     * Надсилає команду і читає відповідь до промпта '>'.
-     * Очікування зроблене через delay, а не Thread.sleep, тому опитування можна скасувати
-     * разом із корутиною, і потік вводу-виводу не блокується намертво.
+     * Очікування всередині зроблене через delay, а не Thread.sleep, тому опитування
+     * можна скасувати разом із корутиною, і потік вводу-виводу не блокується намертво.
      */
     override suspend fun sendCommand(command: String): String = withContext(Dispatchers.IO) {
-        val out = output ?: throw IOException("Bluetooth-потік запису закритий")
-        val inp = input ?: throw IOException("Bluetooth-потік читання закритий")
-
-        // Викидаємо хвіст попередньої відповіді, щоб він не приклеївся до нової.
-        if (inp.available() > 0) inp.skip(inp.available().toLong())
-
-        val payload = if (command.endsWith("\r")) command else "$command\r"
-        out.write(payload.toByteArray())
-        out.flush()
-
-        readUntilPrompt(inp, command)
+        link().send(command)
     }
 
     override suspend fun writeRaw(text: String) = withContext(Dispatchers.IO) {
-        val out = output ?: throw IOException("Bluetooth-потік запису закритий")
-        out.write(text.toByteArray())
-        out.flush()
+        link().writeRaw(text)
     }
 
-    /**
-     * Віддає все, що вже прийшло, не чекаючи ні рядка, ні промпта.
-     *
-     * У моніторі промпта немає, а читання «до \r» з таймаутом повертало обрізану
-     * половину кадру як повний рядок — байти зсувалися й пробіг виходив сміттям.
-     */
     override suspend fun readAvailable(): String = withContext(Dispatchers.IO) {
-        val inp = input ?: throw IOException("Bluetooth-потік читання закритий")
-        val available = inp.available()
-        if (available <= 0) return@withContext ""
-
-        val buffer = ByteArray(minOf(available, READ_BUFFER_SIZE))
-        val bytesRead = inp.read(buffer)
-        if (bytesRead <= 0) "" else String(buffer, 0, bytesRead, Charsets.ISO_8859_1)
+        link().readAvailable()
     }
 
-    override suspend fun flushInput() = withContext(Dispatchers.IO) {
-        val inp = input ?: return@withContext
-        while (inp.available() > 0) inp.read()
-        Unit
-    }
-
-    private suspend fun readUntilPrompt(inp: InputStream, command: String): String {
-        val response = StringBuilder()
-        val buffer = ByteArray(READ_BUFFER_SIZE)
-        var idlePolls = 0
-
-        while (idlePolls < MAX_IDLE_POLLS) {
-            delay(POLL_INTERVAL_MS)
-            if (inp.available() <= 0) {
-                idlePolls++
-                continue
-            }
-
-            val bytesRead = inp.read(buffer)
-            if (bytesRead < 0) throw IOException("З'єднання розірвано під час читання")
-
-            response.append(String(buffer, 0, bytesRead))
-            if (response.contains(PROMPT)) return response.toString()
-            idlePolls = 0
-        }
-
-        throw IOException("Адаптер не відповів на «$command» за ${MAX_IDLE_POLLS * POLL_INTERVAL_MS} мс")
+    override suspend fun flushInput(): Boolean = withContext(Dispatchers.IO) {
+        // Сокета вже немає — сушити нічого, і це не помилка: обрив міг статися
+        // рівно між вікном монітора і виходом із нього.
+        val active = stream ?: return@withContext true
+        active.drain()
     }
 
     fun disconnect() {
-        runCatching { input?.close() }
-        runCatching { output?.close() }
+        runCatching { socket?.inputStream?.close() }
+        runCatching { socket?.outputStream?.close() }
         runCatching { socket?.close() }
-        input = null
-        output = null
+        stream = null
         socket = null
     }
 
     private companion object {
         val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
         val OBD_NAME_HINTS = listOf("Vlink", "OBD", "ELM")
-        const val PROMPT = ">"
-        const val READ_BUFFER_SIZE = 1024
-        const val POLL_INTERVAL_MS = 100L
-        const val MAX_IDLE_POLLS = 25
     }
 }

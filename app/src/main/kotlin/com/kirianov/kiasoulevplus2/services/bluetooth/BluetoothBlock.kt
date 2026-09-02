@@ -23,6 +23,7 @@ import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
 
@@ -128,15 +130,44 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         }
     }
 
+    /**
+     * Цикл опитування з ВАРТОВИМ ЧАСОМ.
+     *
+     * Один такт не має права тривати нескінченно. Поки такого обмеження не було,
+     * достатньо було одного зависання в читанні — і цикл спинявся назавжди: умова
+     * `while` більше не перевірялася, стан лишався «Підключено», а екран показував
+     * останні дані, які встиг отримати. Саме це й виглядало як «показує з'єднання,
+     * але дані не змінюються».
+     *
+     * Гірше того, тихо страдало й навчання: блок прогнозу бачить розрив лише
+     * тоді, коли стан став «Відключено». Замерзлий такт не змінює стану взагалі,
+     * тож ані відрізок не відбраковувався, ані нового знімка не приходило —
+     * години їзди просто не існували для моделі. Ось чому «пробіг навчання»
+     * виходив 49 км замість двохсот.
+     *
+     * Спрацював вартовий — це не «одиничний збій зв'язку», який варто перечекати:
+     * транспорт застряг, і другий такт застрягне так само. Тому обриваємо
+     * з'єднання одразу; далі автопідключення підніме його з повною
+     * переініціалізацією адаптера, а вона вміє виводити його з монітора.
+     */
     private fun startDataPolling(scope: CoroutineScope) {
         pollingJob?.cancel()
         pollingJob = scope.launch(Dispatchers.IO) {
             var consecutiveFailures = 0
 
             while (isActive && GeneralData.state.value.isConnected) {
+                val budgetMs = if (GeneralData.state.value.inputBms.scanCellsRequested) {
+                    CELL_POLL_BUDGET_MS
+                } else {
+                    POLL_BUDGET_MS
+                }
+
                 try {
-                    pollOnce()
+                    withTimeout(budgetMs) { pollOnce() }
                     consecutiveFailures = 0
+                } catch (e: TimeoutCancellationException) {
+                    handleConnectionLost(IOException("Адаптер не відповів за ${budgetMs / 1000} с"))
+                    return@launch
                 } catch (e: IOException) {
                     consecutiveFailures++
                     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -247,6 +278,26 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
 
         /** Скільки підряд помилок вводу-виводу вважати обривом, а не одиничним збоєм. */
         const val MAX_CONSECUTIVE_FAILURES = 3
+
+        /**
+         * Стеля одного такту опитування.
+         *
+         * Складається з найгірших випадків усередині: два запити по 3 с бюджету
+         * на промпт, вікно монітора з сушінням буфера з обох боків (1.5 + 0.7 + 1.5)
+         * і вихід із нього — три спроби промпта плюс три команди відкоту, теж по 3 с.
+         * Разом близько 26 с; двадцять вісім лишають запас на планувальник.
+         *
+         * Це саме вартовий, а не робочий таймаут: у здоровому такті все це займає
+         * менше секунди. Якщо ми дійшли до цієї межі, з адаптером щось не так.
+         */
+        const val POLL_BUDGET_MS = 28_000L
+
+        /**
+         * Окрема стеля для зчитування комірок: там до чотирнадцяти команд, кожна з
+         * повтором і паузою на ISO-TP. Одна стеля на обидві гілки або душила б
+         * комірки, або дозволяла б надто довгий звичайний такт.
+         */
+        const val CELL_POLL_BUDGET_MS = 120_000L
 
         /** Одне вікно монітора на кожні стільки циклів опитування. */
         const val MONITOR_EVERY_N_POLLS = 4L

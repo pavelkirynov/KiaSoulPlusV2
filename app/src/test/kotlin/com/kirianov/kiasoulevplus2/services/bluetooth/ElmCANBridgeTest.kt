@@ -22,6 +22,8 @@ class ElmCANBridgeTest {
     private class RecordingAdapter(
         /** Що адаптер віддає шматками у вікні монітора — як у справжньому потоці. */
         private val monitorChunks: List<String> = emptyList(),
+        /** Чи стихає потік після зупинки монітора. false — адаптер застряг у «AT MA». */
+        private val quiet: Boolean = true,
     ) : ElmAdapter {
         val sent = mutableListOf<String>()
         val raw = mutableListOf<String>()
@@ -41,8 +43,9 @@ class ElmCANBridgeTest {
         override suspend fun readAvailable(): String =
             monitorChunks.getOrNull(chunkIndex++) ?: ""
 
-        override suspend fun flushInput() {
+        override suspend fun flushInput(): Boolean {
             flushes++
+            return quiet
         }
     }
 
@@ -64,7 +67,7 @@ class ElmCANBridgeTest {
 
         override suspend fun writeRaw(text: String) = Unit
         override suspend fun readAvailable(): String = ""
-        override suspend fun flushInput() = Unit
+        override suspend fun flushInput(): Boolean = true
     }
 
     @Test
@@ -234,6 +237,55 @@ class ElmCANBridgeTest {
         bridge.sendCANCommand("7E4", "21 01")
 
         assertEquals(listOf("AT SH 7E4", "21 01"), adapter.sent)
+    }
+
+    /**
+     * Найдорожчий баг цього застосунку: адаптер лишається в моніторі, сипле кадри
+     * без промпта — і зупинити його ніхто не намагається. Тоді жодна команда не
+     * доходить, а перезапуск застосунку не лікує, бо застряг адаптер, не застосунок.
+     */
+    @Test
+    fun `init stops a monitor that never stopped before saying anything`() = runBlocking {
+        val adapter = RecordingAdapter(quiet = false)
+        val bridge = ElmCANBridge(adapter)
+
+        bridge.initAdapter()
+
+        // Пробіл мусить піти ПЕРЕД «AT Z», інакше скидання потонуло б у потоці кадрів.
+        assertTrue("Монітор не зупиняли перед скиданням", adapter.raw.contains(" "))
+        assertTrue("Буфер не сушили перед скиданням", adapter.flushes > 0)
+        assertEquals("AT Z", adapter.sent.first())
+    }
+
+    /**
+     * Потік, який не стих після пробілу, означає, що монітор досі працює. Вважати
+     * адаптер готовим після цього не можна: наступний запит мусить його скинути.
+     */
+    @Test
+    fun `a stream that never goes quiet forces a full re-init`() = runBlocking {
+        val adapter = RecordingAdapter(monitorChunks = listOf("4F0 00\r"), quiet = false)
+        val bridge = ElmCANBridge(adapter)
+        bridge.initAdapter()
+        adapter.sent.clear()
+
+        bridge.monitorBroadcast(windowMs = 100, filterId = "4F0")
+        bridge.sendCANCommand("7E4", "21 01")
+
+        assertTrue("Переініціалізації не було", adapter.sent.contains("AT Z"))
+    }
+
+    /** А коли потік стих і промпт відповів, скидати нічого не треба. */
+    @Test
+    fun `a clean exit from the monitor keeps the adapter initialised`() = runBlocking {
+        val adapter = RecordingAdapter(monitorChunks = listOf("4F0 00\r"))
+        val bridge = ElmCANBridge(adapter)
+        bridge.initAdapter()
+        adapter.sent.clear()
+
+        bridge.monitorBroadcast(windowMs = 100, filterId = "4F0")
+        bridge.sendCANCommand("7E4", "21 01")
+
+        assertTrue("Зайве скидання адаптера", !adapter.sent.contains("AT Z"))
     }
 
     @Test
