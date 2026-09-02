@@ -20,7 +20,7 @@ import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CellData
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
-import com.kirianov.kiasoulevplus2.Data.DistanceCheck
+import com.kirianov.kiasoulevplus2.Data.RangeAccuracy
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.TripHistory
 import com.kirianov.kiasoulevplus2.Data.TripSample
@@ -39,39 +39,39 @@ class CalculationBlock(
     fun start(scope: CoroutineScope) {
         recalculateOnChange(scope)
         recordSamples(scope)
-        trackDistance(scope)
+        trackRangeAccuracy(scope)
         resetOnDisconnect(scope)
     }
 
     /**
-     * Свій підрахунок шляху з швидкості, щоб було з чим порівняти одометр.
-     * Різниця між ними — міра того, наскільки застосунок здатний рахувати
-     * відстань зі своїх даних; див. DistanceCheck.
+     * Чи стримав прогноз обіцянку: наскільки впав обіцяний запас проти того,
+     * скільки насправді проїхано. Див. RangeAccuracy.
+     *
+     * Відлік починається заново при від'єднанні і на зарядці: зарядка піднімає
+     * запас, і початкова обіцянка після неї означає вже інше.
      */
-    private fun trackDistance(scope: CoroutineScope) {
+    private fun trackRangeAccuracy(scope: CoroutineScope) {
         GeneralData.state
-            .map { SpeedReading(it.connection, it.vehicle.speedKmh, it.vehicle.hasSpeed, it.vehicle.odometerKm, it.vehicle.hasOdometer) }
+            .map { RangeReading(it.ml.prediction?.rangeKm ?: 0.0, it.vehicle.odometerKm, it.charge.charging) }
             .distinctUntilChanged()
             .onEach { reading ->
-                if (reading.connection != ConnectionState.Connected) return@onEach
-                if (!reading.hasSpeed) return@onEach
+                val current = GeneralData.state.value.rangeAccuracy
 
-                val updated = GeneralData.state.value.distanceCheck.plus(
-                    speedKmh = reading.speedKmh,
-                    atMs = elapsedMillis(),
-                    odometerKm = reading.odometerKm.takeIf { reading.hasOdometer },
-                )
-                GeneralData.updateDistanceCheck(updated)
+                if (reading.charging) {
+                    if (current.started) GeneralData.updateRangeAccuracy(RangeAccuracy())
+                    return@onEach
+                }
+
+                val updated = current.observe(reading.rangeKm, reading.odometerKm)
+                if (updated != current) GeneralData.updateRangeAccuracy(updated)
             }
             .launchIn(scope)
     }
 
-    private data class SpeedReading(
-        val connection: ConnectionState,
-        val speedKmh: Double,
-        val hasSpeed: Boolean,
+    private data class RangeReading(
+        val rangeKm: Double,
         val odometerKm: Double,
-        val hasOdometer: Boolean,
+        val charging: Boolean,
     )
 
     private data class Inputs(
@@ -132,7 +132,7 @@ class CalculationBlock(
                 if (connection == ConnectionState.Disconnected) {
                     startedAt = null
                     GeneralData.clearTripHistory()
-                    GeneralData.updateDistanceCheck(DistanceCheck())
+                    GeneralData.updateRangeAccuracy(RangeAccuracy())
                 }
             }
             .launchIn(scope)

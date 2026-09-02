@@ -84,7 +84,7 @@ object GeneralData {
 
     fun clearTripHistory() = _state.update { it.copy(tripHistory = TripHistory()) }
 
-    fun updateDistanceCheck(check: DistanceCheck) = _state.update { it.copy(distanceCheck = check) }
+    fun updateRangeAccuracy(accuracy: RangeAccuracy) = _state.update { it.copy(rangeAccuracy = accuracy) }
 
     // --- Прогноз залишку ходу: пише блок прогнозу ------------------------------
 

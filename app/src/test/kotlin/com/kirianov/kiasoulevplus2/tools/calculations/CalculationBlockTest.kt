@@ -2,6 +2,8 @@ package com.kirianov.kiasoulevplus2.tools.calculations
 
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CellData
+import com.kirianov.kiasoulevplus2.Data.ChargeLog
+import com.kirianov.kiasoulevplus2.Data.MlPrediction
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
 import com.kirianov.kiasoulevplus2.Data.GeneralData
@@ -169,5 +171,61 @@ class CalculationBlockTest {
         assertEquals(2.5, trip.consumedKwh, 0.0001)
         assertEquals(null, trip.kwhPer100Km)
         assertEquals(10.0, trip.averagePowerKw!!, 0.0001)
+    }
+
+    private fun predictRange(km: Double) =
+        GeneralData.updateMl { it.copy(prediction = MlPrediction(
+            rangeKm = km,
+            rangeFromKm = km * 0.9,
+            rangeToKm = km * 1.1,
+            realPercent = 80.0,
+            usableEnergyRemainingKwh = 40.0,
+            whPerKm = 150.0,
+        )) }
+
+    /** Обіцяв 200, проїхали 50, обіцяє 135 -> оптимізм на 30 %. */
+    @Test
+    fun `the forecast is checked against what was actually driven`() {
+        GeneralData.updateConnection(ConnectionState.Connected, "")
+        GeneralData.updateVehicle(VehicleData(odometerKm = 1_000.0))
+        predictRange(200.0)
+
+        GeneralData.updateVehicle(VehicleData(odometerKm = 1_050.0))
+        predictRange(135.0)
+
+        val accuracy = GeneralData.state.value.rangeAccuracy
+        assertEquals(50.0, accuracy.drivenKm, 0.001)
+        assertEquals(30.0, accuracy.errorPercent!!, 0.001)
+    }
+
+    /**
+     * Зарядка піднімає запас, тому початкова обіцянка після неї означає вже інше:
+     * без скидання «запас упав на» вийшов би від'ємним і безглуздим.
+     */
+    @Test
+    fun `charging starts the check over`() {
+        GeneralData.updateConnection(ConnectionState.Connected, "")
+        GeneralData.updateVehicle(VehicleData(odometerKm = 1_000.0))
+        predictRange(200.0)
+        GeneralData.updateVehicle(VehicleData(odometerKm = 1_050.0))
+        predictRange(135.0)
+        assertTrue(GeneralData.state.value.rangeAccuracy.started)
+
+        GeneralData.updateChargeLog(ChargeLog(charging = true, hasBaseline = true, counterBaselineKwh = 1.0))
+
+        assertFalse(GeneralData.state.value.rangeAccuracy.started)
+    }
+
+    /** Від'єднання — теж нова поїздка. */
+    @Test
+    fun `disconnecting starts the check over`() {
+        GeneralData.updateConnection(ConnectionState.Connected, "")
+        GeneralData.updateVehicle(VehicleData(odometerKm = 1_000.0))
+        predictRange(200.0)
+        assertTrue(GeneralData.state.value.rangeAccuracy.started)
+
+        GeneralData.updateConnection(ConnectionState.Disconnected, "")
+
+        assertFalse(GeneralData.state.value.rangeAccuracy.started)
     }
 }
