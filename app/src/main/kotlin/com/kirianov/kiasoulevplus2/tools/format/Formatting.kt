@@ -40,3 +40,21 @@ fun formatOrDash(value: Double?, decimals: Int, unit: String): String =
 /** Розбирає введений користувачем текст, приймаючи і крапку, і кому. */
 fun parseDecimalInput(text: String): Double? =
     text.trim().replace(',', '.').toDoubleOrNull()
+
+/**
+ * Скільки часу минуло: «щойно», «25 хв тому», «3 год тому», «2 дні тому».
+ *
+ * Відносний час, а не дата: годинник магнітоли на цьому авто збитий, а показувати
+ * дату з телефона поруч із даними з машини — привід сплутати одне з іншим.
+ * Від'ємний вік (годинник телефона перевели назад) читається як «щойно».
+ */
+fun formatAgo(ageMs: Long): String = when {
+    ageMs < MINUTE_MS -> "щойно"
+    ageMs < HOUR_MS -> "${ageMs / MINUTE_MS} хв тому"
+    ageMs < DAY_MS -> "${ageMs / HOUR_MS} год тому"
+    else -> "${ageMs / DAY_MS} дн тому"
+}
+
+private const val MINUTE_MS = 60_000L
+private const val HOUR_MS = 60 * MINUTE_MS
+private const val DAY_MS = 24 * HOUR_MS

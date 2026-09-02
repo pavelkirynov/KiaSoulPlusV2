@@ -9,9 +9,9 @@
 // Чисті функції без стану: жодного звернення до Android.
 // ====================================================================================
 
-package com.kirianov.kiasoulevplus2.tools.ml
+package com.kirianov.kiasoulevplus2.tools.json
 
-internal object MiniJson {
+object MiniJson {
 
     /**
      * Один рядок журналу. Порядок ключів зберігається — так рядки читаються очима,

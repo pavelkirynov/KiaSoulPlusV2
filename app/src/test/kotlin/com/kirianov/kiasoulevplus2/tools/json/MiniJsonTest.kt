@@ -1,4 +1,4 @@
-package com.kirianov.kiasoulevplus2.tools.ml
+package com.kirianov.kiasoulevplus2.tools.json
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

@@ -23,21 +23,24 @@ class ArchitectureTest {
         "tools.battery",
         "tools.calculations",
         "tools.storage",
+        "tools.charging",
         "tools.probe",
         "tools.vehicle",
         "tools.ml",
         "tools.format",
         "tools.frames",
+        "tools.json",
     )
 
     /** Хаб: сюди дозволено звертатися будь-кому, це і є канал обміну. */
     private val hub = "Data"
 
     /**
-     * Бібліотеки чистих функцій без стану: форматування чисел і розбір байтів кадру.
-     * Ними користуються всі блоки — це спільна бібліотека, а не канал обміну даними.
+     * Бібліотеки чистих функцій без стану: форматування чисел, розбір байтів кадру
+     * та читання-запис JSON. Ними користуються всі блоки — це спільна бібліотека,
+     * а не канал обміну даними.
      */
-    private val sharedUtilities = listOf("tools.format", "tools.frames")
+    private val sharedUtilities = listOf("tools.format", "tools.frames", "tools.json")
 
     /**
      * Файли в корені пакета: App (піднімає блоки на весь час життя процесу),

@@ -13,6 +13,8 @@ import com.kirianov.kiasoulevplus2.services.bluetooth.BluetoothBlock
 import com.kirianov.kiasoulevplus2.services.bluetooth.ElmBluetoothManager
 import com.kirianov.kiasoulevplus2.services.foreground.ForegroundBlock
 import com.kirianov.kiasoulevplus2.tools.battery.DecoderBlock
+import com.kirianov.kiasoulevplus2.tools.charging.ChargingBlock
+import com.kirianov.kiasoulevplus2.tools.charging.FileChargeStore
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
 import com.kirianov.kiasoulevplus2.tools.ml.FileMlStore
 import com.kirianov.kiasoulevplus2.tools.ml.MlBlock
@@ -29,6 +31,7 @@ class AppBlocks(context: Context) {
     private val calculations = CalculationBlock()
     private val probe = ProbeBlock()
     private val vehicle = VehicleBlock()
+    private val charging = ChargingBlock(FileChargeStore(context.applicationContext.filesDir))
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
     // Каталог, а не Context: так сховище моделей лишається чистим Kotlin і
     // перевіряється тестами без емулятора, як і решта логіки проєкту.
@@ -40,6 +43,7 @@ class AppBlocks(context: Context) {
         calculations.start(scope)
         probe.start(scope)
         vehicle.start(scope)
+        charging.start(scope)
         storage.start(scope)
         prediction.start(scope)
         foreground.start(scope)

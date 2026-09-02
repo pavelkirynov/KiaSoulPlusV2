@@ -23,10 +23,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WindowStats
+import com.kirianov.kiasoulevplus2.tools.format.formatAgo
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import com.kirianov.kiasoulevplus2.tools.format.formatDuration
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
@@ -154,6 +156,8 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
                 }
             }
 
+            ChargeCard(state.charge)
+
             VehicleCard(state.vehicle)
         }
 
@@ -169,6 +173,55 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
                     MetricRow("Розбаланс ΔV", formatMeasurement(calculated.cellDeltaVolts, 3, "В"))
                 }
             }
+        }
+    }
+}
+
+/**
+ * Зарядки. Рахуються за пожиттєвим лічильником BMS, а не інтегруванням: зарядка
+ * триває годинами, тож крок лічильника 0.1 кВт·год тут дає соті частки відсотка,
+ * і головне — лічильник враховує те, що сталося без телефона.
+ */
+@Composable
+private fun ChargeCard(charge: ChargeLog) {
+    if (!charge.charging && !charge.hasLastSession && !charge.hasToday) return
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Зарядка", fontSize = 18.sp)
+
+            if (charge.charging) {
+                MetricRow(
+                    "Зараз прийнято",
+                    formatMeasurement(charge.sessionKwh, 1, "кВт·год"),
+                )
+            }
+
+            MetricRow(
+                "Остання зарядка",
+                if (charge.hasLastSession) {
+                    formatMeasurement(charge.lastSessionKwh, 1, "кВт·год")
+                } else {
+                    NO_VALUE
+                },
+            )
+            if (charge.hasLastSession && charge.lastSessionEndedAtMs > 0L) {
+                MetricRow(
+                    "Закінчилася",
+                    formatAgo(System.currentTimeMillis() - charge.lastSessionEndedAtMs),
+                )
+            }
+
+            MetricRow("За добу", formatMeasurement(charge.todayKwh, 1, "кВт·год"))
+
+            Text(
+                text = "Рахується за лічильником BMS, тому враховує й ті зарядки, " +
+                    "що пройшли без телефона.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

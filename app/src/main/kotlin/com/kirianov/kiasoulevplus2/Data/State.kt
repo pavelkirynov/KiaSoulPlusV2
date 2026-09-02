@@ -17,6 +17,9 @@ data class State(
     val cells: CellData = CellData(),
     val vehicle: VehicleData = VehicleData(),
 
+    /** Що відомо про зарядки: рахується за пожиттєвим лічильником BMS. */
+    val charge: ChargeLog = ChargeLog(),
+
     /** Похідні величини: сюди пише блок обчислень. */
     val calculated: CalculatedData = CalculatedData(),
 

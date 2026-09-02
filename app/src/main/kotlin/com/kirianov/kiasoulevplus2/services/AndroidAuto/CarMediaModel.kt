@@ -119,6 +119,8 @@ object CarMediaModel {
             row("discharged-total", "Віддано за весь час", measureOrNull(bms.cumulativeEnergyDischargedKwh.takeIf { counters }, 1, "кВт·год")),
             row("charged-total", "Прийнято за весь час", measureOrNull(bms.cumulativeEnergyChargedKwh.takeIf { counters }, 1, "кВт·год")),
             row("discharged-ah", "Віддано, А·год", measureOrNull(bms.cumulativeDischargedAh.takeIf { counters }, 1, "А·год")),
+            row("charge-last", "Остання зарядка", measureOrNull(state.charge.lastSessionKwh.takeIf { state.charge.hasLastSession }, 1, "кВт·год")),
+            row("charge-today", "Заряджено за добу", measureOrNull(state.charge.todayKwh.takeIf { state.charge.hasToday }, 1, "кВт·год")),
             row("cell-min", "Мін. комірка", measureOrNull(calculated.minCellVoltage.takeIf { it > 0.0 }, 2, "В")),
             row("cell-max", "Макс. комірка", measureOrNull(calculated.maxCellVoltage.takeIf { it > 0.0 }, 2, "В")),
             row("cell-delta", "Розкид комірок", measureOrNull(calculated.cellDeltaVolts.takeIf { calculated.maxCellVoltage > 0.0 }, 3, "В")),

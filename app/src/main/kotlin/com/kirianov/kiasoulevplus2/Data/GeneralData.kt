@@ -71,6 +71,9 @@ object GeneralData {
 
     fun updateVehicle(vehicle: VehicleData) = _state.update { it.copy(vehicle = vehicle) }
 
+    /** Облік зарядок за пожиттєвим лічильником: пише блок tools/charging. */
+    fun updateChargeLog(charge: ChargeLog) = _state.update { it.copy(charge = charge) }
+
     // --- Похідні величини: пише блок обчислень ---------------------------------
 
     fun updateCalculated(calculated: CalculatedData) =

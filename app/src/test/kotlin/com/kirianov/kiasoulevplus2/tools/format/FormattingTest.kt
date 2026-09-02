@@ -44,4 +44,19 @@ class FormattingTest {
         assertNull(parseDecimalInput(""))
         assertNull(parseDecimalInput("abc"))
     }
+
+    @Test
+    fun `age reads as relative time`() {
+        assertEquals("щойно", formatAgo(0))
+        assertEquals("щойно", formatAgo(59_000))
+        assertEquals("25 хв тому", formatAgo(25 * 60_000L))
+        assertEquals("3 год тому", formatAgo(3 * 3_600_000L))
+        assertEquals("2 дн тому", formatAgo(2 * 86_400_000L))
+    }
+
+    /** Годинник телефона могли перевести назад — від'ємний вік не має ламати рядок. */
+    @Test
+    fun `a negative age reads as just now`() {
+        assertEquals("щойно", formatAgo(-5_000))
+    }
 }

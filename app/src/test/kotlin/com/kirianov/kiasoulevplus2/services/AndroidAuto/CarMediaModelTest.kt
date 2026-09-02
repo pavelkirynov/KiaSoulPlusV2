@@ -2,6 +2,7 @@ package com.kirianov.kiasoulevplus2.services.AndroidAuto
 
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CalculatedData
+import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.State
 import com.kirianov.kiasoulevplus2.Data.VehicleData
@@ -138,5 +139,28 @@ class CarMediaModelTest {
             CarMediaModel.childrenOf(CarMediaModel.ROOT_ID, connected()),
             CarMediaModel.childrenOf("что-то-старое", connected()),
         )
+    }
+
+    @Test
+    fun `the energy section carries the charge figures`() {
+        val state = connected().copy(
+            charge = ChargeLog(lastSessionKwh = 31.4, todayKwh = 33.9, hasBaseline = true),
+        )
+
+        val rows = CarMediaModel.childrenOf(CarMediaModel.ENERGY_ID, state)
+            .associate { it.title to it.subtitle }
+
+        assertEquals("31.4 кВт·год", rows["Остання зарядка"])
+        assertEquals("33.9 кВт·год", rows["Заряджено за добу"])
+    }
+
+    /** Поки зарядок не було, рядки лишаються з познакою, а не з нулем. */
+    @Test
+    fun `charge rows without a charge read as missing`() {
+        val rows = CarMediaModel.childrenOf(CarMediaModel.ENERGY_ID, connected())
+            .associate { it.title to it.subtitle }
+
+        assertEquals(CarMediaModel.NO_DATA_TEXT, rows["Остання зарядка"])
+        assertEquals(CarMediaModel.NO_DATA_TEXT, rows["Заряджено за добу"])
     }
 }

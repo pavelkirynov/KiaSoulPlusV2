@@ -12,6 +12,7 @@
 
 package com.kirianov.kiasoulevplus2.tools.ml
 
+import com.kirianov.kiasoulevplus2.tools.json.MiniJson
 import com.kirianov.kiasoulevplus2.Data.MlSegment
 
 internal object MlCodec {
