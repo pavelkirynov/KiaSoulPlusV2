@@ -23,6 +23,7 @@ class ArchitectureTest {
         "tools.battery",
         "tools.calculations",
         "tools.storage",
+        "tools.autoconnect",
         "tools.charging",
         "tools.probe",
         "tools.vehicle",

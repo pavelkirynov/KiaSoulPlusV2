@@ -12,6 +12,7 @@ import android.content.Context
 import com.kirianov.kiasoulevplus2.services.bluetooth.BluetoothBlock
 import com.kirianov.kiasoulevplus2.services.bluetooth.ElmBluetoothManager
 import com.kirianov.kiasoulevplus2.services.foreground.ForegroundBlock
+import com.kirianov.kiasoulevplus2.tools.autoconnect.AutoConnectBlock
 import com.kirianov.kiasoulevplus2.tools.battery.DecoderBlock
 import com.kirianov.kiasoulevplus2.tools.charging.ChargingBlock
 import com.kirianov.kiasoulevplus2.tools.charging.FileChargeStore
@@ -31,6 +32,7 @@ class AppBlocks(context: Context) {
     private val calculations = CalculationBlock()
     private val probe = ProbeBlock()
     private val vehicle = VehicleBlock()
+    private val autoConnect = AutoConnectBlock()
     private val charging = ChargingBlock(FileChargeStore(context.applicationContext.filesDir))
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
     // Каталог, а не Context: так сховище моделей лишається чистим Kotlin і
@@ -44,6 +46,7 @@ class AppBlocks(context: Context) {
         probe.start(scope)
         vehicle.start(scope)
         charging.start(scope)
+        autoConnect.start(scope)
         storage.start(scope)
         prediction.start(scope)
         foreground.start(scope)
