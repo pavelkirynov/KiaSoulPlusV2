@@ -3,9 +3,17 @@
 //
 // Витрата й рекуперація лишаються на інтегралі миттєвої потужності — там крок
 // лічильника 0.1 кВт·год завеликий. Зарядка ж триває годинами, тож лічильник BMS
-// для неї точніший за будь-яке інтегрування і, головне, не залежить від того, чи
-// був телефон під'єднаний: різниця з останнім побаченим показом враховує й те,
-// що сталося без нас.
+// для неї точніший за будь-яке інтегрування.
+//
+// ГОЛОВНА ПАСТКА, НА ЯКІЙ ЦЕЙ КОД УЖЕ ОДНОГО РАЗУ ЗЛАМАВСЯ. Лічильник прийнятої
+// енергії росте від УСЬОГО, що входить у батарею, — у тому числі від рекуперації.
+// Тому «лічильник виріс» не означає «зарядка»: у місті він росте на кожному
+// гальмуванні, і спуск з гори виглядав як зарядка на кілька кВт·год.
+//
+// Через це нараховуємо ЛИШЕ поки авто саме каже, що заряджається (кадр 581), і на
+// вході в зарядку беремо новий базовий показ. Друге не менш важливе за перше: без
+// нього перша ж різниця затягнула б у сесію всю рекуперацію, набігшу за поїздку
+// до неї.
 //
 // Чистий об'єкт без стану: увесь стан приходить аргументом і повертається назад.
 // ====================================================================================
@@ -51,46 +59,68 @@ object ChargeTracker {
         }
 
         val rolled = rollDay(log, dayKey)
+
+        // Авто не заряджається: лічильник усе одно міг вирости від рекуперації.
+        // Базовий показ веземо за ним, але в сесію не нараховуємо нічого.
+        if (!isCharging) return notCharging(rolled, counterKwh, nowMs)
+
+        // Щойно почалася зарядка: беремо новий базовий показ і НЕ нараховуємо цю
+        // різницю — у ній сидить рекуперація за поїздку до зарядки.
+        if (!rolled.charging) return started(rolled, counterKwh, nowMs)
+
         val step = counterKwh - rolled.counterBaselineKwh
 
         // Лічильник не може зменшитись. Якщо зменшився — перед нами інша батарея
         // або хибне читання: беремо новий базовий показ, нічого не нараховуючи.
         if (step < 0.0 || step > MAX_PLAUSIBLE_STEP_KWH) {
-            return rolled.copy(counterBaselineKwh = counterKwh, charging = isCharging)
+            return rolled.copy(counterBaselineKwh = counterKwh)
         }
-
-        if (step == 0.0) return idle(rolled, isCharging, nowMs)
-
-        // Прирост є, отже зарядка. Якщо попередня скінчилася давно — це вже нова.
-        val continuing = rolled.charging || nowMs - rolled.lastSessionEndedAtMs < SESSION_GAP_MS
-        val startedAt = if (continuing && rolled.sessionStartedAtMs > 0L) rolled.sessionStartedAtMs else nowMs
+        if (step == 0.0) return rolled
 
         return rolled.copy(
             counterBaselineKwh = counterKwh,
-            charging = true,
-            sessionKwh = if (continuing) rolled.sessionKwh + step else step,
-            sessionStartedAtMs = startedAt,
+            sessionKwh = rolled.sessionKwh + step,
             todayKwh = rolled.todayKwh + step,
             dayKey = dayKey,
         )
     }
 
     /**
-     * Приросту немає. Це або пауза посеред зарядки, або вона вже скінчилася —
-     * розрізняє їх ознака заряджання з шини та час від останнього приросту.
+     * Зарядка почалася. Базовий показ переїжджає на поточний: усе, що набігло до
+     * цього моменту, до зарядки не належить.
+     *
+     * Якщо телефон під'єднався посеред зарядки, у сесію потрапить лише та частина,
+     * яку ми бачили. Це свідома недооцінка: приписати сесії рекуперацію попередньої
+     * поїздки було б гірше за недорахований кілловат-годину.
      */
-    private fun idle(log: ChargeLog, isCharging: Boolean, nowMs: Long): ChargeLog {
-        if (!log.charging) return log.copy(charging = isCharging)
-        if (isCharging) return log
-
-        // Зарядка щойно скінчилася: переносимо її в «останню» і чистимо поточну.
+    private fun started(log: ChargeLog, counterKwh: Double, nowMs: Long): ChargeLog {
+        val continuing = nowMs - log.lastSessionEndedAtMs < SESSION_GAP_MS && log.lastSessionEndedAtMs > 0L
         return log.copy(
-            charging = false,
-            lastSessionKwh = log.sessionKwh,
-            lastSessionEndedAtMs = nowMs,
-            sessionKwh = 0.0,
-            sessionStartedAtMs = 0L,
+            counterBaselineKwh = counterKwh,
+            charging = true,
+            sessionKwh = if (continuing) log.sessionKwh else 0.0,
+            sessionStartedAtMs = if (continuing && log.sessionStartedAtMs > 0L) log.sessionStartedAtMs else nowMs,
         )
+    }
+
+    /**
+     * Авто не заряджається. Лічильник тут росте від рекуперації, тож базовий показ
+     * тягнемо за ним — інакше вся рекуперація за поїздку впала б у наступну сесію.
+     */
+    private fun notCharging(log: ChargeLog, counterKwh: Double, nowMs: Long): ChargeLog {
+        val closed = if (log.charging) {
+            log.copy(
+                charging = false,
+                lastSessionKwh = log.sessionKwh,
+                lastSessionEndedAtMs = nowMs,
+                sessionKwh = 0.0,
+                sessionStartedAtMs = 0L,
+            )
+        } else {
+            log
+        }
+
+        return if (counterKwh == closed.counterBaselineKwh) closed else closed.copy(counterBaselineKwh = counterKwh)
     }
 
     /** Нова доба — новий добовий підсумок. Решта лічильників доби не знає. */

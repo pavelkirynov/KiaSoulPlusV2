@@ -84,6 +84,14 @@ object GeneralData {
 
     fun clearTripHistory() = _state.update { it.copy(tripHistory = TripHistory()) }
 
+    fun updateSettings(settings: Settings) = _state.update { it.copy(settings = settings) }
+
+    fun setAutoConnect(enabled: Boolean) =
+        _state.update { it.copy(settings = it.settings.copy(autoConnect = enabled)) }
+
+    /** Скидання відліку точності прогнозу кнопкою з екрана «Прогноз». */
+    fun resetRangeAccuracy() = _state.update { it.copy(rangeAccuracy = RangeAccuracy()) }
+
     fun updateRangeAccuracy(accuracy: RangeAccuracy) = _state.update { it.copy(rangeAccuracy = accuracy) }
 
     // --- Прогноз залишку ходу: пише блок прогнозу ------------------------------

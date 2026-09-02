@@ -20,6 +20,8 @@ import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
 import com.kirianov.kiasoulevplus2.tools.ml.FileMlStore
 import com.kirianov.kiasoulevplus2.tools.ml.MlBlock
 import com.kirianov.kiasoulevplus2.tools.probe.ProbeBlock
+import com.kirianov.kiasoulevplus2.tools.settings.FileSettingsStore
+import com.kirianov.kiasoulevplus2.tools.settings.SettingsBlock
 import com.kirianov.kiasoulevplus2.tools.storage.SharedPreferencesCellStore
 import com.kirianov.kiasoulevplus2.tools.storage.StorageBlock
 import com.kirianov.kiasoulevplus2.tools.vehicle.VehicleBlock
@@ -32,6 +34,7 @@ class AppBlocks(context: Context) {
     private val calculations = CalculationBlock()
     private val probe = ProbeBlock()
     private val vehicle = VehicleBlock()
+    private val settings = SettingsBlock(FileSettingsStore(context.applicationContext.filesDir))
     private val autoConnect = AutoConnectBlock()
     private val charging = ChargingBlock(FileChargeStore(context.applicationContext.filesDir))
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
@@ -46,6 +49,7 @@ class AppBlocks(context: Context) {
         probe.start(scope)
         vehicle.start(scope)
         charging.start(scope)
+        settings.start(scope)
         autoConnect.start(scope)
         storage.start(scope)
         prediction.start(scope)

@@ -49,15 +49,23 @@ class ChargingBlockTest {
         ChargingBlock(store, nowMs = { now }, dayKey = { "2026-09-01" }).start(scope)
     }
 
+    /**
+     * Спершу ознака заряджання, потім лічильник — саме в такому порядку це й
+     * приходить з машини: кадр 581 повідомляє про зарядку, а лічильник росте вже
+     * потім. Зворотний порядок створював би стан «лічильник виріс, а про зарядку
+     * ще не знаємо», якого на шині не буває.
+     */
     private fun publish(counterKwh: Double, charging: Boolean) {
-        GeneralData.updateBms(BmsData(displaySoc = 80.0, cumulativeEnergyChargedKwh = counterKwh))
         GeneralData.updateVehicle(VehicleData(charging = ChargingState(isCharging = charging)))
+        GeneralData.updateBms(BmsData(displaySoc = 80.0, cumulativeEnergyChargedKwh = counterKwh))
     }
 
     @Test
     fun `charging is tracked from the counter into the hub`() {
         start()
         publish(100.0, charging = false)
+        now = 30_000
+        publish(100.0, charging = true)
         now = 60_000
         publish(104.5, charging = true)
 
@@ -79,6 +87,7 @@ class ChargingBlockTest {
                 hasBaseline = true,
                 todayKwh = 7.0,
                 dayKey = "2026-09-01",
+                charging = true,
             ),
         )
 
@@ -98,6 +107,7 @@ class ChargingBlockTest {
                 hasBaseline = true,
                 todayKwh = 7.0,
                 dayKey = "2026-08-31",
+                charging = true,
             ),
         )
 
@@ -112,7 +122,14 @@ class ChargingBlockTest {
      */
     @Test
     fun `a saved total without a day is not carried over`() {
-        start(saved = ChargeLog(counterBaselineKwh = 100.0, hasBaseline = true, todayKwh = 7.0))
+        start(
+            saved = ChargeLog(
+                counterBaselineKwh = 100.0,
+                hasBaseline = true,
+                todayKwh = 7.0,
+                charging = true,
+            ),
+        )
 
         publish(102.5, charging = true)
 
@@ -130,6 +147,8 @@ class ChargingBlockTest {
     fun `every change is written to the store`() {
         start()
         publish(100.0, charging = false)
+        now = 30_000
+        publish(100.0, charging = true)
         now = 60_000
         publish(103.0, charging = true)
 
@@ -154,6 +173,8 @@ class ChargingBlockTest {
     fun `a finished session shows up as the last one`() {
         start()
         publish(100.0, charging = false)
+        now = 30_000
+        publish(100.0, charging = true)
         now = 60_000
         publish(110.0, charging = true)
         now = 120_000
@@ -163,5 +184,24 @@ class ChargingBlockTest {
         assertFalse(charge.charging)
         assertEquals(10.0, charge.lastSessionKwh, 0.001)
         assertTrue(charge.hasLastSession)
+    }
+
+    /**
+     * Наскрізна перевірка головної пастки: поїздка з рекуперацією не має
+     * потрапити в облік зарядок.
+     */
+    @Test
+    fun `a drive with regen adds nothing to the charge log`() {
+        start()
+        publish(100.0, charging = false)
+        now = 60_000
+        publish(101.5, charging = false)
+        now = 120_000
+        publish(103.2, charging = false)
+
+        val charge = GeneralData.state.value.charge
+        assertEquals(0.0, charge.todayKwh, 0.001)
+        assertEquals(0.0, charge.sessionKwh, 0.001)
+        assertFalse(charge.charging)
     }
 }

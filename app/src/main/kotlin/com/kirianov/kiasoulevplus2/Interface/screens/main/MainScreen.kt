@@ -2,6 +2,7 @@
 
 package com.kirianov.kiasoulevplus2.Interface.screens.main
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,19 +15,23 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kirianov.kiasoulevplus2.Data.BmsData
+import com.kirianov.kiasoulevplus2.Data.CalculatedData
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
-import com.kirianov.kiasoulevplus2.Data.RangeAccuracy
+import com.kirianov.kiasoulevplus2.Data.State
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WindowStats
 import com.kirianov.kiasoulevplus2.tools.format.formatAgo
@@ -41,193 +46,192 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
     val bms = state.bms
     val calculated = state.calculated
 
+    // Обрив зв'язку видно за кольором, не вчитуючись у рядок статусу: за кермом
+    // читати нема коли. Персиковий узятий із прозорістю, а не суцільним, щоб у
+    // темній темі він лишався теплим відтінком, а не засвіченим тлом.
+    val background = if (state.isConnected) {
+        Color.Transparent
+    } else {
+        DISCONNECTED_TINT
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(background)
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Button(
-                        onClick = mainViewModel::onConnectClick,
-                        // Під час підключення кнопка вимкнена: повторне натискання
-                        // раніше могло запустити другу спробу поверх першої.
-                        enabled = state.connection != ConnectionState.Connecting,
-                    ) {
-                        Text(if (state.isConnected) "Відключити" else "Підключити")
-                    }
+        ConnectionCard(
+            state = state,
+            onConnectClick = mainViewModel::onConnectClick,
+            onAutoConnectChange = mainViewModel::onAutoConnectChange,
+        )
 
-                    Text(
-                        text = when (state.connection) {
-                            ConnectionState.Connected -> "З'єднано"
-                            ConnectionState.Connecting -> "Підключення..."
-                            ConnectionState.Disconnected -> "Відключено"
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        color = when (state.connection) {
-                            ConnectionState.Connected -> MaterialTheme.colorScheme.primary
-                            ConnectionState.Connecting -> MaterialTheme.colorScheme.tertiary
-                            ConnectionState.Disconnected -> MaterialTheme.colorScheme.error
-                        },
-                    )
+        // Усі картки на місці з першої секунди, ще до підключення: інакше екран
+        // після запуску виглядає напівпорожнім, і незрозуміло, чи застосунок
+        // щось умієе взагалі. Замість чисел — прочерки.
+        BatteryCard(bms, calculated)
+
+        ConsumptionCard(
+            stats = calculated.window,
+            selected = state.consumptionWindow,
+            hasOdometer = state.vehicle.hasOdometer,
+            onWindowSelected = mainViewModel::onWindowSelected,
+        )
+
+        LifetimeCountersCard(bms)
+
+        ChargeCard(state.charge)
+
+        VehicleCard(state.vehicle)
+
+        CellsCard(calculated)
+    }
+}
+
+@Composable
+private fun ConnectionCard(
+    state: State,
+    onConnectClick: () -> Unit,
+    onAutoConnectChange: (Boolean) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = onConnectClick,
+                    // Під час підключення кнопка вимкнена: повторне натискання
+                    // раніше могло запустити другу спробу поверх першої.
+                    enabled = state.connection != ConnectionState.Connecting,
+                ) {
+                    Text(if (state.isConnected) "Відключити" else "Підключити")
                 }
 
                 Text(
-                    text = "Статус: ${state.debugInfo}",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = when (state.connection) {
+                        ConnectionState.Connected -> "З'єднано"
+                        ConnectionState.Connecting -> "Підключення..."
+                        ConnectionState.Disconnected -> "Відключено"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = when (state.connection) {
+                        ConnectionState.Connected -> MaterialTheme.colorScheme.primary
+                        ConnectionState.Connecting -> MaterialTheme.colorScheme.tertiary
+                        ConnectionState.Disconnected -> MaterialTheme.colorScheme.error
+                    },
                 )
             }
-        }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "Показники батареї", fontSize = 18.sp)
-
-                MetricRow(
-                    label = "Заряд (SOC)",
-                    value = if (bms.hasData) "${formatDecimal(bms.displaySoc, 1)}%" else NO_VALUE,
-                )
-                MetricRow(
-                    label = "Напруга ВВБ",
-                    value = if (bms.hasData) formatMeasurement(bms.batteryVoltage, 1, "В") else NO_VALUE,
-                )
-                MetricRow(
-                    label = "Струм ВВБ",
-                    value = if (bms.hasData) formatMeasurement(bms.batteryCurrent, 1, "А") else NO_VALUE,
-                )
-                MetricRow(
-                    label = "Потужність",
-                    value = if (bms.hasData) formatMeasurement(calculated.powerKw, 2, "кВт") else NO_VALUE,
-                )
-                MetricRow(
-                    label = "Температура ВВБ",
-                    value = if (bms.hasData) formatMeasurement(bms.batteryTempC, 1, "°C") else NO_VALUE,
+                Text(text = "Автопідключення", style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = state.settings.autoConnect,
+                    onCheckedChange = onAutoConnectChange,
                 )
             }
-        }
 
-        if (bms.hasEnergyCounters) {
-            ConsumptionCard(
-                stats = calculated.window,
-                selected = state.consumptionWindow,
-                hasOdometer = state.vehicle.hasOdometer,
-                onWindowSelected = mainViewModel::onWindowSelected,
+            Text(
+                text = "Статус: ${state.debugInfo}",
+                style = MaterialTheme.typography.bodyMedium,
             )
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(text = "Лічильники батареї за весь час", fontSize = 18.sp)
-
-                    MetricRow(
-                        "Віддано",
-                        formatMeasurement(bms.cumulativeEnergyDischargedKwh, 1, "кВт·год"),
-                    )
-                    MetricRow(
-                        "Прийнято",
-                        formatMeasurement(bms.cumulativeEnergyChargedKwh, 1, "кВт·год"),
-                    )
-
-                    // Ампер-години поруч навмисно: їх відношення до кВт·год дає
-                    // середню напругу пакета, і саме цим звіряється, що прочитані
-                    // ті байти. Раніше як кВт·год показувалися саме ці числа.
-                    MetricRow(
-                        "Віддано, заряд",
-                        formatMeasurement(bms.cumulativeDischargedAh, 1, "А·год"),
-                    )
-                    MetricRow(
-                        "Прийнято, заряд",
-                        formatMeasurement(bms.cumulativeChargedAh, 1, "А·год"),
-                    )
-                }
-            }
-
-            ChargeCard(state.charge)
-
-            RangeAccuracyCard(state.rangeAccuracy)
-
-            VehicleCard(state.vehicle)
-        }
-
-        if (calculated.maxCellVoltage > 0.0) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(text = "Комірки", fontSize = 18.sp)
-                    MetricRow("Мінімальна", formatMeasurement(calculated.minCellVoltage, 3, "В"))
-                    MetricRow("Максимальна", formatMeasurement(calculated.maxCellVoltage, 3, "В"))
-                    MetricRow("Розбаланс ΔV", formatMeasurement(calculated.cellDeltaVolts, 3, "В"))
-                }
-            }
         }
     }
 }
 
-/**
- * Чи стримав прогноз обіцянку.
- *
- * Порівнюється не відстань із відстанню, а обіцяне з пройденим: якби прогноз був
- * точний, обіцяний запас падав би рівно на стільько, скільки проїхано. Різниця і
- * є помилка моделі — те, заради чого застосунок і зроблений.
- */
 @Composable
-private fun RangeAccuracyCard(accuracy: RangeAccuracy) {
-    if (!accuracy.started) return
+private fun BatteryCard(bms: BmsData, calculated: CalculatedData) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Показники батареї", fontSize = 18.sp)
+
+            MetricRow(
+                label = "Заряд (SOC)",
+                value = if (bms.hasData) "${formatDecimal(bms.displaySoc, 1)}%" else NO_VALUE,
+            )
+            MetricRow(
+                label = "Напруга ВВБ",
+                value = if (bms.hasData) formatMeasurement(bms.batteryVoltage, 1, "В") else NO_VALUE,
+            )
+            MetricRow(
+                label = "Струм ВВБ",
+                value = if (bms.hasData) formatMeasurement(bms.batteryCurrent, 1, "А") else NO_VALUE,
+            )
+            MetricRow(
+                label = "Потужність",
+                value = if (bms.hasData) formatMeasurement(calculated.powerKw, 2, "кВт") else NO_VALUE,
+            )
+            MetricRow(
+                label = "Температура ВВБ",
+                value = if (bms.hasData) formatMeasurement(bms.batteryTempC, 1, "°C") else NO_VALUE,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LifetimeCountersCard(bms: BmsData) {
+    val counters = bms.hasEnergyCounters
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(text = "Чи стримав прогноз обіцянку", fontSize = 18.sp)
+            Text(text = "Лічильники батареї за весь час", fontSize = 18.sp)
 
-            MetricRow("Обіцяв на початку", formatMeasurement(accuracy.startRangeKm, 0, "км"))
-            MetricRow("Обіцяє зараз", formatMeasurement(accuracy.currentRangeKm, 0, "км"))
-            MetricRow("Запас упав на", formatMeasurement(accuracy.predictedDropKm, 1, "км"))
-            MetricRow("Проїхали", formatMeasurement(accuracy.drivenKm, 1, "км"))
-
-            val error = accuracy.errorPercent
-            if (error == null) {
-                Text(
-                    text = "Проїхали ще замало — на перших кілометрах похибка одометра " +
-                        "важить більше за якість прогнозу.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                return@Column
-            }
-
-            MetricRow("Помилка", "${formatDecimal(error, 1)} %")
-
-            Text(
-                text = when {
-                    error > 5.0 ->
-                        "Запас падає швидше за дорогу: прогноз оптимістичний, " +
-                            "обіцяного не проїдете."
-                    error < -5.0 ->
-                        "Запас падає повільніше за дорогу: прогноз перестрахувався, " +
-                            "проїдете більше за обіцяне."
-                    else -> "Запас падає рівно так, як проїжджається. Прогнозу можна вірити."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (error > 5.0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            MetricRow(
+                "Віддано",
+                if (counters) formatMeasurement(bms.cumulativeEnergyDischargedKwh, 1, "кВт·год") else NO_VALUE,
             )
+            MetricRow(
+                "Прийнято",
+                if (counters) formatMeasurement(bms.cumulativeEnergyChargedKwh, 1, "кВт·год") else NO_VALUE,
+            )
+
+            // Ампер-години поруч навмисно: їх відношення до кВт·год дає середню
+            // напругу пакета, і саме цим звіряється, що прочитані ті байти.
+            // Раніше як кВт·год показувалися саме ці числа.
+            MetricRow(
+                "Віддано, заряд",
+                if (counters) formatMeasurement(bms.cumulativeDischargedAh, 1, "А·год") else NO_VALUE,
+            )
+            MetricRow(
+                "Прийнято, заряд",
+                if (counters) formatMeasurement(bms.cumulativeChargedAh, 1, "А·год") else NO_VALUE,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CellsCard(calculated: CalculatedData) {
+    val known = calculated.maxCellVoltage > 0.0
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Комірки", fontSize = 18.sp)
+            MetricRow("Мінімальна", if (known) formatMeasurement(calculated.minCellVoltage, 3, "В") else NO_VALUE)
+            MetricRow("Максимальна", if (known) formatMeasurement(calculated.maxCellVoltage, 3, "В") else NO_VALUE)
+            MetricRow("Розбаланс ΔV", if (known) formatMeasurement(calculated.cellDeltaVolts, 3, "В") else NO_VALUE)
         }
     }
 }
@@ -411,3 +415,10 @@ private fun MetricRow(label: String, value: String) {
 }
 
 private const val NO_VALUE = "--"
+
+/**
+ * Персиковий відтінок на час обриву зв'язку. З прозорістю, а не суцільним: у
+ * темній темі суцільний персиковий засвітив би екран і зіпсував читабельність
+ * тексту, а прозорий лишається теплим натяком в обох темах.
+ */
+private val DISCONNECTED_TINT = Color(0xFFFFCBA4).copy(alpha = 0.45f)

@@ -52,6 +52,12 @@ fun ScaleCurveCard(model: MlModelInfo, prediction: MlPrediction?, vehicle: Vehic
         ) {
             Text(text = "Панель проти реальності", fontSize = 18.sp)
 
+            // Крива енергії малюється тим самим полотном, але власним кольором:
+            // дві різні величини на одному графіку інакше не відрізнити.
+            val energyCurve = model.energyCurve
+            val energyColor = MaterialTheme.colorScheme.tertiary
+            val fullKwh = energyCurve.lastOrNull()?.energyKwh ?: 0.0
+
             val curveColor = MaterialTheme.colorScheme.primary
             val referenceColor = MaterialTheme.colorScheme.onSurfaceVariant
             val gridColor = MaterialTheme.colorScheme.outlineVariant
@@ -111,6 +117,20 @@ fun ScaleCurveCard(model: MlModelInfo, prediction: MlPrediction?, vehicle: Vehic
                     }
                     drawPath(line, curveColor, style = Stroke(width = 2.dp.toPx()))
 
+                    // Друга крива: скільки кВт·год стоїть за відсотком шкали. Своя
+                    // вертикальна шкала — від нуля до повної ємності, тому обидві
+                    // криві вміщаються в одне полотно без стискання однієї з них.
+                    if (energyCurve.size >= 2 && fullKwh > 0.0) {
+                        val energyPath = Path().apply {
+                            energyCurve.forEachIndexed { index, point ->
+                                val px = x(point.socPercent)
+                                val py = y(point.energyKwh / fullKwh * 100.0)
+                                if (index == 0) moveTo(px, py) else lineTo(px, py)
+                            }
+                        }
+                        drawPath(energyPath, energyColor, style = Stroke(width = 2.dp.toPx()))
+                    }
+
                     if (nowDial != null && nowReal != null) {
                         val point = Offset(x(nowDial), y(nowReal))
                         drawCircle(markerRing, radius = 6.dp.toPx(), center = point)
@@ -131,6 +151,31 @@ fun ScaleCurveCard(model: MlModelInfo, prediction: MlPrediction?, vehicle: Vehic
             ) {
                 Text(text = "↑ реально, %", style = MaterialTheme.typography.bodySmall)
                 Text(text = "показує панель, % →", style = MaterialTheme.typography.bodySmall)
+            }
+
+            if (energyCurve.size >= 2 && fullKwh > 0.0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "— кВт·год, від 0 до ${formatDecimal(fullKwh, 1)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = energyColor,
+                    )
+                    Text(
+                        text = "права шкала ↑",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = energyColor,
+                    )
+                }
+
+                Text(
+                    text = "Друга крива — скільки кВт·год лежить між дном і кожною " +
+                        "точкою шкали. Її прогин показує, де відсотки «тануть» швидше: " +
+                        "біля дна й біля стелі відсоток коштує менше енергії, ніж у середині.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
 
             Text(text = gapText(curve), style = MaterialTheme.typography.bodySmall)

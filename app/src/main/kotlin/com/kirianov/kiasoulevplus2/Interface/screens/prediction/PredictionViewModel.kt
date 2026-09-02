@@ -18,4 +18,7 @@ class PredictionViewModel : ViewModel() {
     fun onRetrainClick() = GeneralData.requestMlRetrain()
 
     fun onResetClick() = GeneralData.requestMlReset()
+
+    /** Обнуляє відлік точності прогнозу: почати міряти заново з цієї миті. */
+    fun onResetAccuracy() = GeneralData.resetRangeAccuracy()
 }

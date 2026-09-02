@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material3.TextButton
+import com.kirianov.kiasoulevplus2.Data.RangeAccuracy
 import com.kirianov.kiasoulevplus2.Data.MlConfidence
 import com.kirianov.kiasoulevplus2.Data.PredictionBasis
 import com.kirianov.kiasoulevplus2.Data.MlModelInfo
@@ -50,9 +52,11 @@ fun PredictionScreen(predictionViewModel: PredictionViewModel = viewModel()) {
     ) {
         RangeCard(ml.prediction, ml.model.confidence, state.vehicle)
 
+        RangeAccuracyCard(state.rangeAccuracy, predictionViewModel::onResetAccuracy)
+
         ml.prediction?.let { ScenarioCard(it) }
 
-        EnergyCurveCard(ml.model, ml.prediction)
+
 
         BatteryCard(ml.model, ml.prediction)
 
@@ -81,6 +85,73 @@ fun PredictionScreen(predictionViewModel: PredictionViewModel = viewModel()) {
  * проїду, ЯКЩО далі їхати так само, як останні години, і за такого ж климату».
  * Скільки буде на інших швидкостях — у картці сценаріїв нижче.
  */
+/**
+ * Чи стримав прогноз обіцянку — одразу під самим прогнозом, щоб обіцянка та її
+ * точність були в одному погляді.
+ *
+ * Порівнюється не відстань із відстанню, а обіцяне з пройденим: якби прогноз був
+ * точний, обіцяний запас падав би рівно на стільько, скільки проїхано.
+ */
+@Composable
+private fun RangeAccuracyCard(accuracy: RangeAccuracy, onReset: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Чи стримав прогноз обіцянку", fontSize = 18.sp)
+                TextButton(onClick = onReset) { Text("Обнулити") }
+            }
+
+            if (!accuracy.started) {
+                Text(
+                    text = "Відлік почнеться, коли з'являться і прогноз, і пробіг. " +
+                        "Обнуляється сам після зарядки — після неї початкова обіцянка " +
+                        "означає вже інше.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                return@Column
+            }
+
+            MetricRow("Обіцяв на початку", formatMeasurement(accuracy.startRangeKm, 0, "км"))
+            MetricRow("Обіцяє зараз", formatMeasurement(accuracy.currentRangeKm, 0, "км"))
+            MetricRow("Запас упав на", formatMeasurement(accuracy.predictedDropKm, 1, "км"))
+            MetricRow("Проїхали", formatMeasurement(accuracy.drivenKm, 1, "км"))
+
+            val error = accuracy.errorPercent
+            if (error == null) {
+                Text(
+                    text = "Проїхали ще замало — на перших кілометрах похибка одометра " +
+                        "важить більше за якість прогнозу.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                return@Column
+            }
+
+            MetricRow("Похибка", "${formatDecimal(error, 1)} %")
+
+            Text(
+                text = when {
+                    error > 5.0 ->
+                        "Запас падає швидше за дорогу: прогноз оптимістичний, " +
+                            "обіцяного не проїдете."
+                    error < -5.0 ->
+                        "Запас падає повільніше за дорогу: прогноз перестрахувався, " +
+                            "проїдете більше за обіцяне."
+                    else -> "Запас падає рівно так, як проїжджається. Прогнозу можна вірити."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (error > 5.0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 @Composable
 private fun BasisNote(basis: PredictionBasis) {
     val text = if (basis.hasHistory) {

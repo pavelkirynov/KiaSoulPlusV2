@@ -26,6 +26,7 @@ class ArchitectureTest {
         "tools.autoconnect",
         "tools.charging",
         "tools.probe",
+        "tools.settings",
         "tools.vehicle",
         "tools.ml",
         "tools.format",

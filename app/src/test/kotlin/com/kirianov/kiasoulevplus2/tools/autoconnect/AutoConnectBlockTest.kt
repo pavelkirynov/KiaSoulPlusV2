@@ -129,4 +129,35 @@ class AutoConnectBlockTest {
         assertTrue(GeneralData.state.value.request == AppRequest.Connect)
         scope.cancel()
     }
+
+    /** Перемикач вимкнено — блок не просить нічого. */
+    @Test
+    fun `the switch turns it off`() = runTest {
+        val scope = TestScope(UnconfinedTestDispatcher(testScheduler))
+        GeneralData.setAutoConnect(false)
+        AutoConnectBlock().start(scope)
+        scope.testScheduler.runCurrent()
+
+        scope.testScheduler.advanceTimeBy(10 * 60_000L)
+        scope.testScheduler.runCurrent()
+
+        assertEquals(AppRequest.None, GeneralData.state.value.request)
+        scope.cancel()
+    }
+
+    /** Увімкнули назад — блок знову береться до справи. */
+    @Test
+    fun `turning the switch back on resumes it`() = runTest {
+        val scope = TestScope(UnconfinedTestDispatcher(testScheduler))
+        GeneralData.setAutoConnect(false)
+        AutoConnectBlock().start(scope)
+        scope.testScheduler.runCurrent()
+
+        GeneralData.setAutoConnect(true)
+        scope.testScheduler.advanceTimeBy(2 * AutoConnectPolicy.IDLE_CHECK_MS)
+        scope.testScheduler.runCurrent()
+
+        assertEquals(AppRequest.Connect, GeneralData.state.value.request)
+        scope.cancel()
+    }
 }

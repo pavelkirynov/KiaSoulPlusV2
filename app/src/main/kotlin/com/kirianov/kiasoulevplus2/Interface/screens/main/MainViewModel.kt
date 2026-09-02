@@ -18,6 +18,8 @@ class MainViewModel : ViewModel() {
      */
     fun onWindowSelected(window: ConsumptionWindow) = GeneralData.selectConsumptionWindow(window)
 
+    fun onAutoConnectChange(enabled: Boolean) = GeneralData.setAutoConnect(enabled)
+
     fun onConnectClick() {
         if (GeneralData.state.value.isConnected) {
             GeneralData.requestDisconnect()

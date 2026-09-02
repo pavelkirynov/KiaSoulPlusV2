@@ -4,6 +4,8 @@
 // Сам просить з'єднання, поки його немає, — щоб моделі вчилися на щоденних
 // поїздках, а не лише тоді, коли хтось згадав натиснути кнопку.
 //
+// Вимикається перемикачем на головному екрані.
+//
 // ВАЖЛИВЕ ПРАВИЛО: явне «Відключити» поважається. Інакше кнопка відключення
 // перестала б працювати — застосунок під'єднувався б назад через секунди, і це
 // виглядало б як зламаний застосунок, а не як автопідключення. Вмикається знову
@@ -70,7 +72,8 @@ class AutoConnectBlock {
                 }
 
                 // Поки підключення в процесі, друга спроба лише перебила б першу.
-                if (connection == ConnectionState.Connecting || userWantsOff) {
+                val enabled = GeneralData.state.value.settings.autoConnect
+                if (connection == ConnectionState.Connecting || userWantsOff || !enabled) {
                     delay(AutoConnectPolicy.IDLE_CHECK_MS)
                     continue
                 }

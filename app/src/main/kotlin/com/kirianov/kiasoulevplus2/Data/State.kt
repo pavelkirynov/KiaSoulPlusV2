@@ -41,6 +41,9 @@ data class State(
     /** Введені вручну напруги: сюди пише блок сховища та інтерфейс. */
     val manualCells: ManualCells = ManualCells(),
 
+    /** Налаштування користувача: їх веде блок tools/settings. */
+    val settings: Settings = Settings(),
+
     val connection: ConnectionState = ConnectionState.Disconnected,
     val debugInfo: String = "",
 ) {
