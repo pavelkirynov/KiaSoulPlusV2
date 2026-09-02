@@ -111,24 +111,42 @@ fun ScaleCurveCard(model: MlModelInfo, prediction: MlPrediction?, vehicle: Vehic
                     }
                     drawPath(area, curveColor.copy(alpha = 0.18f))
 
-                    val line = Path().apply {
-                        moveTo(x(curve.first().dialPercent), y(curve.first().realPercent))
-                        curve.drop(1).forEach { lineTo(x(it.dialPercent), y(it.realPercent)) }
+                    // Виміряне малюється суцільним, доведене з відомого — пунктиром.
+                    // Інакше здогад виглядає так само переконливо, як вимір, і по
+                    // графіку не зрозуміти, де кінчаються дані й починається модель.
+                    curve.zipWithNext().forEach { (a, b) ->
+                        val measured = a.measured && b.measured
+                        drawLine(
+                            color = if (measured) curveColor else curveColor.copy(alpha = 0.5f),
+                            start = Offset(x(a.dialPercent), y(a.realPercent)),
+                            end = Offset(x(b.dialPercent), y(b.realPercent)),
+                            strokeWidth = 2.dp.toPx(),
+                            pathEffect = if (measured) {
+                                null
+                            } else {
+                                PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
+                            },
+                        )
                     }
-                    drawPath(line, curveColor, style = Stroke(width = 2.dp.toPx()))
 
                     // Друга крива: скільки кВт·год стоїть за відсотком шкали. Своя
                     // вертикальна шкала — від нуля до повної ємності, тому обидві
                     // криві вміщаються в одне полотно без стискання однієї з них.
                     if (energyCurve.size >= 2 && fullKwh > 0.0) {
-                        val energyPath = Path().apply {
-                            energyCurve.forEachIndexed { index, point ->
-                                val px = x(point.socPercent)
-                                val py = y(point.energyKwh / fullKwh * 100.0)
-                                if (index == 0) moveTo(px, py) else lineTo(px, py)
-                            }
+                        energyCurve.zipWithNext().forEach { (a, b) ->
+                            val measured = a.measured && b.measured
+                            drawLine(
+                                color = if (measured) energyColor else energyColor.copy(alpha = 0.5f),
+                                start = Offset(x(a.socPercent), y(a.energyKwh / fullKwh * 100.0)),
+                                end = Offset(x(b.socPercent), y(b.energyKwh / fullKwh * 100.0)),
+                                strokeWidth = 2.dp.toPx(),
+                                pathEffect = if (measured) {
+                                    null
+                                } else {
+                                    PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
+                                },
+                            )
                         }
-                        drawPath(energyPath, energyColor, style = Stroke(width = 2.dp.toPx()))
                     }
 
                     if (nowDial != null && nowReal != null) {
@@ -179,6 +197,11 @@ fun ScaleCurveCard(model: MlModelInfo, prediction: MlPrediction?, vehicle: Vehic
             }
 
             Text(text = gapText(curve), style = MaterialTheme.typography.bodySmall)
+
+            Text(
+                text = measuredText(model),
+                style = MaterialTheme.typography.bodySmall,
+            )
 
             if (nowDial != null && nowReal != null) {
                 Text(
@@ -231,4 +254,21 @@ private fun AxisLabel(text: String, modifier: Modifier) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/**
+ * Яку частину шкали справді пройшли через вимірювання.
+ *
+ * Пунктир на графіку без цього рядка виглядав би дефектом малювання, а він означає
+ * рівно одне: тут ще не їхали, і крива в цьому місці доведена з відомого.
+ */
+private fun measuredText(model: MlModelInfo): String {
+    val from = model.measuredFromPercent
+    val to = model.measuredToPercent
+    if (from == null || to == null) {
+        return "Суцільна лінія — виміряне, пунктир — доведене з відомого. " +
+            "Поки виміряного немає: крива вся доведена."
+    }
+    return "Виміряно від ${formatDecimal(from, 0)} до ${formatDecimal(to, 0)} % шкали — " +
+        "це суцільна лінія. Пунктир далі доведений з того, що вже відомо."
 }

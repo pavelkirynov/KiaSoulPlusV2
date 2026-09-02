@@ -176,6 +176,24 @@ class CapacityModel(
      * Довчитися на цілій сесії: заїзді або заряджанні, за яке SOC пройшов помітний
      * шмат шкали. Менші проміжки відкидаються — на них шум SOC більший за сигнал.
      */
+    /**
+     * Скільки спостережень припало на кожну корзину шкали. Потрібно графіку: він
+     * малює виміряне однією лінією, а доведене з відомого — іншою, замість того
+     * щоб не малювати нічого, поки шкала не пройдена вся.
+     */
+    private val binCoverage = DoubleArray(BINS)
+
+    /** Чи проходила ця точка шкали через вимірювання. */
+    fun binMeasured(socPercent: Double): Boolean = binCoverage[binOf(socPercent)] > 0.0
+
+    /** Найнижча й найвища виміряні точки шкали, або null, якщо не міряли нічого. */
+    val measuredFromPercent: Double?
+        get() = binCoverage.indexOfFirst { it > 0.0 }.takeIf { it >= 0 }?.let { it * BIN_WIDTH_PERCENT }
+
+    val measuredToPercent: Double?
+        get() = binCoverage.indexOfLast { it > 0.0 }.takeIf { it >= 0 }
+            ?.let { (it + 1) * BIN_WIDTH_PERCENT }
+
     fun learn(
         socStartPercent: Double,
         socEndPercent: Double,
@@ -191,15 +209,12 @@ class CapacityModel(
 
         // Вага одна на сесію: довший проміжок і так важить більше, бо накриває
         // більше корзин і накриває їх повніше.
-        val accepted = energy.observe(
-            featuresFor(socEndPercent, socStartPercent),
-            energyKwh,
-            weight = 1.0,
-            atMs = atMs,
-        )
+        val features = featuresFor(socEndPercent, socStartPercent)
+        val accepted = energy.observe(features, energyKwh, weight = 1.0, atMs = atMs)
         if (accepted) {
             measuredEnergyKwh += abs(energyKwh)
             measuredSpanPercent += abs(drop)
+            features.forEachIndexed { bin, share -> binCoverage[bin] += abs(share) }
         }
         return accepted
     }
@@ -250,7 +265,11 @@ class CapacityModel(
         val count = points.coerceAtLeast(2)
         return (0 until count).map { index ->
             val display = index * 100.0 / (count - 1)
-            ScalePoint(dialPercent = display, realPercent = realPercentForDisplay(display))
+            ScalePoint(
+                dialPercent = display,
+                realPercent = realPercentForDisplay(display),
+                measured = binMeasured(display),
+            )
         }
     }
 
@@ -300,7 +319,13 @@ class CapacityModel(
 
         return (0 until count).map { index ->
             val soc = floor + index * (ceiling - floor) / (count - 1)
-            EnergyPoint(socPercent = soc, energyKwh = energyBetween(floor, soc))
+            EnergyPoint(
+                socPercent = soc,
+                energyKwh = energyBetween(floor, soc),
+                // Виміряне й доведене з відомого малюються по-різному: інакше
+                // здогад виглядав би так само переконливо, як вимір.
+                measured = binMeasured(soc),
+            )
         }
     }
 
@@ -323,6 +348,7 @@ class CapacityModel(
         buffer = buffer.snapshot(),
         measuredEnergyKwh = measuredEnergyKwh,
         measuredSpanPercent = measuredSpanPercent,
+        binCoverage = binCoverage.toList(),
     )
 
     fun restore(snapshot: CapacitySnapshot): Boolean {
@@ -330,6 +356,12 @@ class CapacityModel(
         val bufferRestored = buffer.restore(snapshot.buffer)
         measuredEnergyKwh = snapshot.measuredEnergyKwh
         measuredSpanPercent = snapshot.measuredSpanPercent
+
+        // Старі збереження покриття корзин не мають: тоді лишаємо нулі, і графік
+        // просто покаже все як доведене, поки не набереться нового вимірювання.
+        binCoverage.indices.forEach { bin ->
+            binCoverage[bin] = snapshot.binCoverage.getOrElse(bin) { 0.0 }
+        }
         return energyRestored && bufferRestored
     }
 
@@ -547,4 +579,10 @@ class CapacitySnapshot(
     val measuredEnergyKwh: Double = 0.0,
     /** Сира сума пройдених відсотків шкали. */
     val measuredSpanPercent: Double = 0.0,
+    /**
+     * Скільки спостережень припало на кожну корзину шкали. Зберігається разом із
+     * моделлю: без цього після перезапуску вся крива читалася б як невиміряна, і
+     * графік знову показував би порожнє замість того, що вже знає.
+     */
+    val binCoverage: List<Double> = emptyList(),
 )

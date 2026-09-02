@@ -104,9 +104,20 @@ class MlBlock(
                 if (!state.isConnected || !state.bms.hasData) {
                     // Розрив: далі знімки підуть із діркою в часі, а відрізок крізь
                     // дірку рахувати не можна.
-                    segments.reset()
-                    session.reset()
+                    val hadOpenSegment = segments.reset()
                     lastSequence = null
+
+                    // Показати відбраковку саме тут: обрив — найчастіша її причина,
+                    // і без цього рядка число «відрізків не дожило» не оновлювалося
+                    // б рівно в тому випадку, який його й наповнює.
+                    if (hadOpenSegment) guard.withLock { publish() }
+
+                    // Сесію ємності при цьому НЕ скидаємо. Вона складає готові
+                    // відрізки й сама перевіряє неперервність SOC між ними: якщо
+                    // під час обриву авто стояло, сесія законно продовжується, а
+                    // якщо SOC зрушив — її обірве власна перевірка. Скидання тут
+                    // коштувало дорого: ємності потрібні ~8 % шкали, тобто близько
+                    // 27 км спостережень, і кожен обрив зв'язку викидав усе набране.
                     return@onEach
                 }
 
@@ -289,6 +300,12 @@ class MlBlock(
                     capacityMeasured = capacity.capacityMeasured,
                     scaleMeasured = capacity.scaleMeasured,
                     scaleCurve = capacity.scaleCurve(),
+                    measuredFromPercent = capacity.measuredFromPercent,
+                    measuredToPercent = capacity.measuredToPercent,
+                    sessionSpanPercent = session.spanPercent,
+                    sessionTargetPercent = CapacityModel.MIN_SOC_SPAN_PERCENT,
+                    abortedSegments = segments.aborted,
+                    lastAbortReason = segments.lastAbortReason,
                     energyCurve = capacity.energyCurve(),
                     auxPowerKw = consumption.auxPowerKw,
                     maeWhPerKm = consumption.meanAbsoluteErrorWhPerKm(),

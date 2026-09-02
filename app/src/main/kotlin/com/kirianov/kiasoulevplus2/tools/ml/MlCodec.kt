@@ -100,6 +100,7 @@ internal object MlCodec {
             "capacityBuffer" to encodeRegression(snapshot.capacity.buffer),
             "capacityMeasuredKwh" to snapshot.capacity.measuredEnergyKwh,
             "capacityMeasuredSpan" to snapshot.capacity.measuredSpanPercent,
+            "capacityBins" to snapshot.capacity.binCoverage,
             "ratios" to snapshot.quality.ratios,
             "bandMultiplier" to snapshot.quality.coverageMultiplier,
             "blocks" to snapshot.quality.blocksSeen,
@@ -126,6 +127,11 @@ internal object MlCodec {
                 buffer = capacityBuffer,
                 measuredEnergyKwh = values.double("capacityMeasuredKwh") ?: 0.0,
                 measuredSpanPercent = values.double("capacityMeasuredSpan") ?: 0.0,
+                // Збереження без цього поля читається як «покриття невідоме»:
+                // нулі, а не відмова завантажити модель цілком.
+                binCoverage = (values["capacityBins"] as? List<*>)
+                    ?.mapNotNull { it as? Double }
+                    .orEmpty(),
             ),
             quality = QualitySnapshot(
                 ratios = ratios,

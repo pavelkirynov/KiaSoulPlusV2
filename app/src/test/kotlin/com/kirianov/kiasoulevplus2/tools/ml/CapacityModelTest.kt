@@ -2,6 +2,7 @@ package com.kirianov.kiasoulevplus2.tools.ml
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -359,5 +360,84 @@ class CapacityModelTest {
     @Test
     fun `an unmeasured battery has no curve`() {
         assertTrue(CapacityModel().energyCurve().isEmpty())
+    }
+
+    /**
+     * Головне з відгуку: графік мусить показувати те, що вже зняли, а не чекати
+     * повного проходу шкали. Для цього модель повинна знати, які корзини виміряні.
+     */
+    @Test
+    fun `only the bins actually driven are marked as measured`() {
+        val model = CapacityModel()
+
+        // Їздили лише в середині шкали: з 70 до 40 %.
+        repeat(6) { index ->
+            model.learn(70.0, 40.0, 51.0 * 0.3, atMs = index * DAY_MS)
+        }
+
+        assertTrue("середина мусить бути виміряною", model.binMeasured(50.0))
+        assertFalse("низ шкали не міряли", model.binMeasured(5.0))
+        assertFalse("верх шкали не міряли", model.binMeasured(95.0))
+        assertEquals(40.0, model.measuredFromPercent!!, 0.001)
+        assertEquals(70.0, model.measuredToPercent!!, 0.001)
+    }
+
+    @Test
+    fun `nothing is measured before anything is learned`() {
+        val model = CapacityModel()
+
+        assertNull(model.measuredFromPercent)
+        assertNull(model.measuredToPercent)
+        assertFalse(model.binMeasured(50.0))
+    }
+
+    /** Крива мусить казати, де вимір, а де доведене з відомого. */
+    @Test
+    fun `the energy curve marks measured points apart from inferred ones`() {
+        val model = CapacityModel()
+        repeat(6) { index -> model.learn(70.0, 40.0, 51.0 * 0.3, atMs = index * DAY_MS) }
+
+        val curve = model.energyCurve()
+
+        assertTrue(curve.any { it.measured })
+        assertTrue("поза виміряним мусить бути доведене", curve.any { !it.measured })
+        curve.filter { it.measured }.forEach {
+            assertTrue("виміряне поза межами: ${it.socPercent}", it.socPercent in 39.0..71.0)
+        }
+    }
+
+    /** Покриття корзин мусить пережити збереження: інакше графік після перезапуску порожній. */
+    @Test
+    fun `bin coverage survives a snapshot`() {
+        val model = CapacityModel()
+        repeat(6) { index -> model.learn(70.0, 40.0, 51.0 * 0.3, atMs = index * DAY_MS) }
+
+        val restored = CapacityModel()
+        restored.restore(model.snapshot())
+
+        assertTrue(restored.binMeasured(50.0))
+        assertFalse(restored.binMeasured(5.0))
+        assertEquals(model.measuredFromPercent!!, restored.measuredFromPercent!!, 0.001)
+    }
+
+    /** Старе збереження без покриття читається як «нічого не виміряно», а не падає. */
+    @Test
+    fun `an old snapshot without coverage still restores`() {
+        val model = CapacityModel()
+        repeat(6) { index -> model.learn(70.0, 40.0, 51.0 * 0.3, atMs = index * DAY_MS) }
+        val old = model.snapshot()
+
+        val restored = CapacityModel()
+        val ok = restored.restore(
+            CapacitySnapshot(
+                energy = old.energy,
+                buffer = old.buffer,
+                measuredEnergyKwh = old.measuredEnergyKwh,
+                measuredSpanPercent = old.measuredSpanPercent,
+            ),
+        )
+
+        assertTrue(ok)
+        assertNull(restored.measuredFromPercent)
     }
 }

@@ -76,6 +76,17 @@ class SegmentBuilder(
      * викидається цілком: пробіг за цей час зріс, а спожита енергія — ні, і такий
      * рядок навчив би модель, що машина їздить задарма.
      */
+    /**
+     * Скільки відрізків не дожило до кінця і чому. Не для краси: вимогу «3 км і
+     * п'ять хвилин без розриву» на нестабільному Bluetooth виконати важко, і без
+     * цього числа «модель не вчиться» виглядає загадкою замість діагнозу.
+     */
+    var aborted: Int = 0
+        private set
+
+    var lastAbortReason: String = ""
+        private set
+
     fun accept(sample: MlSample): MlSegment? {
         val current = open
         if (current == null) {
@@ -88,7 +99,13 @@ class SegmentBuilder(
         if (dtMs <= 0L) return null
 
         // Довга дірка або зміна режиму «їдемо / заряджаємось»: починаємо заново.
-        if (dtMs > ABORT_GAP_MS || sample.charging != current.charging) {
+        if (dtMs > ABORT_GAP_MS) {
+            abort("дірка ${dtMs / 1000} с у даних")
+            open = Accumulator(sample)
+            return null
+        }
+        if (sample.charging != current.charging) {
+            abort("перемикання їзда/зарядка")
             open = Accumulator(sample)
             return null
         }
@@ -100,15 +117,42 @@ class SegmentBuilder(
         val segment = current.build()
         // Наступний відрізок починається там, де скінчився цей, без розриву.
         open = Accumulator(sample)
-        return if (segment != null && isUsable(segment)) segment else null
+
+        if (segment == null) {
+            abort("відрізок без пройденої відстані")
+            return null
+        }
+        if (!isUsable(segment)) {
+            abort(unusableReason(segment))
+            return null
+        }
+        return segment
+    }
+
+    private fun abort(reason: String) {
+        aborted++
+        lastAbortReason = reason
+    }
+
+    /** Чому саме відрізок не годиться: назва причини потрібна на екрані. */
+    private fun unusableReason(segment: MlSegment): String = when {
+        segment.durationMs <= 0L -> "нульова тривалість"
+        segment.coverage < MIN_COVERAGE ->
+            "покриття ${(segment.coverage * 100).toInt()} % замість ${(MIN_COVERAGE * 100).toInt()}"
+        !segment.energyKwh.isFinite() -> "енергія не число"
+        else -> "мало зразків швидкості: ${segment.speedSamples} з $MIN_SPEED_SAMPLES"
     }
 
     /**
      * Забути незакритий відрізок. Викликається на розриві з'єднання: далі знімки
      * підуть із діркою в часі, а відрізок через дірку рахувати не можна.
      */
-    fun reset() {
+    /** @return чи був незакритий відрізок, який довелося відкинути. */
+    fun reset(): Boolean {
+        val had = open != null
+        if (had) abort("обрив зв'язку")
         open = null
+        return had
     }
 
     /** Чи годиться відрізок для навчання. */

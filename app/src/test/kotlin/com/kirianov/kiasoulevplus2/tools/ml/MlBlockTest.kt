@@ -252,4 +252,78 @@ class MlBlockTest {
             cleared = true
         }
     }
+
+    /**
+     * Головна причина, чому за 200 км навчання майже не набиралося: кожен обрив
+     * зв'язку викидав набрану сесію ємності, а їй потрібно ~8 % шкали, тобто
+     * близько 27 км спостережень. Неперервність SOC сесія перевіряє сама.
+     */
+    @Test
+    fun `a dropped connection no longer throws away the capacity session`() {
+        startBlock()
+        driveDropping(minutes = 12)
+
+        val spanBefore = GeneralData.state.value.ml.model.sessionSpanPercent
+        assertTrue("сесія мусила щось набрати, а набрала $spanBefore", spanBefore > 0.0)
+
+        // Обрив і повернення на тому самому SOC: авто стояло, сесія законна.
+        GeneralData.updateConnection(ConnectionState.Disconnected, "обрив")
+        GeneralData.updateConnection(ConnectionState.Connected, "знову")
+
+        assertEquals(
+            "набране мусило лишитися",
+            spanBefore,
+            GeneralData.state.value.ml.model.sessionSpanPercent,
+            0.001,
+        )
+    }
+
+    /** Незакритий відрізок на обриві губиться — і це має бути видно числом. */
+    @Test
+    fun `an aborted segment is counted so slow learning is not a mystery`() {
+        startBlock()
+        driveDropping(minutes = 2)
+
+        GeneralData.updateConnection(ConnectionState.Disconnected, "обрив")
+
+        val model = GeneralData.state.value.ml.model
+        assertTrue("відбраковані відрізки мусять рахуватися", model.abortedSegments > 0)
+        assertTrue("причина мусить бути названа", model.lastAbortReason.isNotEmpty())
+    }
+
+    /**
+     * Їзда зі спадаючим SOC: рівний хід 60 км/год і 10 кВт розряду, але заряд
+     * справді з'їжджає — інакше сесія ємності нічого не набирає.
+     */
+    private fun driveDropping(minutes: Int) {
+        val seconds = minutes * 60
+        var soc = 80.0
+        repeat(seconds) {
+            elapsed += 1000
+            odometerKm += 60.0 / 3600.0
+            // 51 кВт·год на 100 % -> 10 кВт з'їдають 0.0054 % за секунду.
+            soc -= 10.0 / 3600.0 / 51.0 * 100.0
+
+            GeneralData.publishBatteryFrames(listOf("21 01"), listOf("7EC..."))
+            GeneralData.updateBms(
+                BmsData(
+                    displaySoc = soc - 1.0,
+                    batteryVoltage = 360.0,
+                    batteryCurrent = -27.8,
+                    batteryTempC = 20.0,
+                    cumulativeEnergyChargedKwh = 1000.0,
+                    cumulativeEnergyDischargedKwh = 1000.0,
+                ),
+            )
+            GeneralData.updateVehicle(
+                VehicleData(
+                    odometerKm = Math.floor(odometerKm * 10.0) / 10.0,
+                    speedKmh = 60.0,
+                    preciseSocPercent = soc,
+                    displaySocPercent = soc - 1.0,
+                    ambientTempC = 15.0,
+                ),
+            )
+        }
+    }
 }

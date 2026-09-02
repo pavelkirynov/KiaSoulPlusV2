@@ -226,6 +226,13 @@ data class PredictionBasis(
 data class ScalePoint(
     val dialPercent: Double,
     val realPercent: Double,
+
+    /**
+     * Чи проходила ця точка шкали через вимірювання. Виміряне й доведене з
+     * відомого малюються по-різному: інакше здогад виглядав би так само
+     * переконливо, як вимір.
+     */
+    val measured: Boolean = false,
 )
 
 /**
@@ -237,6 +244,7 @@ data class ScalePoint(
 data class EnergyPoint(
     val socPercent: Double,
     val energyKwh: Double,
+    val measured: Boolean = false,
 )
 
 /**
@@ -284,6 +292,23 @@ data class MlModelInfo(
 
     /** Скільки відсотків шкали загалом пройшло через вимірювання. */
     val measuredScalePercent: Double = 0.0,
+
+    /**
+     * Скільки відсотків шкали набрано в поточній сесії ємності. Наступне
+     * спостереження ємності з'явиться, коли дійде до MIN_SOC_SPAN_PERCENT.
+     */
+    val sessionSpanPercent: Double = 0.0,
+
+    /** Скільки відсотків шкали потрібно набрати для одного виміру ємності. */
+    val sessionTargetPercent: Double = 0.0,
+
+    /** Межі виміряної ділянки шкали, %. Null, поки не міряли нічого. */
+    val measuredFromPercent: Double? = null,
+    val measuredToPercent: Double? = null,
+
+    /** Скільки відрізків не дожило до кінця і чому останній із них. */
+    val abortedSegments: Int = 0,
+    val lastAbortReason: String = "",
 
     /** Крива «кВт·год проти відсотка», виміряна на цій батареї. */
     val energyCurve: List<EnergyPoint> = emptyList(),
