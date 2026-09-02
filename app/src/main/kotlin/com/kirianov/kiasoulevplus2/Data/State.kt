@@ -26,6 +26,9 @@ data class State(
     /** Знімки лічильників за поїздку: їх веде блок обчислень. */
     val tripHistory: TripHistory = TripHistory(),
 
+    /** Свій підрахунок шляху проти одометра: його теж веде блок обчислень. */
+    val distanceCheck: DistanceCheck = DistanceCheck(),
+
     /** Прогноз залишку ходу і те, що встиг вивчити блок прогнозу. */
     val ml: MlData = MlData(),
 

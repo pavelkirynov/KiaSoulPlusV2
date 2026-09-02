@@ -27,10 +27,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.MlConfidence
+import com.kirianov.kiasoulevplus2.Data.PredictionBasis
 import com.kirianov.kiasoulevplus2.Data.MlModelInfo
 import com.kirianov.kiasoulevplus2.Data.MlPrediction
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
+import com.kirianov.kiasoulevplus2.tools.format.formatDuration
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
 import com.kirianov.kiasoulevplus2.tools.format.formatOrDash
 
@@ -70,6 +72,42 @@ fun PredictionScreen(predictionViewModel: PredictionViewModel = viewModel()) {
  * авто: спершу це орієнтир для довіри, а далі — найцікавіше на екрані, бо саме
  * в розходженні й видно, чи вивчила модель щось, чого не знає бортовий комп'ютер.
  */
+/**
+ * На чому побудоване велике число зверху.
+ *
+ * Без цього рядка воно читається як «стільки проїду», а означає інше: «стільки
+ * проїду, ЯКЩО далі їхати так само, як останні години, і за такого ж климату».
+ * Скільки буде на інших швидкостях — у картці сценаріїв нижче.
+ */
+@Composable
+private fun BasisNote(basis: PredictionBasis) {
+    val text = if (basis.hasHistory) {
+        "За вашим стилем їзди: ${formatDuration(basis.movingMs)} руху, " +
+            "у середньому ${formatDecimal(basis.meanSpeedKmh, 0)} км/год. " +
+            climateSentence(basis) +
+            " Поїдете інакше — і запас буде інший: дивіться сценарії нижче."
+    } else {
+        "Поїздок ще не набралося, тому взято рівний хід 50 км/год. " +
+            "Число уточниться з першими кілометрами."
+    }
+
+    Text(text = text, style = MaterialTheme.typography.bodySmall)
+}
+
+/**
+ * Клімат береться живий із шини, а не всереднений за години: пічку могли щойно
+ * ввімкнути, і прогноз мусить подорожчати одразу, а не за чверть години.
+ */
+private fun climateSentence(basis: PredictionBasis): String {
+    val share = basis.climateShare ?: return "Климат авто не повідомляє."
+    val percent = formatDecimal(share * 100.0, 0)
+    return if (basis.climateLive) {
+        "Климат враховано поточний, зараз це $percent % витрати."
+    } else {
+        "Климат — середній за цими поїздками, $percent % витрати."
+    }
+}
+
 @Composable
 private fun RangeCard(
     prediction: MlPrediction?,
@@ -102,6 +140,8 @@ private fun RangeCard(
                     "до ${formatDecimal(prediction.rangeToKm, 0)} км",
                 style = MaterialTheme.typography.bodyMedium,
             )
+
+            BasisNote(prediction.basis)
 
             MetricRow("Реальний заряд", formatMeasurement(prediction.realPercent, 0, "%"))
             MetricRow("Корисної енергії", formatMeasurement(prediction.usableEnergyRemainingKwh, 1, "кВт·год"))

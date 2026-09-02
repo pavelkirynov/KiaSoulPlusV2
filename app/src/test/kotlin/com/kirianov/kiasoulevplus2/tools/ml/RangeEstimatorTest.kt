@@ -1,14 +1,27 @@
 package com.kirianov.kiasoulevplus2.tools.ml
 
 import com.kirianov.kiasoulevplus2.Data.MlConfidence
+import com.kirianov.kiasoulevplus2.Data.MlSegment
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RangeEstimatorTest {
+
+    /** Відрізок руху з відомою відстанню й тривалістю: решта тут не важлива. */
+    private fun drive(distanceKm: Double, durationMs: Long, charging: Boolean = false) = MlSegment(
+        startedAtMs = 0L,
+        distanceKm = distanceKm,
+        durationMs = durationMs,
+        energyKwh = distanceKm * 0.15,
+        meanSpeedMps = if (durationMs > 0) distanceKm * 1000.0 / (durationMs / 1000.0) else 0.0,
+        meanSpeedCubedMps = 0.0,
+        charging = charging,
+    )
 
     /**
      * Наскрізна перевірка всієї витівки. Вигадане авто з відомою витратою і відомою
@@ -228,5 +241,51 @@ class RangeEstimatorTest {
             }
 
         return Triple(consumption, capacity, quality)
+    }
+
+    /**
+     * Велике число зверху мусить уміти сказати, на чому воно побудоване: інакше
+     * воно читається як «стільки проїду», а означає «стільки проїду, якщо їхати
+     * так само, як останні години».
+     */
+    @Test
+    fun `the basis reports moving time and mean speed`() {
+        val segments = listOf(
+            drive(distanceKm = 5.0, durationMs = 300_000),
+            drive(distanceKm = 10.0, durationMs = 300_000),
+        )
+
+        val basis = RangeEstimator.basisOf(segments, climateShare = 0.12, climateLive = true)
+
+        assertEquals(2, basis.segments)
+        assertEquals(600_000L, basis.movingMs)
+        // 15 км за 10 хвилин -> 90 км/год
+        assertEquals(90.0, basis.meanSpeedKmh, 0.001)
+        assertEquals(0.12, basis.climateShare!!, 0.001)
+        assertTrue(basis.climateLive)
+        assertTrue(basis.hasHistory)
+    }
+
+    /** Час РУХУ, а не час на годиннику: зарядка й стоянка у вікно не входять. */
+    @Test
+    fun `charging segments are not part of the basis`() {
+        val segments = listOf(
+            drive(distanceKm = 5.0, durationMs = 300_000),
+            drive(distanceKm = 0.0, durationMs = 3_600_000, charging = true),
+        )
+
+        val basis = RangeEstimator.basisOf(segments, climateShare = null, climateLive = false)
+
+        assertEquals(1, basis.segments)
+        assertEquals(300_000L, basis.movingMs)
+    }
+
+    /** Поки поїздок немає, казати про «ваш стиль» нема чого. */
+    @Test
+    fun `without segments the basis has no history`() {
+        val basis = RangeEstimator.basisOf(emptyList(), climateShare = null, climateLive = false)
+
+        assertFalse(basis.hasHistory)
+        assertEquals(0, basis.segments)
     }
 }

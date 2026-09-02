@@ -26,6 +26,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
+import com.kirianov.kiasoulevplus2.Data.DistanceCheck
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WindowStats
 import com.kirianov.kiasoulevplus2.tools.format.formatAgo
@@ -158,6 +159,8 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
 
             ChargeCard(state.charge)
 
+            DistanceCheckCard(state.distanceCheck)
+
             VehicleCard(state.vehicle)
         }
 
@@ -173,6 +176,52 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
                     MetricRow("Розбаланс ΔV", formatMeasurement(calculated.cellDeltaVolts, 3, "В"))
                 }
             }
+        }
+    }
+}
+
+/**
+ * Свій підрахунок шляху проти одометра.
+ *
+ * Швидкість приходить приблизно раз на шість секунд, тож інтеграл мусить
+ * накопичувати помилку. Питання не в тому, чи вона є, а яка вона — і відповідає
+ * на це саме ця картка.
+ */
+@Composable
+private fun DistanceCheckCard(check: DistanceCheck) {
+    if (!check.hasComputed) return
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Перевірка підрахунку шляху", fontSize = 18.sp)
+
+            MetricRow("Порахував застосунок", formatMeasurement(check.computedKm, 2, "км"))
+            MetricRow(
+                "Намотав одометр",
+                if (check.hasOdometer) formatMeasurement(check.odometerKm, 1, "км") else NO_VALUE,
+            )
+
+            val error = check.errorPercent
+            if (error == null) {
+                Text(
+                    text = "Одометр ще не змінився — порівнювати поки нема з чим.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                return@Column
+            }
+
+            MetricRow("Різниця", formatMeasurement(check.differenceKm, 2, "км"))
+            MetricRow("Помилка", "${formatDecimal(error, 1)} %")
+
+            Text(
+                text = "Порахований шлях — це інтеграл швидкості, яка приходить раз " +
+                    "на кілька секунд. Одометр тут за еталон: різниця показує, наскільки " +
+                    "застосунку можна вірити там, де одометр недоступний.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

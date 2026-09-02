@@ -261,8 +261,14 @@ class MlBlock(
         val conditions = RangeEstimator.recentConditions(recent.toList()).let { aggregated ->
             climateShareOf(vehicle)?.let { aggregated.copy(climateShare = it) } ?: aggregated
         }
+        val liveClimate = climateShareOf(vehicle)
+        val basis = RangeEstimator.basisOf(
+            segments = recent.toList(),
+            climateShare = conditions.climateShare,
+            climateLive = liveClimate != null,
+        )
         val prediction = socOf(vehicle)?.let { soc ->
-            RangeEstimator.predict(consumption, capacity, quality, soc, conditions)
+            RangeEstimator.predict(consumption, capacity, quality, soc, conditions, basis)
         }
 
         GeneralData.updateMl { current ->

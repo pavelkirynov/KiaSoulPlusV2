@@ -189,7 +189,31 @@ data class MlPrediction(
 
     /** Той самий залишок для кількох сталих швидкостей. */
     val scenarios: List<RangeScenario> = emptyList(),
+
+    /**
+     * На чому побудований прогноз. Не окраса: без цього велике число зверху
+     * читається як «стільки проїду», а насправді воно означає «стільки проїду,
+     * ЯКЩО далі їхати так само, як останні години, і за такого ж климату».
+     */
+    val basis: PredictionBasis = PredictionBasis(),
 )
+
+/**
+ * Умови, за яких порахований прогноз.
+ *
+ * [movingMs] — саме час РУХУ, а не час на годиннику: стоянка у вікно не входить.
+ * [climateLive] — климат узятий живий з шини, а не всереднений: пічку могли щойно
+ * ввімкнути, і прогноз мусить подорожчати одразу.
+ */
+data class PredictionBasis(
+    val segments: Int = 0,
+    val movingMs: Long = 0L,
+    val meanSpeedKmh: Double = 0.0,
+    val climateShare: Double? = null,
+    val climateLive: Boolean = false,
+) {
+    val hasHistory: Boolean get() = segments > 0 && movingMs > 0L
+}
 
 /** Залишок ходу, якщо всю дорогу їхати з однією швидкістю. */
 /**

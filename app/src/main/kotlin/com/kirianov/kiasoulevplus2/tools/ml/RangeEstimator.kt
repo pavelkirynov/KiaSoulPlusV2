@@ -22,6 +22,7 @@ package com.kirianov.kiasoulevplus2.tools.ml
 import com.kirianov.kiasoulevplus2.Data.MlConfidence
 import com.kirianov.kiasoulevplus2.Data.MlPrediction
 import com.kirianov.kiasoulevplus2.Data.MlSegment
+import com.kirianov.kiasoulevplus2.Data.PredictionBasis
 import com.kirianov.kiasoulevplus2.Data.RangeScenario
 import kotlin.math.sqrt
 
@@ -36,6 +37,7 @@ object RangeEstimator {
         quality: PredictionQuality,
         preciseSocPercent: Double,
         recent: DriveConditions,
+        basis: PredictionBasis = PredictionBasis(),
     ): MlPrediction? {
         if (preciseSocPercent < 0.0) return null
 
@@ -52,6 +54,7 @@ object RangeEstimator {
         val bounds = measured ?: parametricBounds(consumption, capacity, recent, rangeKm)
 
         return MlPrediction(
+            basis = basis,
             rangeKm = rangeKm,
             rangeFromKm = bounds.first.coerceAtLeast(0.0),
             rangeToKm = bounds.second,
@@ -110,6 +113,27 @@ object RangeEstimator {
      * Зважування за пробігом, а не за кількістю відрізків: п'ятихвилинна стоянка не
      * має важити стільки ж, скільки десять кілометрів траси.
      */
+    /**
+     * Опис того, на чому побудований прогноз: скільки відрізків, скільки часу РУХУ
+     * вони покривають і з якою середньою швидкістю. Стоянка у час руху не входить.
+     */
+    fun basisOf(segments: List<MlSegment>, climateShare: Double?, climateLive: Boolean): PredictionBasis {
+        val moving = segments.filter { !it.charging && it.distanceKm > 0.0 }
+        if (moving.isEmpty()) return PredictionBasis(climateShare = climateShare, climateLive = climateLive)
+
+        val movingMs = moving.sumOf { it.durationMs }
+        val distanceKm = moving.sumOf { it.distanceKm }
+        val hours = movingMs / MS_PER_HOUR
+
+        return PredictionBasis(
+            segments = moving.size,
+            movingMs = movingMs,
+            meanSpeedKmh = if (hours > 0.0) distanceKm / hours else 0.0,
+            climateShare = climateShare,
+            climateLive = climateLive,
+        )
+    }
+
     fun recentConditions(segments: List<MlSegment>, fallbackSpeedKmh: Double = 50.0): DriveConditions {
         val moving = segments.filter { !it.charging && it.distanceKm > 0.0 }
         if (moving.isEmpty()) return DriveConditions.steady(fallbackSpeedKmh)
@@ -197,4 +221,6 @@ object RangeEstimator {
     private const val GOOD_WIDTH = 0.10
     private const val FAIR_READINESS = 0.5
     private const val FAIR_WIDTH = 0.20
+    private const val MS_PER_HOUR = 3_600_000.0
+
 }
