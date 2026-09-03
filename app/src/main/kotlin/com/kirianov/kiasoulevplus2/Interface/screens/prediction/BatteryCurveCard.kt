@@ -181,6 +181,8 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
 
             Text(text = measuredText(curve), style = MaterialTheme.typography.bodyMedium)
 
+            Text(text = fullText(curve), style = MaterialTheme.typography.bodySmall)
+
             nowSoc?.let { soc ->
                 curve.energyAt(soc)?.let { energy ->
                     Text(
@@ -215,6 +217,16 @@ private fun measuredText(curve: BatteryCurve): String {
     } else {
         "Зміряного ще немає"
     }
-    return "$range, покрито ${formatDecimal(curve.coveredPercent, 0)} % зі 100. " +
-        "Замірів ${curve.samples}, повна ємність за кривою ${formatDecimal(curve.fullKwh, 1)} кВт·год."
+    return "$range, покрито ${formatDecimal(curve.coveredPercent, 0)} % зі 100. Замірів ${curve.samples}."
 }
+
+/**
+ * Повна ємність — це ДОВЕДЕННЯ, і поки покрито кілька відсотків шкали, сказати це
+ * треба прямо. Виміряний нахил розтягується на всю шкалу, а вона може бути
+ * нерівною: відсоток угорі шкали і відсоток посередині коштують по-різному.
+ */
+private fun fullText(curve: BatteryCurve): String =
+    "Якщо решта шкали така сама, як зміряна ділянка, повна ємність — " +
+        "${formatDecimal(curve.fullKwh, 1)} кВт·год. Це доведення, а не вимір: " +
+        "поки зміряно ${formatDecimal(curve.coveredPercent, 0)} % шкали."
+

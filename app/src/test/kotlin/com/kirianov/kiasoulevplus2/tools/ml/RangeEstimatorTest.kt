@@ -57,6 +57,61 @@ class RangeEstimatorTest {
         assertTrue("інтервал має накривати правду", expectedKm in prediction.rangeFromKm..prediction.rangeToKm)
     }
 
+    /**
+     * Виміряна крива ємності важить більше за апріорне припущення про пакет.
+     *
+     * Це не питання смаку. Припущення взяте із зарядки від розетки (51 кВт·год у
+     * батарею), а прямий вимір по пожиттєвих лічильниках BMS дав майже вдвічі
+     * менше на відсоток шкали. Поки прогноз спирався на припущення, зверху
+     * стояло 401 км при реальних приблизно двохсот.
+     */
+    @Test
+    fun `a measured curve outweighs the assumed pack`() {
+        val car = VirtualCar()
+        val (consumption, capacity, quality) = trainedOn(car, capacityKwh = 51.0)
+
+        fun predictWith(curveEnergyKwh: Double?) = RangeEstimator.predict(
+            consumption = consumption,
+            capacity = capacity,
+            quality = quality,
+            preciseSocPercent = 80.0,
+            recent = DriveConditions.steady(60.0),
+            curveEnergyKwh = curveEnergyKwh,
+        )
+
+        val assumed = predictWith(null)!!
+        val measured = predictWith(23.0)!!
+
+        assertEquals(23.0, measured.usableEnergyRemainingKwh, 0.001)
+        assertTrue("вимір не позначено", measured.capacityMeasured)
+        assertFalse("припущення позначено виміром", assumed.capacityMeasured)
+        assertTrue(
+            "менша ємність мусить дати менший запас: ${assumed.rangeKm} проти ${measured.rangeKm}",
+            measured.rangeKm < assumed.rangeKm,
+        )
+        // Сценарії теж мусять їхати від виміряної енергії, а не від припущеної.
+        assertTrue(measured.scenarios.all { it.rangeKm < assumed.rangeKm })
+    }
+
+    /** Порожній вимір нічого не ламає: береться припущення, як і до нього. */
+    @Test
+    fun `a curve with nothing measured falls back to the model`() {
+        val car = VirtualCar()
+        val (consumption, capacity, quality) = trainedOn(car, capacityKwh = 51.0)
+
+        val prediction = RangeEstimator.predict(
+            consumption = consumption,
+            capacity = capacity,
+            quality = quality,
+            preciseSocPercent = 80.0,
+            recent = DriveConditions.steady(60.0),
+            curveEnergyKwh = 0.0,
+        )!!
+
+        assertFalse(prediction.capacityMeasured)
+        assertEquals(capacity.energyRemainingKwh(80.0), prediction.usableEnergyRemainingKwh, 0.001)
+    }
+
     /** Швидше їхати — менше проїхати. Сценарії мають бути впорядковані. */
     @Test
     fun `driving faster gets you less far`() {

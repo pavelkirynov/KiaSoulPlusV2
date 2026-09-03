@@ -278,8 +278,24 @@ class MlBlock(
             climateShare = conditions.climateShare,
             climateLive = liveClimate != null,
         )
+        // Ємність беремо з ВИМІРЯНОЇ кривої, якщо вона вже щось зміряла.
+        //
+        // Це не дрібниця. Апріорне припущення про пакет (51 кВт·год, порахований
+        // із зарядки від розетки) і прямий вимір по пожиттєвих лічильниках BMS
+        // розійшлися майже вдвічі — і саме припущення робило верхнє число на
+        // екрані нереальним. Вимір іде першим; припущення лишається запасним
+        // варіантом на перші кілометри, поки замірів ще нуль.
+        val curve = GeneralData.state.value.curve
         val prediction = socOf(vehicle)?.let { soc ->
-            RangeEstimator.predict(consumption, capacity, quality, soc, conditions, basis)
+            RangeEstimator.predict(
+                consumption = consumption,
+                capacity = capacity,
+                quality = quality,
+                preciseSocPercent = soc,
+                recent = conditions,
+                basis = basis,
+                curveEnergyKwh = if (curve.hasMeasurements) curve.energyAt(soc) else null,
+            )
         }
 
         GeneralData.updateMl { current ->

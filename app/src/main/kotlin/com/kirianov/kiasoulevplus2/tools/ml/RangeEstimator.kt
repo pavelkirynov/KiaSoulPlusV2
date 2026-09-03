@@ -38,10 +38,20 @@ object RangeEstimator {
         preciseSocPercent: Double,
         recent: DriveConditions,
         basis: PredictionBasis = PredictionBasis(),
+        /**
+         * Енергія, що лишилася, за ВИМІРЯНОЮ кривою ємності, кВт·год.
+         *
+         * Коли вона є, вона й береться: це прямий вимір по пожиттєвих лічильниках
+         * BMS, а `capacity` поки що спирається на апріорне припущення про пакет.
+         * Два числа розходилися майже вдвічі, і саме припущення робило верхнє
+         * число на екрані нереально великим.
+         */
+        curveEnergyKwh: Double? = null,
     ): MlPrediction? {
         if (preciseSocPercent < 0.0) return null
 
-        val energyKwh = capacity.energyRemainingKwh(preciseSocPercent)
+        val measuredEnergy = curveEnergyKwh?.takeIf { it.isFinite() && it > 0.0 }
+        val energyKwh = measuredEnergy ?: capacity.energyRemainingKwh(preciseSocPercent)
         if (energyKwh <= 0.0) return null
 
         val whPerKm = consumption.predictWhPerKm(recent)
@@ -60,6 +70,7 @@ object RangeEstimator {
             rangeToKm = bounds.second,
             realPercent = capacity.realPercent(preciseSocPercent),
             usableEnergyRemainingKwh = energyKwh,
+            capacityMeasured = measuredEnergy != null,
             whPerKm = whPerKm,
             measuredBand = measured != null,
             scenarios = SCENARIO_SPEEDS_KMH.map { speed ->
