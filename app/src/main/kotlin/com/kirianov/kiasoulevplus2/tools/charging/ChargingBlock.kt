@@ -27,12 +27,21 @@ class ChargingBlock(
             GeneralData.updateChargeLog(log)
 
             GeneralData.state
-                .map { Reading(it.bms.cumulativeEnergyChargedKwh, it.vehicle.charging.isCharging) }
+                .map {
+                    Reading(
+                        counterKwh = it.bms.cumulativeEnergyChargedKwh,
+                        // Одометр потрібен, щоб відрізнити зарядку без телефона від
+                        // рекуперації: без нього перша різниця після ночі неоднозначна.
+                        odometerKm = it.vehicle.odometerKm,
+                        isCharging = it.vehicle.charging.isCharging,
+                    )
+                }
                 .distinctUntilChanged()
                 .collect { reading ->
                     val updated = ChargeTracker.observe(
                         log = log,
                         counterKwh = reading.counterKwh,
+                        odometerKm = reading.odometerKm,
                         isCharging = reading.isCharging,
                         nowMs = nowMs(),
                         dayKey = dayKey(),
@@ -46,7 +55,11 @@ class ChargingBlock(
         }
     }
 
-    private data class Reading(val counterKwh: Double, val isCharging: Boolean)
+    private data class Reading(
+        val counterKwh: Double,
+        val odometerKm: Double,
+        val isCharging: Boolean,
+    )
 }
 
 /**

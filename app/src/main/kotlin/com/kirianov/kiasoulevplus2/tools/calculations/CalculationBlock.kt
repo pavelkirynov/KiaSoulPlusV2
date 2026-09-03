@@ -47,17 +47,32 @@ class CalculationBlock(
      * Чи стримав прогноз обіцянку: наскільки впав обіцяний запас проти того,
      * скільки насправді проїхано. Див. RangeAccuracy.
      *
-     * Відлік починається заново при від'єднанні і на зарядці: зарядка піднімає
-     * запас, і початкова обіцянка після неї означає вже інше.
+     * ЩО ЙОГО СКИДАЄ, А ЩО НІ. Зарядка — скидає: вона піднімає запас, і початкова
+     * обіцянка після неї означає вже інше. Обрив зв'язку — НЕ скидає, і це
+     * важливо. Обидва числа тут абсолютні: одометр авто і поточний прогноз. Ні
+     * те, ні інше не залежить від того, дивився застосунок чи ні, тож пауза в
+     * спостереженнях нічого не псує — на відміну від скидання, після якого
+     * відлік починався з нуля по кілька разів за поїздку і не встигав набрати
+     * навіть тих трьох кілометрів, з яких відсоток узагалі щось означає.
      */
     private fun trackRangeAccuracy(scope: CoroutineScope) {
         GeneralData.state
-            .map { RangeReading(it.ml.prediction?.rangeKm ?: 0.0, it.vehicle.odometerKm, it.charge.charging) }
+            .map {
+                RangeReading(
+                    rangeKm = it.ml.prediction?.rangeKm ?: 0.0,
+                    odometerKm = it.vehicle.odometerKm,
+                    charging = it.charge.charging,
+                    // Зарядка, яку застосунок не бачив живцем, теж міняє запас —
+                    // її видно лише за тим, що з'явилася нова завершена сесія.
+                    lastChargeEndedAtMs = it.charge.lastSessionEndedAtMs,
+                )
+            }
             .distinctUntilChanged()
             .onEach { reading ->
                 val current = GeneralData.state.value.rangeAccuracy
 
-                if (reading.charging) {
+                if (reading.charging || reading.lastChargeEndedAtMs != lastChargeSeenMs) {
+                    lastChargeSeenMs = reading.lastChargeEndedAtMs
                     if (current.started) GeneralData.updateRangeAccuracy(RangeAccuracy())
                     return@onEach
                 }
@@ -68,10 +83,14 @@ class CalculationBlock(
             .launchIn(scope)
     }
 
+    /** Коли скінчилася остання зарядка, яку ми вже врахували для скидання відліку. */
+    private var lastChargeSeenMs = 0L
+
     private data class RangeReading(
         val rangeKm: Double,
         val odometerKm: Double,
         val charging: Boolean,
+        val lastChargeEndedAtMs: Long,
     )
 
     private data class Inputs(
@@ -132,7 +151,9 @@ class CalculationBlock(
                 if (connection == ConnectionState.Disconnected) {
                     startedAt = null
                     GeneralData.clearTripHistory()
-                    GeneralData.updateRangeAccuracy(RangeAccuracy())
+                    // RangeAccuracy тут НЕ скидається: див. пояснення в
+                    // trackRangeAccuracy. Обидва його числа абсолютні й
+                    // переживають паузу в спостереженнях.
                 }
             }
             .launchIn(scope)

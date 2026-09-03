@@ -216,15 +216,51 @@ class CalculationBlockTest {
         assertFalse(GeneralData.state.value.rangeAccuracy.started)
     }
 
-    /** Від'єднання — теж нова поїздка. */
+    /**
+     * А от обрив зв'язку відлік НЕ скидає, і це протилежне тому, як було спочатку.
+     *
+     * Обидва його числа абсолютні: одометр авто і поточний прогноз. Жодне з них не
+     * залежить від того, дивився застосунок чи ні, тож пауза в спостереженнях
+     * нічого не псує. Скидання ж коштувало всього: на нестабільному Bluetooth
+     * відлік починався з нуля по кілька разів за поїздку і не встигав набрати
+     * навіть тих трьох кілометрів, з яких відсоток узагалі щось означає.
+     */
     @Test
-    fun `disconnecting starts the check over`() {
+    fun `a dropped link does not start the check over`() {
         GeneralData.updateConnection(ConnectionState.Connected, "")
         GeneralData.updateVehicle(VehicleData(odometerKm = 1_000.0))
         predictRange(200.0)
         assertTrue(GeneralData.state.value.rangeAccuracy.started)
 
         GeneralData.updateConnection(ConnectionState.Disconnected, "")
+        assertTrue("Обрив зв'язку скинув відлік", GeneralData.state.value.rangeAccuracy.started)
+
+        // Повернулися за 20 км: відлік мусить порахувати їх від тієї самої точки.
+        GeneralData.updateConnection(ConnectionState.Connected, "")
+        GeneralData.updateVehicle(VehicleData(odometerKm = 1_020.0))
+        predictRange(170.0)
+
+        val accuracy = GeneralData.state.value.rangeAccuracy
+        assertEquals(20.0, accuracy.drivenKm, 0.001)
+        assertEquals(30.0, accuracy.predictedDropKm, 0.001)
+    }
+
+    /**
+     * Зарядка, якої застосунок не бачив живцем (авто стояло вночі без телефона),
+     * так само робить попередню обіцянку неспівставною: запас після неї інший.
+     */
+    @Test
+    fun `a charge found afterwards starts the check over`() {
+        GeneralData.updateConnection(ConnectionState.Connected, "")
+        GeneralData.updateVehicle(VehicleData(odometerKm = 1_000.0))
+        predictRange(200.0)
+        GeneralData.updateVehicle(VehicleData(odometerKm = 1_050.0))
+        predictRange(135.0)
+        assertTrue(GeneralData.state.value.rangeAccuracy.started)
+
+        GeneralData.updateChargeLog(
+            ChargeLog(lastSessionKwh = 38.0, lastSessionEndedAtMs = 1_000L, hasBaseline = true),
+        )
 
         assertFalse(GeneralData.state.value.rangeAccuracy.started)
     }
