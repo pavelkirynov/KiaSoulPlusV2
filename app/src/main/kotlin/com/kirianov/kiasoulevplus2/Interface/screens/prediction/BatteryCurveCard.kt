@@ -2,14 +2,22 @@
 // по вертикалі — кВт·год, які в батареї лишаються.
 //
 // ЧОМУ ОКРЕМИЙ ГРАФІК, А НЕ ДРУГА КРИВА НА СУСІДНЬОМУ. Дві величини з різними
-// одиницями на одному полотні читаються погано: спільна вертикаль означає, що
-// одна з них намальована в чужому масштабі, і форму кривої вже не побачити. Тут
-// вертикаль своя, у кіловат-годинах, з власними підписами.
+// одиницями на одному полотні читаються погано: спільна вертикаль означає, що одна
+// з них намальована в чужому масштабі, і форму кривої вже не побачити. Тут
+// вертикаль своя, у кіловат-годинах, і з цифрами біля осі.
 //
-// ЩО ТУТ ВИМІРЯНЕ, А ЩО ДОВЕДЕНЕ. Суцільна ділянка — та, де крива справді
-// зміряна різницею пожиттєвих лічильників. Пунктир — доведення середнім
-// нахилом: ми ще не бували на цих відсотках, і показувати їх так само, як
-// зміряні, означало б брехати про те, чого не знаємо.
+// ОСІ Й СІТКА МАЛЮЮТЬСЯ ЗАВЖДИ, навіть коли замірів ще нуль. Порожнє полотно з
+// підписаними осями показує, що графік є і чого він чекає; картка, яка до першого
+// заміру складається в абзац тексту, виглядає як відсутня функція.
+//
+// ПІДПИСИ ОСЕЙ — ЗВИЧАЙНІ Text, а не малювання по полотну, і розкладені за
+// відомою висотою полотна. Тому висота задана числом, а не пропорцією: інакше
+// цифру ніяк не поставити рівно проти її лінії сітки.
+//
+// ЩО ТУТ ВИМІРЯНЕ, А ЩО ДОВЕДЕНЕ. Суцільна ділянка — та, де крива справді зміряна
+// різницею пожиттєвих лічильників. Пунктир — доведення середнім нахилом: ми ще не
+// бували на цих відсотках, і показувати їх так само, як зміряні, означало б
+// брехати про те, чого не знаємо.
 
 package com.kirianov.kiasoulevplus2.Interface.screens.prediction
 
@@ -18,10 +26,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -31,12 +41,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kirianov.kiasoulevplus2.Data.BatteryCurve
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import kotlin.math.ceil
+
+/** Висота полотна. Число, а не пропорція: за ним розкладаються підписи осі. */
+private val PLOT_HEIGHT = 200.dp
+
+/** Ширина стовпчика цифр біля вертикальної осі. */
+private val AXIS_WIDTH = 34.dp
+
+/**
+ * Скільки кВт·год показувати на осі, поки не зміряно нічого.
+ *
+ * Шістдесят: перепакована батарея цього авто — близько 51 кВт·год, і вісь має
+ * бути з запасом над нею, щоб перша ж крива не втикалася в стелю.
+ */
+private const val DEFAULT_TOP_KWH = 60.0
 
 @Composable
 fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> Unit) {
@@ -47,88 +72,111 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
         ) {
             Text(text = "Ємність по шкалі", fontSize = 18.sp)
 
-            if (!curve.hasMeasurements) {
-                Text(
-                    text = "Ще жодного заміру. Один замір беремо, коли лічильник відданої " +
-                        "енергії набирає близько кіловат-години — це приблизно п'ять " +
-                        "кілометрів дороги.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                return@Column
-            }
-
             val lineColor = MaterialTheme.colorScheme.primary
             val inferredColor = MaterialTheme.colorScheme.outline
             val gridColor = MaterialTheme.colorScheme.outlineVariant
             val markerRing = MaterialTheme.colorScheme.surface
 
-            val topKwh = ceil((curve.fullKwh.coerceAtLeast(1.0)) / 10.0) * 10.0
+            val topKwh = topOf(curve)
+            val step = if (topKwh > 60.0) 20.0 else 10.0
             val nowSoc = vehicle.preciseSocPercent.takeIf { vehicle.hasPreciseSoc }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1.3f),
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val leftInset = 30.dp.toPx()
-                    val bottomInset = 18.dp.toPx()
-                    val edge = 8.dp.toPx()
-                    val plotWidth = size.width - leftInset - edge
-                    val plotHeight = size.height - bottomInset - edge
-                    if (plotWidth <= 0f || plotHeight <= 0f) return@Canvas
-
-                    fun x(percent: Double) = leftInset + (percent / 100.0).toFloat() * plotWidth
-                    fun y(kwh: Double) = edge + (1.0 - kwh / topKwh).toFloat() * plotHeight
-
-                    // Сітка: кожні 20 % і кожні 10 кВт·год. Рідка навмисно — вона
-                    // тут для оцінки на око, а не для зняття значень.
-                    for (percent in 0..100 step 20) {
-                        val at = x(percent.toDouble())
-                        drawLine(gridColor, Offset(at, edge), Offset(at, edge + plotHeight), 1f)
-                    }
-                    var kwh = 0.0
-                    while (kwh <= topKwh) {
-                        val at = y(kwh)
-                        drawLine(gridColor, Offset(leftInset, at), Offset(leftInset + plotWidth, at), 1f)
-                        kwh += 10.0
-                    }
-
-                    // Крива по відрізках: суцільна там, де обидва кінці зміряні.
-                    val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))
-                    curve.points.zipWithNext { from, to ->
-                        val measured = from.measured && to.measured
-                        drawLine(
-                            color = if (measured) lineColor else inferredColor,
-                            start = Offset(x(from.socPercent), y(from.energyKwh)),
-                            end = Offset(x(to.socPercent), y(to.energyKwh)),
-                            strokeWidth = if (measured) 3f else 2f,
-                            pathEffect = if (measured) null else dash,
+            Row(modifier = Modifier.fillMaxWidth()) {
+                // Цифри вертикальної осі. Кожна зсунута рівно на висоту своєї
+                // лінії сітки, тому й висота полотна тут задана числом.
+                Box(
+                    modifier = Modifier
+                        .width(AXIS_WIDTH)
+                        .height(PLOT_HEIGHT),
+                ) {
+                    var value = 0.0
+                    while (value <= topKwh) {
+                        val share = 1.0 - value / topKwh
+                        Text(
+                            text = formatDecimal(value, 0),
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(end = 4.dp)
+                                // Мінус пів рядка: підпис має стояти серединою
+                                // проти лінії, а не низом.
+                                .offset(y = PLOT_HEIGHT * share.toFloat() - 8.dp),
                         )
+                        value += step
                     }
+                }
 
-                    // Де авто зараз: точка на кривій, щоб число з екрана мало місце.
-                    nowSoc?.let { soc ->
-                        curve.energyAt(soc)?.let { energy ->
-                            val center = Offset(x(soc), y(energy))
-                            drawCircle(markerRing, radius = 7f, center = center)
-                            drawCircle(lineColor, radius = 4f, center = center)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(PLOT_HEIGHT),
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        fun x(percent: Double) = (percent / 100.0).toFloat() * size.width
+                        fun y(kwh: Double) = (1.0 - kwh / topKwh).toFloat() * size.height
+
+                        // Сітка: кожні 20 % і кожні step кВт·год. Рідка навмисно —
+                        // вона для оцінки на око, а не для зняття значень.
+                        for (percent in 0..100 step 20) {
+                            drawLine(gridColor, Offset(x(percent.toDouble()), 0f), Offset(x(percent.toDouble()), size.height), 1f)
+                        }
+                        var value = 0.0
+                        while (value <= topKwh) {
+                            drawLine(gridColor, Offset(0f, y(value)), Offset(size.width, y(value)), 1f)
+                            value += step
+                        }
+
+                        // Крива по відрізках: суцільна там, де обидва кінці зміряні.
+                        val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))
+                        curve.points.zipWithNext { from, to ->
+                            val measured = from.measured && to.measured
+                            drawLine(
+                                color = if (measured) lineColor else inferredColor,
+                                start = Offset(x(from.socPercent), y(from.energyKwh)),
+                                end = Offset(x(to.socPercent), y(to.energyKwh)),
+                                strokeWidth = if (measured) 4f else 2f,
+                                pathEffect = if (measured) null else dash,
+                            )
+                        }
+
+                        // Де авто зараз: точка на кривій, щоб число з екрана мало місце.
+                        nowSoc?.let { soc ->
+                            curve.energyAt(soc)?.let { energy ->
+                                val center = Offset(x(soc), y(energy))
+                                drawCircle(markerRing, radius = 8f, center = center)
+                                drawCircle(lineColor, radius = 5f, center = center)
+                            }
                         }
                     }
                 }
             }
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = AXIS_WIDTH),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(text = "0 %", style = MaterialTheme.typography.bodySmall)
-                Text(
-                    text = "вертикаль — кВт·год, до ${formatDecimal(topKwh, 0)}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Text(text = "50 %", style = MaterialTheme.typography.bodySmall)
                 Text(text = "100 %", style = MaterialTheme.typography.bodySmall)
+            }
+
+            Text(
+                text = "Вертикаль — кВт·год, горизонталь — відсоток шкали.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            if (!curve.hasMeasurements) {
+                Text(
+                    text = "Замірів ще немає, тому кривої на полотні теж немає. Один " +
+                        "замір беремо, коли лічильник відданої енергії набирає близько " +
+                        "кіловат-години — це приблизно п'ять кілометрів дороги.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                return@Column
             }
 
             Text(text = measuredText(curve), style = MaterialTheme.typography.bodyMedium)
@@ -151,6 +199,12 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
             OutlinedButton(onClick = onReset) { Text("Забути криву") }
         }
     }
+}
+
+/** Стеля вертикальної осі: округлена вгору до десятка, з запасом над кривою. */
+private fun topOf(curve: BatteryCurve): Double {
+    if (curve.fullKwh <= 0.0) return DEFAULT_TOP_KWH
+    return ceil(curve.fullKwh / 10.0) * 10.0
 }
 
 private fun measuredText(curve: BatteryCurve): String {
