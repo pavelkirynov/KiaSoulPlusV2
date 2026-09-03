@@ -41,12 +41,19 @@ object RangeEstimator {
         /**
          * Енергія, що лишилася, за ВИМІРЯНОЮ кривою ємності, кВт·год.
          *
-         * Коли вона є, вона й береться: це прямий вимір по пожиттєвих лічильниках
-         * BMS, а `capacity` поки що спирається на апріорне припущення про пакет.
-         * Два числа розходилися майже вдвічі, і саме припущення робило верхнє
-         * число на екрані нереально великим.
+         * Коли вона є, вона й береться: крива знає, як ємність РОЗПОДІЛЕНА по
+         * шкалі, а шкала цього авто різко нерівна — відсоток угорі коштує
+         * близько кілометра, у кінці від п'яти до десяти. Сама повна ємність у
+         * криву приходить окремо: аксіомою з відомого пакета, а далі виміром із
+         * зарядки з низьких відсотків.
          */
         curveEnergyKwh: Double? = null,
+        /**
+         * Чи зміряна повна ємність зарядкою з низьких відсотків, чи вона поки
+         * аксіома. Крива дає розподіл ємності по шкалі навіть на аксіомі, тож
+         * «взяли з кривої» і «зміряли» — різні речі, і плутати їх не можна.
+         */
+        curveTotalMeasured: Boolean = false,
     ): MlPrediction? {
         if (preciseSocPercent < 0.0) return null
 
@@ -70,7 +77,7 @@ object RangeEstimator {
             rangeToKm = bounds.second,
             realPercent = capacity.realPercent(preciseSocPercent),
             usableEnergyRemainingKwh = energyKwh,
-            capacityMeasured = measuredEnergy != null,
+            capacityMeasured = measuredEnergy != null && curveTotalMeasured,
             whPerKm = whPerKm,
             measuredBand = measured != null,
             scenarios = SCENARIO_SPEEDS_KMH.map { speed ->

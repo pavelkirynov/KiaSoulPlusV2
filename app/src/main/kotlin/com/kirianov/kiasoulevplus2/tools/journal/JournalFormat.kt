@@ -129,10 +129,13 @@ object JournalFormat {
                 "kWh=${num(modelAfter.usableCapacityKwh)}"
         }
 
-        if (before.curve.samples != after.curve.samples) {
+        if (before.curve.samples != after.curve.samples ||
+            before.curve.fullChargeSamples != after.curve.fullChargeSamples
+        ) {
             val curve = after.curve
             out += "$at curve n=${curve.samples} covered=${num(curve.coveredPercent)} " +
-                "full=${num(curve.fullKwh)} " +
+                "total=${num(curve.totalKwh)}${if (curve.totalMeasured) "!" else "?"} " +
+                "charges=${curve.fullChargeSamples} " +
                 "from=${num(curve.measuredFromPercent)} to=${num(curve.measuredToPercent)}"
         }
 

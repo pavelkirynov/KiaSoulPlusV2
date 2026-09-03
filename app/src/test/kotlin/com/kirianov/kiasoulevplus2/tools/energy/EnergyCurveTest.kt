@@ -3,6 +3,7 @@ package com.kirianov.kiasoulevplus2.tools.energy
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.ChargingState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.Data.Pack
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -127,20 +128,106 @@ class EnergyCurveTest {
 
     /**
      * Крива мусить бути суцільною від 0 до 100 %, інакше її нема як нарисувати.
-     * Але кожна точка знає, вимір це чи доведення середнім нахилом.
+     * Але кожна точка знає, вимір це чи доведення.
      */
     @Test
     fun `the curve is continuous and marks what was measured`() {
         val levels = EnergyLevels()
         levels.learn(fromPercent = 90.0, toPercent = 80.0, netKwh = 5.0)
 
-        val curve = levels.curve()
+        val curve = levels.curve(totalKwh = 51.0)
 
         assertEquals(101, curve.size)
         assertEquals(0.0, curve.first().energyKwh, 0.001)
-        assertEquals(50.0, curve.last().energyKwh, 0.001)
         assertTrue("Виміряне не позначене", curve.any { it.socPercent == 85.0 && it.measured })
         assertTrue("Доведене позначене як вимір", curve.any { it.socPercent == 50.0 && !it.measured })
+    }
+
+    /**
+     * ГОЛОВНЕ ПРО ЦЮ КРИВУ: сума задана наперед, і місцевий нахил на неї не
+     * впливає.
+     *
+     * Саме тут я й помилився. Зміряна ділянка 88–95 % дала 0.29 кВт·год на
+     * відсоток, і з цього виходило «у батареї 29 кВт·год» — при справжніх 51.
+     * Причина в тому, що шкала різко нерівна: відсоток угорі коштує близько
+     * кілометра, у кінці — від п'яти до десяти. Тому вимір задає ФОРМУ, а
+     * повна ємність приходить окремо.
+     */
+    @Test
+    fun `a local slope never changes the total`() {
+        val levels = EnergyLevels()
+        // Дешевий відсоток угорі шкали: 7 % по 0.29 кВт·год.
+        levels.learn(fromPercent = 95.0, toPercent = 88.0, netKwh = 2.03)
+
+        val curve = levels.curve(totalKwh = 51.0)
+
+        assertEquals("Сума кривої мусить лишитися повною ємністю", 51.0, curve.last().energyKwh, 0.01)
+        // Зміряна ділянка лишається зі своїм нахилом...
+        val measuredSlope = curve.first { it.socPercent == 95.0 }.energyKwh -
+            curve.first { it.socPercent == 88.0 }.energyKwh
+        assertEquals(2.03, measuredSlope, 0.05)
+        // ...а решта ємності дісталася невиміряній частині, і там відсоток дорожчий.
+        val tailSlope = curve.first { it.socPercent == 50.0 }.energyKwh -
+            curve.first { it.socPercent == 49.0 }.energyKwh
+        assertTrue("Невиміряна частина мусить бути дорожчою: $tailSlope", tailSlope > 0.29)
+    }
+
+    // --- Повна ємність із зарядки ------------------------------------------------
+
+    /**
+     * Зарядка з низьких відсотків до сотні — єдиний прямий вимір повної ємності.
+     * Лічильник прийнятої енергії веде сама батарея, тож втрат зарядного в цьому
+     * числі немає.
+     */
+    @Test
+    fun `a charge from a low percent measures the whole pack`() {
+        val levels = EnergyLevels()
+
+        assertTrue(levels.learnFullCharge(fromPercent = 3.0, toPercent = 100.0, energyInKwh = 49.3))
+
+        assertEquals(50.8, levels.measuredTotalKwh!!, 0.1)
+        assertEquals(1, levels.fullChargeSamples)
+    }
+
+    /** Зарядка з половини нічого про повну ємність не каже. */
+    @Test
+    fun `a charge from halfway is refused`() {
+        val levels = EnergyLevels()
+
+        assertFalse(levels.learnFullCharge(fromPercent = 50.0, toPercent = 100.0, energyInKwh = 25.0))
+        assertNull(levels.measuredTotalKwh)
+    }
+
+    /** Незакінчена зарядка — теж ні: невідомо, скільки лишилося до сотні. */
+    @Test
+    fun `a charge that stopped early is refused`() {
+        val levels = EnergyLevels()
+
+        assertFalse(levels.learnFullCharge(fromPercent = 3.0, toPercent = 80.0, energyInKwh = 39.0))
+    }
+
+    /** Кілька глибоких зарядок усереднюються. */
+    @Test
+    fun `deep charges are averaged`() {
+        val levels = EnergyLevels()
+
+        levels.learnFullCharge(fromPercent = 0.0, toPercent = 100.0, energyInKwh = 50.0)
+        levels.learnFullCharge(fromPercent = 0.0, toPercent = 100.0, energyInKwh = 52.0)
+
+        assertEquals(51.0, levels.measuredTotalKwh!!, 0.001)
+        assertEquals(2, levels.fullChargeSamples)
+    }
+
+    /** Виміряна ємність замінює аксіому в кривій. */
+    @Test
+    fun `a measured total replaces the axiom in the curve`() {
+        val levels = EnergyLevels()
+        levels.learn(fromPercent = 95.0, toPercent = 88.0, netKwh = 2.03)
+        levels.learnFullCharge(fromPercent = 2.0, toPercent = 100.0, energyInKwh = 44.1)
+
+        val total = levels.measuredTotalKwh!!
+        assertEquals(45.0, total, 0.1)
+        assertEquals(total, levels.curve(total).last().energyKwh, 0.01)
     }
 
     @Test
@@ -202,8 +289,13 @@ class EnergyCurveTest {
 
         val curve = GeneralData.state.value.curve
         assertEquals(1, curve.samples)
-        // Віддано 6, прийнято 1 — отже пішло 5 кВт·год на 10 % шкали.
-        assertEquals(50.0, curve.fullKwh, 0.5)
+        // Віддано 6, прийнято 1 — отже пішло 5 кВт·год на 10 % шкали. Але повна
+        // ємність від цього не змінюється: вона аксіома, поки її не зміряли.
+        // 16 комірок CATL по 3.18 кВт·год — рівно те, що стоїть в авто.
+        assertEquals(Pack.USABLE_CAPACITY_KWH, curve.totalKwh, 0.001)
+        assertFalse(curve.totalMeasured)
+        assertEquals(0.5, curve.points.first { it.socPercent == 85.0 }.energyKwh -
+            curve.points.first { it.socPercent == 84.0 }.energyKwh, 0.01)
     }
 
     /** Поки лічильник не набрав кіловат-години, замір брати рано. */
@@ -265,7 +357,7 @@ class EnergyCurveTest {
 
         val curve = GeneralData.state.value.curve
         assertEquals(1, curve.samples)
-        assertEquals(50.0, curve.fullKwh, 0.5)
+        assertEquals(90.0, curve.measuredToPercent!!, 0.001)
     }
 
     @Test

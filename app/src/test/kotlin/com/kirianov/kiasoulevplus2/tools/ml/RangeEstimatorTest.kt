@@ -58,25 +58,22 @@ class RangeEstimatorTest {
     }
 
     /**
-     * Виміряна крива ємності важить більше за апріорне припущення про пакет.
-     *
-     * Це не питання смаку. Припущення взяте із зарядки від розетки (51 кВт·год у
-     * батарею), а прямий вимір по пожиттєвих лічильниках BMS дав майже вдвічі
-     * менше на відсоток шкали. Поки прогноз спирався на припущення, зверху
-     * стояло 401 км при реальних приблизно двохсот.
+     * Крива задає залишок енергії, бо знає розподіл ємності по шкалі. Шкала цього
+     * авто різко нерівна, і «88 % шкали» не означає «88 % енергії».
      */
     @Test
-    fun `a measured curve outweighs the assumed pack`() {
+    fun `the curve decides the remaining energy`() {
         val car = VirtualCar()
         val (consumption, capacity, quality) = trainedOn(car, capacityKwh = 51.0)
 
-        fun predictWith(curveEnergyKwh: Double?) = RangeEstimator.predict(
+        fun predictWith(curveEnergyKwh: Double?, totalMeasured: Boolean = true) = RangeEstimator.predict(
             consumption = consumption,
             capacity = capacity,
             quality = quality,
             preciseSocPercent = 80.0,
             recent = DriveConditions.steady(60.0),
             curveEnergyKwh = curveEnergyKwh,
+            curveTotalMeasured = totalMeasured,
         )
 
         val assumed = predictWith(null)!!
@@ -85,6 +82,8 @@ class RangeEstimatorTest {
         assertEquals(23.0, measured.usableEnergyRemainingKwh, 0.001)
         assertTrue("вимір не позначено", measured.capacityMeasured)
         assertFalse("припущення позначено виміром", assumed.capacityMeasured)
+        // Крива на аксіомі дає число, але виміром воно не називається.
+        assertFalse(predictWith(23.0, totalMeasured = false)!!.capacityMeasured)
         assertTrue(
             "менша ємність мусить дати менший запас: ${assumed.rangeKm} проти ${measured.rangeKm}",
             measured.rangeKm < assumed.rangeKm,

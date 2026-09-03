@@ -219,11 +219,11 @@ private fun RangeCard(
             BasisNote(prediction.basis)
 
             MetricRow("Реальний заряд", formatMeasurement(prediction.realPercent, 0, "%"))
-            // З позначкою, звідки число. Вимір по лічильниках BMS і апріорне
-            // припущення про пакет розходилися майже вдвічі, і показувати їх
-            // однаково означало б показувати здогад як вимір.
+            // З позначкою, звідки взялася повна ємність: зміряна глибокою
+            // зарядкою чи поки аксіома з відомого пакета. Показувати ці два
+            // випадки однаково означало б показувати здогад як вимір.
             MetricRow(
-                if (prediction.capacityMeasured) "Корисної енергії, вимір" else "Корисної енергії, припущення",
+                if (prediction.capacityMeasured) "Корисної енергії, вимір" else "Корисної енергії, аксіома",
                 formatMeasurement(prediction.usableEnergyRemainingKwh, 1, "кВт·год"),
             )
             MetricRow("Витрата в прогнозі", formatMeasurement(prediction.whPerKm, 0, "Вт·год/км"))

@@ -205,8 +205,8 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
 
 /** Стеля вертикальної осі: округлена вгору до десятка, з запасом над кривою. */
 private fun topOf(curve: BatteryCurve): Double {
-    if (curve.fullKwh <= 0.0) return DEFAULT_TOP_KWH
-    return ceil(curve.fullKwh / 10.0) * 10.0
+    if (curve.totalKwh <= 0.0) return DEFAULT_TOP_KWH
+    return ceil(curve.totalKwh / 10.0) * 10.0
 }
 
 private fun measuredText(curve: BatteryCurve): String {
@@ -221,12 +221,16 @@ private fun measuredText(curve: BatteryCurve): String {
 }
 
 /**
- * Повна ємність — це ДОВЕДЕННЯ, і поки покрито кілька відсотків шкали, сказати це
- * треба прямо. Виміряний нахил розтягується на всю шкалу, а вона може бути
- * нерівною: відсоток угорі шкали і відсоток посередині коштують по-різному.
+ * Звідки взялася повна ємність. Це найважливіший рядок картки: сума кривої задана
+ * НАПЕРЕД, а заміри лише перерозподіляють її по шкалі.
  */
-private fun fullText(curve: BatteryCurve): String =
-    "Якщо решта шкали така сама, як зміряна ділянка, повна ємність — " +
-        "${formatDecimal(curve.fullKwh, 1)} кВт·год. Це доведення, а не вимір: " +
-        "поки зміряно ${formatDecimal(curve.coveredPercent, 0)} % шкали."
+private fun fullText(curve: BatteryCurve): String = if (curve.totalMeasured) {
+    "Повна ємність ${formatDecimal(curve.totalKwh, 1)} кВт·год — зміряна " +
+        "${curve.fullChargeSamples} зарядкою з низьких відсотків. Заміри вище " +
+        "розкладають її по шкалі."
+} else {
+    "Повна ємність ${formatDecimal(curve.totalKwh, 1)} кВт·год узята за аксіомою: " +
+        "16 комірок CATL по 3.18 кВт·год. Уточниться зарядкою, що почнеться з " +
+        "1–4 %. Заміри вище розкладають цю ємність по шкалі, а не додають до неї."
+}
 

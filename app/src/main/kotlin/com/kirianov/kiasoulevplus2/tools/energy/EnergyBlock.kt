@@ -4,9 +4,11 @@
 // ЩО ВІН РОБИТЬ:
 // 1. Стежить за точним SOC і пожиттєвими лічильниками енергії.
 // 2. Коли шкала помітно зрушила, а лічильник відданої енергії набрав близько
-//    кіловат-години, віддає це в криву як один замір.
-// 3. Тримає готову криву в GeneralData і зберігає її у файл.
-// 4. Виконує запит «забути криву».
+//    кіловат-години, віддає це в криву як один замір ФОРМИ шкали.
+// 3. Ловить зарядки, що починалися з низьких відсотків, і міряє ними ПОВНУ
+//    ємність. Доти повна ємність — аксіома з відомого пакета.
+// 4. Тримає готову криву в GeneralData і зберігає її у файл.
+// 5. Виконує запит «забути криву».
 //
 // ЧОГО ВІН НЕ РОБИТЬ:
 // - НЕ інтегрує потужність і НЕ залежить від знака струму: усе рахується
@@ -28,6 +30,7 @@ import com.kirianov.kiasoulevplus2.Data.BatteryCurve
 import com.kirianov.kiasoulevplus2.Data.CurveRequest
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.State
+import com.kirianov.kiasoulevplus2.Data.Pack
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +61,16 @@ class EnergyBlock(
     private var lastSocPercent: Double? = null
     private var lastReadingMs: Long? = null
 
+    /**
+     * Початок зарядки: відсоток і лічильник прийнятої енергії в той момент.
+     *
+     * Зарядка з низьких відсотків до сотні — єдиний прямий вимір ПОВНОЇ ємності,
+     * який узагалі можна зняти з машини. Лічильник прийнятої енергії веде сама
+     * батарея, тож втрат бортового зарядного в цьому числі немає — на відміну від
+     * показів розетки, з яких і взялася аксіома.
+     */
+    private var chargeStart: ChargeStart? = null
+
     fun start(scope: CoroutineScope) {
         scope.launch(ioDispatcher) {
             store.load()?.let { levels.restore(it) }
@@ -74,7 +87,9 @@ class EnergyBlock(
                 }
 
                 val reading = readingOf(state) ?: return@collect
-                if (accept(reading)) {
+                val learnedShape = accept(reading)
+                val learnedTotal = watchCharge(reading)
+                if (learnedShape || learnedTotal) {
                     withContext(ioDispatcher) { store.save(levels.snapshot()) }
                     publish()
                 }
@@ -125,19 +140,68 @@ class EnergyBlock(
         return learned
     }
 
+    /**
+     * Веде зарядну сесію й закриває її замiром повної ємності, коли шкала дійшла
+     * до сотні.
+     *
+     * Якір ставиться на будь-якому зарядному читанні з низьким відсотком, а не
+     * лише на переході «не заряджаюсь → заряджаюсь»: телефон часто під'єднується
+     * посеред зарядки, і чекати наступного разу означало б не зміряти нічого.
+     *
+     * @return чи додався замір повної ємності.
+     */
+    private fun watchCharge(reading: Reading): Boolean {
+        if (!reading.charging) {
+            // Зарядка скінчилася, не дійшовши до сотні: міряти нічого.
+            chargeStart = null
+            return false
+        }
+
+        val started = chargeStart
+        if (started == null) {
+            if (reading.socPercent <= EnergyLevels.MAX_START_PERCENT) {
+                chargeStart = ChargeStart(reading.socPercent, reading.chargedKwh)
+            }
+            return false
+        }
+
+        if (reading.socPercent < EnergyLevels.MIN_FINISH_PERCENT) return false
+
+        val learned = levels.learnFullCharge(
+            fromPercent = started.socPercent,
+            toPercent = reading.socPercent,
+            energyInKwh = reading.chargedKwh - started.chargedKwh,
+        )
+        // Хай там прийнято чи ні, сесія закрита: другого разу той самий вимір
+        // додавати не можна.
+        chargeStart = null
+        return learned
+    }
+
     private fun publish() {
-        val curve = levels.curve()
+        // Повна ємність: вимір із глибокої зарядки, а поки його немає — аксіома з
+        // відомого пакета. Місцевий нахил кривої тут НЕ використовується: угорі
+        // шкали відсоток найдешевший, і розтягнути його на всю шкалу означало б
+        // занизити ємність у рази.
+        val measuredTotal = levels.measuredTotalKwh
+        val total = measuredTotal ?: Pack.USABLE_CAPACITY_KWH
+        val curve = levels.curve(total)
+
         GeneralData.updateCurve { current ->
             current.copy(
                 points = curve,
                 measuredFromPercent = levels.measuredFromPercent,
                 measuredToPercent = levels.measuredToPercent,
                 coveredPercent = levels.coveredPercent,
-                fullKwh = levels.fullKwh(),
+                totalKwh = total,
+                totalMeasured = measuredTotal != null,
+                fullChargeSamples = levels.fullChargeSamples,
                 samples = levels.samples,
             )
         }
     }
+
+    private data class ChargeStart(val socPercent: Double, val chargedKwh: Double)
 
     private fun readingOf(state: State): Reading? {
         val vehicle = state.vehicle
