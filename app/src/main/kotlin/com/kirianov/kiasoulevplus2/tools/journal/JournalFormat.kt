@@ -59,6 +59,11 @@ object JournalFormat {
             add("chg=${flag(vehicle.charging.isCharging)}")
             add("kWhIn=${num(bms.cumulativeEnergyChargedKwh)}")
             add("kWhOut=${num(bms.cumulativeEnergyDischargedKwh)}")
+            // Лічильники в ампер-годинах мають крок 0.1 А·год, тобто вдесятеро
+            // тонший за кВт·год. Якщо кривій ємності забракне роздільності, міряти
+            // доведеться саме по них — а для цього їх треба спершу побачити.
+            add("AhIn=${num(bms.cumulativeChargedAh)}")
+            add("AhOut=${num(bms.cumulativeDischargedAh)}")
             add("rng=${vehicle.rangeKm}")
             add("amb=${num(vehicle.ambientTempC.takeIf { vehicle.hasAmbientTemp })}")
             add("batT=${num(bms.batteryTempC)}")
@@ -122,6 +127,13 @@ object JournalFormat {
                 "target=${num(modelAfter.sessionTargetPercent)} " +
                 "measured=${flag(modelAfter.capacityMeasured)} " +
                 "kWh=${num(modelAfter.usableCapacityKwh)}"
+        }
+
+        if (before.curve.samples != after.curve.samples) {
+            val curve = after.curve
+            out += "$at curve n=${curve.samples} covered=${num(curve.coveredPercent)} " +
+                "full=${num(curve.fullKwh)} " +
+                "from=${num(curve.measuredFromPercent)} to=${num(curve.measuredToPercent)}"
         }
 
         val accuracyBefore = before.rangeAccuracy

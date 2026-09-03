@@ -17,6 +17,8 @@ import com.kirianov.kiasoulevplus2.tools.battery.DecoderBlock
 import com.kirianov.kiasoulevplus2.tools.charging.ChargingBlock
 import com.kirianov.kiasoulevplus2.tools.charging.FileChargeStore
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
+import com.kirianov.kiasoulevplus2.tools.energy.EnergyBlock
+import com.kirianov.kiasoulevplus2.tools.energy.FileEnergyStore
 import com.kirianov.kiasoulevplus2.tools.journal.FileJournalStore
 import com.kirianov.kiasoulevplus2.tools.journal.JournalBlock
 import com.kirianov.kiasoulevplus2.tools.ml.FileMlStore
@@ -43,6 +45,8 @@ class AppBlocks(context: Context) {
     // Каталог, а не Context: так сховище моделей лишається чистим Kotlin і
     // перевіряється тестами без емулятора, як і решта логіки проєкту.
     private val prediction = MlBlock(FileMlStore(context.applicationContext.filesDir))
+    // Міряє криву ємності різницею пожиттєвих лічильників.
+    private val energy = EnergyBlock(FileEnergyStore(context.applicationContext.filesDir))
     private val foreground = ForegroundBlock(context.applicationContext)
 
     // Свідок усього, що відбувається: пише в файл те саме, що бачить екран.
@@ -61,6 +65,7 @@ class AppBlocks(context: Context) {
         autoConnect.start(scope)
         storage.start(scope)
         prediction.start(scope)
+        energy.start(scope)
         foreground.start(scope)
         bluetooth.start(scope)
         // Останнім: так у журнал потрапляє вже піднятий стан, а не порожній.

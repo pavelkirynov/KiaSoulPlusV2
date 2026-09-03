@@ -44,6 +44,9 @@ data class State(
     /** Налаштування користувача: їх веде блок tools/settings. */
     val settings: Settings = Settings(),
 
+    /** Виміряна крива ємності: її веде блок tools/energy. */
+    val curve: BatteryCurve = BatteryCurve(),
+
     /** Журнал діагностики: його веде блок tools/journal. */
     val journal: Journal = Journal(),
 

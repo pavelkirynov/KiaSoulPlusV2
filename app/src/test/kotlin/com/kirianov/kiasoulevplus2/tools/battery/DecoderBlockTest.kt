@@ -46,7 +46,9 @@ class DecoderBlockTest {
         val bms = GeneralData.state.value.bms
         assertEquals(80.0, bms.displaySoc, 0.001)
         assertEquals(366.0, bms.batteryVoltage, 0.001)
-        assertEquals(-1.0, bms.batteryCurrent, 0.001)
+        // Сире FF F6 — це -1.0 А, а декодер інвертує знак: на цьому авто
+        // від'ємне сире означає заряд. Див. BmsResponseDecoder.
+        assertEquals(1.0, bms.batteryCurrent, 0.001)
         assertEquals(25.0, bms.batteryTempC, 0.001)
     }
 

@@ -56,7 +56,17 @@ object BmsResponseDecoder {
         return BmsData(
             displaySoc = bytes[SOC_INDEX] / 2.0,
             batteryVoltage = FrameParser.unsigned16(bytes, VOLTAGE_HIGH_INDEX) / 10.0,
-            batteryCurrent = FrameParser.signed16(bytes, CURRENT_HIGH_INDEX) / 10.0,
+            // Знак ІНВЕРТУЄТЬСЯ. Сире значення на цьому авто додатне саме на
+            // розряді — це видно з журналу поїздки: розгін до 95 км/год ішов із
+            // I=+147 А, і напруга при цьому просідала з 390 до 381 В, тобто
+            // батарея віддавала. Від'ємне сире з'являлося рівно на гальмуванні,
+            // коли напруга підскакувала до 397 В, тобто батарея приймала.
+            //
+            // Домовленість застосунку протилежна (від'ємне = розряд), і поки
+            // знак не переверталося тут, ВСЕ навчання йшло навиворіт: тяга
+            // зараховувалася як рекуперація, і відрізок на 6.1 км виходив із
+            // енергією -0.98 кВт·год. Модель училася, що авто їздить задарма.
+            batteryCurrent = -FrameParser.signed16(bytes, CURRENT_HIGH_INDEX) / 10.0,
             batteryTempC = FrameParser.signed8(bytes, TEMP_MAX_INDEX).toDouble(),
             cumulativeChargedAh = counterAt(bytes, CHARGED_AH_INDEX),
             cumulativeDischargedAh = counterAt(bytes, DISCHARGED_AH_INDEX),

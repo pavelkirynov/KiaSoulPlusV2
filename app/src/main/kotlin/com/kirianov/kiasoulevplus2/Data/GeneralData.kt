@@ -92,6 +92,17 @@ object GeneralData {
     fun setJournalEnabled(enabled: Boolean) =
         _state.update { it.copy(settings = it.settings.copy(journal = enabled)) }
 
+    // --- Виміряна крива ємності: пише блок tools/energy ------------------------
+
+    fun updateCurve(transform: (BatteryCurve) -> BatteryCurve) =
+        _state.update { it.copy(curve = transform(it.curve)) }
+
+    /** Кнопка «Забути криву» з екрана «Прогноз». */
+    fun requestCurveReset() = updateCurve { it.copy(request = CurveRequest.Reset) }
+
+    /** Викликає блок виміру, коли прийняв запит до виконання. */
+    fun clearCurveRequest() = updateCurve { it.copy(request = CurveRequest.None) }
+
     // --- Журнал діагностики: пише блок tools/journal ---------------------------
 
     fun updateJournal(transform: (Journal) -> Journal) =

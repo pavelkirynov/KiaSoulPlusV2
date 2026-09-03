@@ -21,4 +21,6 @@ class PredictionViewModel : ViewModel() {
 
     /** Обнуляє відлік точності прогнозу: почати міряти заново з цієї миті. */
     fun onResetAccuracy() = GeneralData.resetRangeAccuracy()
+
+    fun onResetCurve() = GeneralData.requestCurveReset()
 }

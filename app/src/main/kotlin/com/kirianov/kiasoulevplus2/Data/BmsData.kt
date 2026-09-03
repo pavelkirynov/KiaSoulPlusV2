@@ -7,7 +7,9 @@ package com.kirianov.kiasoulevplus2.Data
 data class BmsData(
     val displaySoc: Double = NO_DATA,     // SOC з BMS (%)
     val batteryVoltage: Double = 0.0,     // Напруга батареї (В)
-    val batteryCurrent: Double = 0.0,     // Струм (А), від'ємний = розряд
+    // Струм (А), від'ємний = розряд. Сире значення з BMS протилежне за знаком —
+    // див. пояснення в BmsResponseDecoder.
+    val batteryCurrent: Double = 0.0,
     val batteryTempC: Double = 0.0,       // Максимальна температура модулів (°C)
 
     /**

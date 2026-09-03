@@ -60,6 +60,8 @@ fun PredictionScreen(predictionViewModel: PredictionViewModel = viewModel()) {
 
         BatteryCard(ml.model, ml.prediction)
 
+        BatteryCurveCard(state.curve, state.vehicle, predictionViewModel::onResetCurve)
+
         ScaleCurveCard(ml.model, ml.prediction, state.vehicle)
 
         LearningCard(ml.model, ml.recentSegments.size)

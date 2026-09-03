@@ -32,6 +32,13 @@ class FileMlStore(private val directory: File) : MlStore {
     private val modelFile get() = File(directory, MODEL_FILE)
     private val logFile get() = File(directory, LOG_FILE)
 
+    init {
+        // Прибрати покоління з перевернутим знаком. Мовчки: файлів може й не
+        // бути, і це нормально — так буде в кожного, хто поставив застосунок
+        // уже після виправлення.
+        LEGACY_FILES.forEach { name -> runCatching { File(directory, name).delete() } }
+    }
+
     override fun loadModel(): ModelSnapshot? = try {
         val file = modelFile
         if (file.isFile) MlCodec.decodeModel(file.readText()) else null
@@ -100,8 +107,18 @@ class FileMlStore(private val directory: File) : MlStore {
     }
 
     private companion object {
-        const val MODEL_FILE = "ml_model.json"
-        const val LOG_FILE = "ml_segments.jsonl"
+        /**
+         * Друге покоління файлів. Усе, що записано першим, вчилося з
+         * перевернутим знаком струму: тяга зараховувалася як рекуперація, і
+         * відрізки лежать у журналі з від'ємною енергією. Донавчати на них не
+         * можна й перенавчати теж — їх треба забути. Тому нові імена: старі
+         * файли не читаються, а прибираються при першому ж запуску.
+         */
+        const val MODEL_FILE = "ml_model-v2.json"
+        const val LOG_FILE = "ml_segments-v2.jsonl"
+
+        /** Файли першого покоління: лишилися на диску, і їх треба прибрати. */
+        val LEGACY_FILES = listOf("ml_model.json", "ml_segments.jsonl")
 
         /**
          * Близько десяти мегабайтів. Один відрізок — це приблизно 300 байтів і

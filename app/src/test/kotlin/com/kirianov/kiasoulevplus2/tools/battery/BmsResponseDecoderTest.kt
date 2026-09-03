@@ -50,14 +50,28 @@ class BmsResponseDecoderTest {
 
         assertEquals(80.0, data.displaySoc, 0.001)
         assertEquals(366.0, data.batteryVoltage, 0.001)
-        assertEquals(-1.0, data.batteryCurrent, 0.001)
+        assertEquals(1.0, data.batteryCurrent, 0.001)
         assertEquals(25.0, data.batteryTempC, 0.001)
         assertTrue(data.hasData)
     }
 
+    /**
+     * Знак сирого значення на цьому авто протилежний домовленості застосунку.
+     *
+     * Це не припущення, а вимір: у журналі поїздки розгін ішов із сирим +147 А і
+     * просадкою напруги з 390 до 381 В (батарея віддає), а гальмування — із
+     * сирим -122 А і підскоком до 397 В (батарея приймає). Тому декодер
+     * інвертує знак, і саме це тут і перевіряється.
+     */
     @Test
-    fun `decodes a charging current as positive`() {
-        val data = BmsResponseDecoder.decode(frame(currentRaw = 0x00C8)) // 200 -> 20.0 A
+    fun `a raw positive current means discharge, not charge`() {
+        val data = BmsResponseDecoder.decode(frame(currentRaw = 0x00C8)) // сире 200 -> 20.0 A
+        assertEquals(-20.0, data.batteryCurrent, 0.001)
+    }
+
+    @Test
+    fun `a raw negative current means charge`() {
+        val data = BmsResponseDecoder.decode(frame(currentRaw = 0xFF38)) // сире -200 -> -20.0 A
         assertEquals(20.0, data.batteryCurrent, 0.001)
     }
 
@@ -125,7 +139,7 @@ class BmsResponseDecoderTest {
 
         assertEquals(80.0, data.displaySoc, 0.001)
         assertEquals(366.0, data.batteryVoltage, 0.001)
-        assertEquals(-1.0, data.batteryCurrent, 0.001)
+        assertEquals(1.0, data.batteryCurrent, 0.001)
         assertEquals(25.0, data.batteryTempC, 0.001)
     }
 
