@@ -89,6 +89,20 @@ object GeneralData {
     fun setAutoConnect(enabled: Boolean) =
         _state.update { it.copy(settings = it.settings.copy(autoConnect = enabled)) }
 
+    fun setJournalEnabled(enabled: Boolean) =
+        _state.update { it.copy(settings = it.settings.copy(journal = enabled)) }
+
+    // --- Журнал діагностики: пише блок tools/journal ---------------------------
+
+    fun updateJournal(transform: (Journal) -> Journal) =
+        _state.update { it.copy(journal = transform(it.journal)) }
+
+    /** Кнопка «Очистити журнал» з екрана «Експерименти». */
+    fun requestJournalClear() = updateJournal { it.copy(request = JournalRequest.Clear) }
+
+    /** Викликає блок журналу, коли прийняв запит до виконання. */
+    fun clearJournalRequest() = updateJournal { it.copy(request = JournalRequest.None) }
+
     /** Скидання відліку точності прогнозу кнопкою з екрана «Прогноз». */
     fun resetRangeAccuracy() = _state.update { it.copy(rangeAccuracy = RangeAccuracy()) }
 

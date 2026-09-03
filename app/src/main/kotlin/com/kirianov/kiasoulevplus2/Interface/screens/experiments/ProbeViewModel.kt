@@ -17,6 +17,10 @@ class ProbeViewModel : ViewModel() {
 
     val uiState: StateFlow<State> = GeneralData.state
 
+    fun onJournalEnabled(enabled: Boolean) = GeneralData.setJournalEnabled(enabled)
+
+    fun onJournalClear() = GeneralData.requestJournalClear()
+
     /** Відоме число зі щитка, яке шукаємо у відповідях. Порожній рядок знімає пошук. */
     fun onTargetChanged(text: String) =
         GeneralData.setProbeTarget(text.trim().toLongOrNull()?.takeIf { it > 0 })

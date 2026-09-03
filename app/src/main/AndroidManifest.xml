@@ -91,6 +91,21 @@
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
 
+        <!--
+            Віддає файл журналу назовні. Тека застосунку іншим застосункам
+            недоступна, тож без content:// кнопка «Поділитися» не відкрила б
+            нічого. Не експортований: доступ видається одноразово самим наміром.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true">

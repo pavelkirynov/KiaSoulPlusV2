@@ -11,6 +11,9 @@ material3 = "1.3.1"
 lifecycle = "2.8.7"
 carApp = "1.4.0"
 media = "1.7.0"
+# FileProvider: журнал діагностики віддається назовні через content://, бо шлях
+# у filesDir іншим застосункам недоступний.
+core = "1.13.1"
 junit = "4.13.2"
 
 [plugins]
@@ -20,6 +23,7 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core" }
 androidx-car-app = { module = "androidx.car.app:app", version.ref = "carApp" }
 androidx-media = { module = "androidx.media:media", version.ref = "media" }
 androidx-compose-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "compose" }

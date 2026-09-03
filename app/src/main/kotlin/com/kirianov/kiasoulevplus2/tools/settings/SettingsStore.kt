@@ -31,7 +31,18 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
             } else {
                 val values = MiniJson.decode(text.lineSequence().first())
                 val autoConnect = values["autoConnect"] as? Boolean
-                if (autoConnect == null) null else Settings(autoConnect = autoConnect)
+                if (autoConnect == null) {
+                    null
+                } else {
+                    // Ключа journal у старих файлах немає: там береться типове
+                    // значення, а не false, інакше оновлення застосунку мовчки
+                    // вимикало б журнал усім, хто оновився.
+                    val defaults = Settings()
+                    Settings(
+                        autoConnect = autoConnect,
+                        journal = values["journal"] as? Boolean ?: defaults.journal,
+                    )
+                }
             }
         }
     } catch (_: IOException) {
@@ -43,7 +54,14 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
     override fun save(settings: Settings) {
         try {
             directory.mkdirs()
-            file.writeText(MiniJson.encode(linkedMapOf("autoConnect" to settings.autoConnect)))
+            file.writeText(
+                MiniJson.encode(
+                    linkedMapOf(
+                        "autoConnect" to settings.autoConnect,
+                        "journal" to settings.journal,
+                    ),
+                ),
+            )
         } catch (_: IOException) {
             // Втратити налаштування неприємно, але не варто падіння застосунку.
         }

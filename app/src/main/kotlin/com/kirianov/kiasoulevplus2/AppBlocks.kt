@@ -17,6 +17,8 @@ import com.kirianov.kiasoulevplus2.tools.battery.DecoderBlock
 import com.kirianov.kiasoulevplus2.tools.charging.ChargingBlock
 import com.kirianov.kiasoulevplus2.tools.charging.FileChargeStore
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
+import com.kirianov.kiasoulevplus2.tools.journal.FileJournalStore
+import com.kirianov.kiasoulevplus2.tools.journal.JournalBlock
 import com.kirianov.kiasoulevplus2.tools.ml.FileMlStore
 import com.kirianov.kiasoulevplus2.tools.ml.MlBlock
 import com.kirianov.kiasoulevplus2.tools.probe.ProbeBlock
@@ -43,6 +45,12 @@ class AppBlocks(context: Context) {
     private val prediction = MlBlock(FileMlStore(context.applicationContext.filesDir))
     private val foreground = ForegroundBlock(context.applicationContext)
 
+    // Свідок усього, що відбувається: пише в файл те саме, що бачить екран.
+    private val journal = JournalBlock(
+        store = FileJournalStore(context.applicationContext.filesDir),
+        appVersion = versionOf(context),
+    )
+
     fun start(scope: CoroutineScope) {
         decoders.start(scope)
         calculations.start(scope)
@@ -55,5 +63,12 @@ class AppBlocks(context: Context) {
         prediction.start(scope)
         foreground.start(scope)
         bluetooth.start(scope)
+        // Останнім: так у журнал потрапляє вже піднятий стан, а не порожній.
+        journal.start(scope)
     }
+
+    private fun versionOf(context: Context): String = runCatching {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        info.versionName ?: "?"
+    }.getOrDefault("?")
 }

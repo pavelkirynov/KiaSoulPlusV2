@@ -32,6 +32,7 @@ class ArchitectureTest {
         "tools.format",
         "tools.frames",
         "tools.json",
+        "tools.journal",
     )
 
     /** Хаб: сюди дозволено звертатися будь-кому, це і є канал обміну. */

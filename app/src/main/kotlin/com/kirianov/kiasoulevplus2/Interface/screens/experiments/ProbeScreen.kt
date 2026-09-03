@@ -25,7 +25,9 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -33,12 +35,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
+import androidx.core.content.FileProvider
+import com.kirianov.kiasoulevplus2.Data.Journal
 import com.kirianov.kiasoulevplus2.Data.MonitorCapture
 import com.kirianov.kiasoulevplus2.Data.ProbeResult
 import com.kirianov.kiasoulevplus2.Data.VehicleData
@@ -73,6 +80,13 @@ fun ProbeScreen(probeViewModel: ProbeViewModel) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        JournalCard(
+            journal = state.journal,
+            enabled = state.settings.journal,
+            onEnabled = probeViewModel::onJournalEnabled,
+            onClear = probeViewModel::onJournalClear,
+        )
+
         Text(text = "Ручний запит до шини", fontSize = 18.sp)
         Text(
             text = "Дозволені лише сервіси читання: 01, 02, 09, 19, 21, 22. " +
@@ -296,5 +310,80 @@ private fun MonoBlock(title: String, text: String) {
                 lineHeight = 15.sp,
             )
         }
+    }
+}
+
+
+/**
+ * Журнал діагностики.
+ *
+ * ЧОМУ ЦЕ ТУТ, А НЕ В НАЛАШТУВАННЯХ. Журнал потрібен рівно тоді, коли щось
+ * поводиться не так, — а це той самий стан, у якому людина відкриває
+ * «Експерименти». Хай кнопка «Поділитися» буде поруч із тим, що не працює.
+ *
+ * Файл віддається через FileProvider: тека застосунку недоступна іншим
+ * застосункам напряму, і «Поділитися» без content:// просто нічого не відкриє.
+ */
+@Composable
+private fun JournalCard(
+    journal: Journal,
+    enabled: Boolean,
+    onEnabled: (Boolean) -> Unit,
+    onClear: () -> Unit,
+) {
+    val context = LocalContext.current
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Журнал діагностики", fontSize = 18.sp)
+                Switch(checked = enabled, onCheckedChange = onEnabled)
+            }
+
+            Text(
+                text = "Записує, що приходило з шини і що з цим сталося. " +
+                    "Саме за ним видно, чому щось не порахувалося.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Text(
+                text = "Розмір ${journal.sizeBytes / 1024} КБ, рядків за сеанс ${journal.lines}",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { shareJournal(context, journal.path) },
+                    enabled = journal.hasFile,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Поділитися")
+                }
+                OutlinedButton(onClick = onClear, modifier = Modifier.weight(1f)) {
+                    Text("Очистити")
+                }
+            }
+        }
+    }
+}
+
+private fun shareJournal(context: android.content.Context, path: String) {
+    runCatching {
+        val file = java.io.File(path)
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, file.name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Журнал").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }

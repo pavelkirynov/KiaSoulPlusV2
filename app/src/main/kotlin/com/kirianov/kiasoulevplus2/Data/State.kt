@@ -44,6 +44,9 @@ data class State(
     /** Налаштування користувача: їх веде блок tools/settings. */
     val settings: Settings = Settings(),
 
+    /** Журнал діагностики: його веде блок tools/journal. */
+    val journal: Journal = Journal(),
+
     val connection: ConnectionState = ConnectionState.Disconnected,
     val debugInfo: String = "",
 ) {
