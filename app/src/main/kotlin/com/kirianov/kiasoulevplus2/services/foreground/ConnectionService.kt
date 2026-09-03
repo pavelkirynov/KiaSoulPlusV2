@@ -32,6 +32,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.State
@@ -48,11 +49,26 @@ class ConnectionService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    /**
+     * Будильник процесора на час з'єднання.
+     *
+     * Служби переднього плану виявилося замало. У журналі поїздки є проміжок на
+     * 634 секунди, за який номер зчитування шини зріс лише на два: з'єднання
+     * живе, сповіщення висить, а потоки сплять. Це Doze і фірмові «оптимізації»
+     * оболонки — вони приспиняють саме роботу, а не компонент.
+     *
+     * Частковий wake lock тримає процесор, лишаючи екран вимкненим. Береться
+     * рівно на час з'єднання і віддається разом зі службою, тож розряджати
+     * телефон просто так йому нічим.
+     */
+    private var wakeLock: PowerManager.WakeLock? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        acquireWakeLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -73,7 +89,24 @@ class ConnectionService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        releaseWakeLock()
         super.onDestroy()
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock != null) return
+        val power = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+        wakeLock = runCatching {
+            power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.getOrNull()
+    }
+
+    private fun releaseWakeLock() {
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+        wakeLock = null
     }
 
     /** Рядок сповіщення. Окремо від стану, щоб не перемальовувати його щосекунди. */
@@ -136,6 +169,9 @@ class ConnectionService : Service() {
     }
 
     companion object {
+        /** Тег видно в звіті про батарею — хай там буде зрозуміло, хто не спить. */
+        private const val WAKE_LOCK_TAG = "KiaSoulEVPlus:polling"
+
         private const val CHANNEL_ID = "obd-polling"
         private const val NOTIFICATION_ID = 1
     }

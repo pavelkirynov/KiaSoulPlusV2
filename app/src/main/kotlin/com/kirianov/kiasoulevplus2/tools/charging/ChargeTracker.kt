@@ -21,12 +21,23 @@
 // показ і нараховував тільки той хвостик, який застав живцем. Нічні 38 кВт·год
 // перетворювалися на 0.7.
 //
-// Розрізнити зарядку й рекуперацію за час, коли ми не дивилися, дозволяє ОДОМЕТР.
-// Рекуперація можлива тільки на ходу: щоб віддати енергію в батарею, авто мусить
-// рухатися. Тож якщо між двома спостереженнями минули години, одометр не зрушив,
-// а лічильник виріс — це зарядка, іншого джерела просто немає. Якщо ж одометр
-// зрушив, розділити зарядку й рекуперацію нічим, і тоді ми чесно не зараховуємо
-// нічого: недорахувати краще, ніж приписати спуск з гори до зарядки.
+// Розрізнити зарядку й поїздку за час, коли ми не дивилися, дозволяють два числа
+// З ТОГО САМОГО КАДРУ, що й лічильник прийнятої енергії:
+//
+//   • SOC мусить ВИРОСТИ. Зарядка піднімає заряд — це і є її означення.
+//   • Лічильник ВІДДАНОЇ енергії мусить стояти. Зарядка нічого не віддає.
+//
+// Одометра тут навмисно немає, і це виправлення дорогої помилки. Одометр приходить
+// іншим кадром — широкомовним 4F0 через монітор, раз на кілька секунд, — і після
+// перепідключення він ще деякий час показує СТАРЕ значення, поки лічильники вже
+// нові. У журналі це виглядало так: авто за годину проїхало 51 км, застосунок
+// повернувся, побачив «лічильник +6.7 кВт·год, одометр не зрушив» — і записав
+// зарядку на 6.7 кВт·год, якої не було. SOC при цьому впав із 43 % до 23 %, а
+// лічильник відданої виріс на 12 кВт·год: обидва числа кричали «це поїздка».
+//
+// Мораль загальна: порівнювати можна лише величини з одного кадру. Величини з
+// різних кадрів після паузи мають різний вік, і різниця між ними означає не те,
+// що здається.
 //
 // Чистий об'єкт без стану: увесь стан приходить аргументом і повертається назад.
 // ====================================================================================
@@ -65,19 +76,32 @@ object ChargeTracker {
      */
     const val MISSED_GAP_MS = 10 * 60 * 1000L
 
-    /** Один крок одометра. Менше — авто стояло. */
-    const val MOVED_TOLERANCE_KM = 0.15
+    /**
+     * На скільки має вирости SOC, щоб повірити в зарядку. Два відсотки — це вже
+     * помітно більше за похибку читання, і водночас менше за найкоротшу
+     * осмислену зарядку.
+     */
+    const val MIN_MISSED_SOC_RISE = 2.0
+
+    /**
+     * Скільки дозволено вирости лічильнику ВІДДАНОЇ енергії за паузу, щоб пауза
+     * все ще вважалася зарядкою. Практично нуль: під час зарядки авто нічого не
+     * віддає, а десята частка — це крок самого лічильника.
+     */
+    const val MAX_MISSED_DISCHARGE_KWH = 0.2
 
     /**
      * @param counterKwh пожиттєвий лічильник прийнятої енергії, кВт·год.
-     * @param odometerKm показ одометра; 0 або менше означає «ще не знаємо».
+     * @param dischargedKwh пожиттєвий лічильник ВІДДАНОЇ енергії з того самого кадру.
+     * @param socPercent заряд із того самого кадру, %.
      * @param isCharging чи бачимо зарядку прямо зараз (кадр 581).
      * @param dayKey «рррр-мм-дд» за годинником телефона.
      */
     fun observe(
         log: ChargeLog,
         counterKwh: Double,
-        odometerKm: Double,
+        dischargedKwh: Double,
+        socPercent: Double,
         isCharging: Boolean,
         nowMs: Long,
         dayKey: String,
@@ -89,7 +113,8 @@ object ChargeTracker {
         if (!log.hasBaseline) {
             return log.copy(
                 counterBaselineKwh = counterKwh,
-                odometerBaselineKm = odometerKm,
+                dischargedBaselineKwh = dischargedKwh,
+                socBaselinePercent = socPercent,
                 lastSeenAtMs = nowMs,
                 hasBaseline = true,
                 charging = isCharging,
@@ -100,31 +125,30 @@ object ChargeTracker {
         val step = counterKwh - rolled.counterBaselineKwh
 
         if (!isCharging) {
-            val missed = missedCharge(rolled, step, odometerKm, nowMs)
-            if (missed == null && awaitingOdometer(rolled, step, odometerKm, nowMs)) {
-                // Лічильник виріс за час нашої відсутності, а одометра ще немає:
-                // кадр 4F0 приходить не одразу. Вирішувати зарано, і головне —
-                // не можна тягнути базовий показ, бо разом з ним поїде й уся
-                // пропущена зарядка. Чекаємо наступного читання.
-                return log
-            }
-            return notCharging(rolled, counterKwh, odometerKm, nowMs, missed ?: 0.0, dayKey)
+            val missed = missedCharge(rolled, step, dischargedKwh, socPercent, nowMs)
+            return notCharging(rolled, counterKwh, dischargedKwh, socPercent, nowMs, missed ?: 0.0, dayKey)
         }
 
         // Щойно почалася зарядка: беремо новий базовий показ і НЕ нараховуємо цю
         // різницю — у ній сидить рекуперація за поїздку до зарядки.
-        if (!rolled.charging) return started(rolled, counterKwh, odometerKm, nowMs)
+        if (!rolled.charging) return started(rolled, counterKwh, dischargedKwh, socPercent, nowMs)
 
         // Лічильник не може зменшитись. Якщо зменшився — перед нами інша батарея
         // або хибне читання: беремо новий базовий показ, нічого не нараховуючи.
         if (step < 0.0 || step > MAX_PLAUSIBLE_STEP_KWH) {
-            return rolled.copy(counterBaselineKwh = counterKwh, odometerBaselineKm = odometerKm, lastSeenAtMs = nowMs)
+            return rolled.copy(
+                counterBaselineKwh = counterKwh,
+                dischargedBaselineKwh = dischargedKwh,
+                socBaselinePercent = socPercent,
+                lastSeenAtMs = nowMs,
+            )
         }
         if (step == 0.0) return rolled.copy(lastSeenAtMs = nowMs)
 
         return rolled.copy(
             counterBaselineKwh = counterKwh,
-            odometerBaselineKm = odometerKm,
+            dischargedBaselineKwh = dischargedKwh,
+            socBaselinePercent = socPercent,
             lastSeenAtMs = nowMs,
             sessionKwh = rolled.sessionKwh + step,
             todayKwh = rolled.todayKwh + step,
@@ -136,24 +160,25 @@ object ChargeTracker {
      * Скільки прийшло із зарядки, якої ми не бачили, або null, якщо цього
      * стверджувати не можна.
      *
-     * Три умови мусять справдитися разом: була пауза в спостереженнях, за неї
-     * набігло помітно, і авто за цей час не зрушило з місця.
+     * Чотири умови мусять справдитися разом: була пауза в спостереженнях, за неї
+     * набігло помітно, заряд ВИРІС, і лічильник відданої енергії при цьому стояв.
+     * Останні дві — з того самого кадру, що й лічильник прийнятої, тому їхній вік
+     * однаковий і різниця між ними означає саме те, що має означати.
      */
-    private fun missedCharge(log: ChargeLog, step: Double, odometerKm: Double, nowMs: Long): Double? {
+    private fun missedCharge(
+        log: ChargeLog,
+        step: Double,
+        dischargedKwh: Double,
+        socPercent: Double,
+        nowMs: Long,
+    ): Double? {
         if (log.charging) return null
         if (!gapPassed(log, nowMs)) return null
         if (step < MIN_MISSED_KWH || step > MAX_PLAUSIBLE_STEP_KWH) return null
-        if (odometerKm <= 0.0 || log.odometerBaselineKm <= 0.0) return null
-        if (odometerKm - log.odometerBaselineKm >= MOVED_TOLERANCE_KM) return null
+        if (socPercent - log.socBaselinePercent < MIN_MISSED_SOC_RISE) return null
+        if (dischargedKwh - log.dischargedBaselineKwh > MAX_MISSED_DISCHARGE_KWH) return null
         return step
     }
-
-    private fun awaitingOdometer(log: ChargeLog, step: Double, odometerKm: Double, nowMs: Long): Boolean =
-        !log.charging &&
-            gapPassed(log, nowMs) &&
-            step >= MIN_MISSED_KWH &&
-            step <= MAX_PLAUSIBLE_STEP_KWH &&
-            (odometerKm <= 0.0 || log.odometerBaselineKm <= 0.0)
 
     private fun gapPassed(log: ChargeLog, nowMs: Long): Boolean =
         log.lastSeenAtMs > 0L && nowMs - log.lastSeenAtMs >= MISSED_GAP_MS
@@ -166,11 +191,18 @@ object ChargeTracker {
      * яку ми бачили. Це свідома недооцінка: приписати сесії рекуперацію попередньої
      * поїздки було б гірше за недорахований кілловат-годину.
      */
-    private fun started(log: ChargeLog, counterKwh: Double, odometerKm: Double, nowMs: Long): ChargeLog {
+    private fun started(
+        log: ChargeLog,
+        counterKwh: Double,
+        dischargedKwh: Double,
+        socPercent: Double,
+        nowMs: Long,
+    ): ChargeLog {
         val continuing = nowMs - log.lastSessionEndedAtMs < SESSION_GAP_MS && log.lastSessionEndedAtMs > 0L
         return log.copy(
             counterBaselineKwh = counterKwh,
-            odometerBaselineKm = odometerKm,
+            dischargedBaselineKwh = dischargedKwh,
+            socBaselinePercent = socPercent,
             lastSeenAtMs = nowMs,
             charging = true,
             sessionKwh = if (continuing) log.sessionKwh else 0.0,
@@ -185,7 +217,8 @@ object ChargeTracker {
     private fun notCharging(
         log: ChargeLog,
         counterKwh: Double,
-        odometerKm: Double,
+        dischargedKwh: Double,
+        socPercent: Double,
         nowMs: Long,
         missedKwh: Double,
         dayKey: String,
@@ -212,7 +245,8 @@ object ChargeTracker {
 
         return closed.copy(
             counterBaselineKwh = counterKwh,
-            odometerBaselineKm = odometerKm,
+            dischargedBaselineKwh = dischargedKwh,
+            socBaselinePercent = socPercent,
             lastSeenAtMs = nowMs,
         )
     }

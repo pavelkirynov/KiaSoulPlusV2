@@ -172,6 +172,30 @@ class EnergyCurveTest {
         assertTrue("Невиміряна частина мусить бути дорожчою: $tailSlope", tailSlope > 0.29)
     }
 
+    /**
+     * Порожнє місце між двома виміряними островами заповнюється плавним
+     * переходом, а не стрибком на середнє. Рівний нахил на порожнечі давав зломи
+     * на кожній межі острова — зломи від способу малювання, а не від батареї.
+     */
+    @Test
+    fun `a gap between two measured islands is bridged smoothly`() {
+        val levels = EnergyLevels()
+        // Дешевий острів угорі шкали і дорогий унизу — як воно й буває насправді.
+        levels.learn(fromPercent = 95.0, toPercent = 90.0, netKwh = 1.0)  // 0.2 на відсоток
+        levels.learn(fromPercent = 20.0, toPercent = 15.0, netKwh = 4.0)  // 0.8 на відсоток
+
+        val curve = levels.curve(totalKwh = 51.0)
+        fun rateAt(percent: Double) = curve.first { it.socPercent == percent }.energyKwh -
+            curve.first { it.socPercent == percent - 1.0 }.energyKwh
+
+        // Посередині прогалини нахил мусить бути між сусідами, а не однаковий скрізь.
+        val low = rateAt(25.0)
+        val middle = rateAt(55.0)
+        val high = rateAt(85.0)
+        assertTrue("Перехід не плавний: $low, $middle, $high", low > middle && middle > high)
+        assertEquals("Сума кривої мусить лишитися повною ємністю", 51.0, curve.last().energyKwh, 0.01)
+    }
+
     // --- Повна ємність із зарядки ------------------------------------------------
 
     /**

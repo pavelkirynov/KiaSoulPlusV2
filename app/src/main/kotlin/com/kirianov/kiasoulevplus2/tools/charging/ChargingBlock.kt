@@ -28,11 +28,14 @@ class ChargingBlock(
 
             GeneralData.state
                 .map {
+                    // Усі три числа батареї — з одного кадру 21 01. Саме тому їх
+                    // можна порівнювати між собою після будь-якої паузи: у них
+                    // однаковий вік. Ознака заряджання приходить окремим кадром,
+                    // але вона потрібна лише «прямо зараз», а не в порівнянні.
                     Reading(
                         counterKwh = it.bms.cumulativeEnergyChargedKwh,
-                        // Одометр потрібен, щоб відрізнити зарядку без телефона від
-                        // рекуперації: без нього перша різниця після ночі неоднозначна.
-                        odometerKm = it.vehicle.odometerKm,
+                        dischargedKwh = it.bms.cumulativeEnergyDischargedKwh,
+                        socPercent = it.bms.displaySoc,
                         isCharging = it.vehicle.charging.isCharging,
                     )
                 }
@@ -41,7 +44,8 @@ class ChargingBlock(
                     val updated = ChargeTracker.observe(
                         log = log,
                         counterKwh = reading.counterKwh,
-                        odometerKm = reading.odometerKm,
+                        dischargedKwh = reading.dischargedKwh,
+                        socPercent = reading.socPercent,
                         isCharging = reading.isCharging,
                         nowMs = nowMs(),
                         dayKey = dayKey(),
@@ -57,7 +61,8 @@ class ChargingBlock(
 
     private data class Reading(
         val counterKwh: Double,
-        val odometerKm: Double,
+        val dischargedKwh: Double,
+        val socPercent: Double,
         val isCharging: Boolean,
     )
 }

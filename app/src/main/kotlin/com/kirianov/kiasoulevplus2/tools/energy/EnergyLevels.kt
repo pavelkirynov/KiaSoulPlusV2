@@ -30,9 +30,15 @@
 // ФОРМУ — те, як ця ємність розподілена по шкалі.
 //
 // НЕВИМІРЯНІ КОШИКИ. Крива має бути суцільною від 0 до 100 %, інакше її нема як
-// нарисувати. Невиміряній частині шкали віддається те, що лишилося від повної
-// ємності після виміряних кошиків, — рівним нахилом. Кожна точка знає, вимір це
-// чи доведення, і на графіку це видно різним кольором.
+// нарисувати. Порожнім місцям нахил ПРОТЯГУЄТЬСЯ між сусідніми виміряними: між
+// двома островами — плавно від одного до іншого, за краями — рівно як на
+// найближчому виміряному. І вже після цього все невиміряне разом множиться на
+// один коефіцієнт, щоб сума кривої дорівнювала повній ємності.
+//
+// Рівний нахил на порожніх місцях, який був тут спершу, давав видимі зломи на
+// кожній межі острова — злам, якого в батареї немає, бо він походить від способу
+// малювання, а не від комірок. Кожна точка при цьому однаково знає, вимір вона чи
+// доведення, і на графіку це видно різним кольором.
 // ====================================================================================
 
 package com.kirianov.kiasoulevplus2.tools.energy
@@ -168,35 +174,75 @@ class EnergyLevels {
     fun curve(totalKwh: Double): List<CurvePoint> {
         if (samples == 0 || totalKwh <= 0.0) return emptyList()
 
-        val measuredPercent = (0 until BINS).count { rateOfBin(it) != null } * BIN_WIDTH_PERCENT
+        val measured = DoubleArray(BINS) { rateOfBin(it) ?: Double.NaN }
         val measuredEnergy = measuredEnergyKwh()
-        val unmeasuredPercent = 100.0 - measuredPercent
+        val prior = stretchOverGaps(measured)
 
         // Виміряне вже не влазить у повну ємність. Це або надто мала аксіома, або
         // заміри з надто грубою роздільністю; тиснемо їх пропорційно, лишаючи
         // невиміряній частині хоч якийсь нахил, — інакше крива пішла б униз.
-        val squeeze = if (unmeasuredPercent > 0.0 && measuredEnergy > totalKwh * MAX_MEASURED_SHARE) {
+        val hasGaps = measured.any { it.isNaN() }
+        val squeeze = if (hasGaps && measuredEnergy > totalKwh * MAX_MEASURED_SHARE) {
             totalKwh * MAX_MEASURED_SHARE / measuredEnergy
         } else {
             1.0
         }
 
-        val tailEnergy = totalKwh - measuredEnergy * squeeze
-        val tailRate = if (unmeasuredPercent > 0.0) (tailEnergy / unmeasuredPercent).coerceAtLeast(0.0) else 0.0
+        // Один коефіцієнт на все невиміряне: форма там уже задана протягуванням,
+        // лишається підігнати вагу, щоб сума кривої дорівнювала повній ємності.
+        val priorTail = (0 until BINS).sumOf { if (measured[it].isNaN()) prior[it] * BIN_WIDTH_PERCENT else 0.0 }
+        val tailScale = if (priorTail > 0.0) {
+            ((totalKwh - measuredEnergy * squeeze) / priorTail).coerceAtLeast(0.0)
+        } else {
+            0.0
+        }
 
-        val points = mutableListOf(CurvePoint(0.0, 0.0, measured = rateOfBin(0) != null))
+        val points = mutableListOf(CurvePoint(0.0, 0.0, measured = !measured[0].isNaN()))
         var energy = 0.0
 
         for (bin in 0 until BINS) {
-            val rate = rateOfBin(bin)
-            energy += (rate?.times(squeeze) ?: tailRate) * BIN_WIDTH_PERCENT
+            val known = measured[bin]
+            val rate = if (known.isNaN()) prior[bin] * tailScale else known * squeeze
+            energy += rate * BIN_WIDTH_PERCENT
             points += CurvePoint(
                 socPercent = (bin + 1) * BIN_WIDTH_PERCENT,
                 energyKwh = energy,
-                measured = rate != null,
+                measured = !known.isNaN(),
             )
         }
         return points
+    }
+
+    /**
+     * Протягує нахил на порожні місця: між двома виміряними — плавно від одного до
+     * іншого, за краями — рівно як на найближчому виміряному.
+     *
+     * Це найпростіше припущення, яке не вигадує форми: нахил шкали змінюється
+     * плавно, і між двома відомими точками пряма — чесніше, ніж стрибок на
+     * середнє по всій шкалі.
+     */
+    private fun stretchOverGaps(measured: DoubleArray): DoubleArray {
+        val filled = DoubleArray(BINS)
+        val known = (0 until BINS).filter { !measured[it].isNaN() }
+        if (known.isEmpty()) return filled
+
+        for (bin in 0 until BINS) {
+            if (!measured[bin].isNaN()) {
+                filled[bin] = measured[bin]
+                continue
+            }
+            val before = known.lastOrNull { it < bin }
+            val after = known.firstOrNull { it > bin }
+            filled[bin] = when {
+                before != null && after != null -> {
+                    val share = (bin - before).toDouble() / (after - before)
+                    measured[before] + share * (measured[after] - measured[before])
+                }
+                before != null -> measured[before]
+                else -> measured[after!!]
+            }
+        }
+        return filled
     }
 
     fun snapshot() = LevelsSnapshot(

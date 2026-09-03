@@ -20,8 +20,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,6 +77,8 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
             onConnectClick = mainViewModel::onConnectClick,
             onAutoConnectChange = mainViewModel::onAutoConnectChange,
         )
+
+        BackgroundWorkCard()
 
         // Усі картки на місці з першої секунди, ще до підключення: інакше екран
         // після запуску виглядає напівпорожнім, і незрозуміло, чи застосунок
@@ -278,8 +289,8 @@ private fun ChargeCard(charge: ChargeLog) {
 
             Text(
                 text = "Рахується за лічильником BMS, тому враховує й ті зарядки, " +
-                    "що пройшли без телефона: якщо лічильник виріс, а одометр — ні, " +
-                    "авто нікуди не їхало, отже це була зарядка.",
+                    "що пройшли без телефона: якщо лічильник виріс, заряд піднявся, " +
+                    "а віддано нічого не було — це зарядка.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -423,3 +434,72 @@ private const val NO_VALUE = "--"
  * тексту, а прозорий лишається теплим натяком в обох темах.
  */
 private val DISCONNECTED_TINT = Color(0xFFFFCBA4).copy(alpha = 0.45f)
+
+/**
+ * Прохання до системи не присипляти застосунок.
+ *
+ * ЧОМУ ЦЕ ВЗАГАЛІ ПОТРІБНО. Служба переднього плану тримає ПРОЦЕС, але не
+ * гарантує, що йому дадуть працювати. У журналі поїздки є проміжок на 634
+ * секунди, за який номер зчитування шини зріс лише на два: з'єднання живе,
+ * сповіщення висить, а опитування фактично стоїть. Так поводяться Doze і фірмові
+ * «оптимізації» оболонок — на Xiaomi особливо охоче.
+ *
+ * Частковий wake lock у службі — половина ліки. Друга половина ось ця: попросити
+ * систему винести застосунок з-під оптимізації батареї. Дозвіл дає користувач, і
+ * без нього застосунок працює, просто з дірками у фоні.
+ *
+ * Картки немає, коли дозвіл уже є: місце на екрані дорожче за нагадування про
+ * зроблене.
+ */
+@Composable
+private fun BackgroundWorkCard() {
+    val context = LocalContext.current
+    // Лічильник перевірок: після повернення з системного діалога стан треба
+    // прочитати наново, а сам PowerManager про зміну нікого не сповіщає.
+    var checks by remember { mutableIntStateOf(0) }
+    val allowed = remember(checks) { runsUnrestricted(context) }
+    if (allowed) return
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(text = "Робота у фоні обмежена", fontSize = 18.sp)
+            Text(
+                text = "Система присипляє застосунок зі згорнутим екраном, і опитування " +
+                    "спиняється посеред поїздки — з'єднання при цьому виглядає живим. " +
+                    "Дозвольте роботу без обмежень, щоб дані не мали дірок.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(
+                onClick = {
+                    askToRunUnrestricted(context)
+                    checks++
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Дозволити роботу у фоні")
+            }
+        }
+    }
+}
+
+private fun runsUnrestricted(context: Context): Boolean {
+    val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
+    return runCatching { power.isIgnoringBatteryOptimizations(context.packageName) }.getOrDefault(true)
+}
+
+/**
+ * Відкриває системний діалог. Якщо оболонка його не має — відкриваємо загальний
+ * список оптимізації батареї, а якщо немає й того, мовчимо: краще нічого, ніж
+ * падіння застосунку через чужу прошивку.
+ */
+private fun askToRunUnrestricted(context: Context) {
+    val direct = Intent(
+        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+        Uri.parse("package:${context.packageName}"),
+    )
+    if (runCatching { context.startActivity(direct) }.isSuccess) return
+    runCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+}

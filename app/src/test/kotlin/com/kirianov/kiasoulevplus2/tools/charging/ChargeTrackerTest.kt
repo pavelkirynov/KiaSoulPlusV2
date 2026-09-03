@@ -16,8 +16,9 @@ class ChargeTrackerTest {
         charging: Boolean = true,
         nowMs: Long = 0L,
         dayKey: String = day,
-        odometerKm: Double = 100_000.0,
-    ) = ChargeTracker.observe(log, counter, odometerKm, charging, nowMs, dayKey)
+        dischargedKwh: Double = 20_000.0,
+        socPercent: Double = 50.0,
+    ) = ChargeTracker.observe(log, counter, dischargedKwh, socPercent, charging, nowMs, dayKey)
 
     /**
      * Найважливіше про пожиттєвий лічильник: перше читання не має стати зарядкою.
@@ -211,8 +212,8 @@ class ChargeTrackerTest {
 
     /**
      * Заради чого це все й переписувалося: авто заряджалося вночі, телефона в
-     * ньому не було. На ранок лічильник виріс на 38 кВт·год, а одометр не
-     * зрушив — іншого джерела, крім зарядки, тут просто немає.
+     * ньому не було. На ранок лічильник прийнятої виріс на 38 кВт·год, заряд
+     * піднявся з 20 до 95 %, а віддано за ніч не було нічого.
      */
     @Test
     fun `a charge that happened while we were away is counted`() {
@@ -221,7 +222,8 @@ class ChargeTrackerTest {
             counter = 27_000.0,
             charging = false,
             nowMs = HOUR,
-            odometerKm = 188_894.3,
+            dischargedKwh = 26_000.0,
+            socPercent = 20.0,
         )
 
         val morning = observe(
@@ -229,7 +231,8 @@ class ChargeTrackerTest {
             counter = 27_038.0,
             charging = false,
             nowMs = HOUR + 10 * HOUR,
-            odometerKm = 188_894.3,
+            dischargedKwh = 26_000.0,
+            socPercent = 95.0,
         )
 
         assertEquals(38.0, morning.lastSessionKwh, 0.001)
@@ -237,66 +240,64 @@ class ChargeTrackerTest {
     }
 
     /**
-     * А якщо за час нашої відсутності авто їхало, розділити зарядку й рекуперацію
-     * нічим. Тоді не зараховуємо нічого: недорахувати краще, ніж записати спуск з
-     * гори як зарядку.
+     * Регресія на зарядку, якої не було.
+     *
+     * Авто за годину проїхало 51 км, застосунок повернувся й побачив «лічильник
+     * прийнятої +6.7 кВт·год». Це рекуперація за поїздку. Одометр у той момент
+     * ще показував старе значення — він приходить іншим кадром, — і саме на
+     * цьому застосунок записав зарядку на 6.7 кВт·год. Але SOC упав із 43 % до
+     * 23 %, а лічильник відданої виріс на 12 кВт·год: обидва числа з того самого
+     * кадру кажуть «це поїздка».
      */
     @Test
-    fun `a gap in which the car moved is not counted as charging`() {
+    fun `a drive across a gap is never called a charge`() {
+        val before = observe(
+            ChargeLog(),
+            counter = 27_052.2,
+            charging = false,
+            nowMs = HOUR,
+            dischargedKwh = 26_018.2,
+            socPercent = 43.0,
+        )
+
+        val after = observe(
+            before,
+            counter = 27_058.9,
+            charging = false,
+            nowMs = HOUR + HOUR,
+            dischargedKwh = 26_030.2,
+            socPercent = 23.0,
+        )
+
+        assertFalse("Поїздку записано як зарядку", after.hasLastSession)
+        assertEquals(0.0, after.todayKwh, 0.001)
+    }
+
+    /**
+     * І окремо: заряд виріс, але авто щось віддавало — отже воно їхало, а не
+     * стояло на зарядці. Такий проміжок розділити нічим, тож не рахуємо.
+     */
+    @Test
+    fun `a gap with discharge in it is not counted`() {
         val before = observe(
             ChargeLog(),
             counter = 27_000.0,
             charging = false,
             nowMs = HOUR,
-            odometerKm = 188_894.3,
+            dischargedKwh = 26_000.0,
+            socPercent = 20.0,
         )
 
         val after = observe(
             before,
-            counter = 27_005.0,
+            counter = 27_038.0,
             charging = false,
             nowMs = HOUR + 10 * HOUR,
-            odometerKm = 188_970.0,
+            dischargedKwh = 26_009.0,
+            socPercent = 60.0,
         )
 
         assertFalse(after.hasLastSession)
-        assertEquals(0.0, after.todayKwh, 0.001)
-        // Базовий показ усе одно переїхав: інакше ця різниця впала б у наступну сесію.
-        assertEquals(27_005.0, after.counterBaselineKwh, 0.001)
-    }
-
-    /**
-     * Поки одометра ще немає (кадр 4F0 приходить не одразу), вирішувати зарано —
-     * і, головне, не можна тягнути базовий показ: разом із ним поїхала б і вся
-     * пропущена зарядка, як це й було раніше.
-     */
-    @Test
-    fun `a missed charge waits for the odometer instead of being dropped`() {
-        val evening = observe(
-            ChargeLog(),
-            counter = 27_000.0,
-            charging = false,
-            nowMs = HOUR,
-            odometerKm = 188_894.3,
-        )
-
-        val blind = observe(
-            evening,
-            counter = 27_038.0,
-            charging = false,
-            nowMs = HOUR + 10 * HOUR,
-            odometerKm = 0.0,
-        )
-        assertEquals("Базовий показ поїхав разом із зарядкою", 27_000.0, blind.counterBaselineKwh, 0.001)
-
-        val withOdometer = observe(
-            blind,
-            counter = 27_038.0,
-            charging = false,
-            nowMs = HOUR + 10 * HOUR + 10_000L,
-            odometerKm = 188_894.3,
-        )
-        assertEquals(38.0, withOdometer.lastSessionKwh, 0.001)
     }
 
     /** Дрібний приріст за паузу — не зарядка: стільки набігає й від службових потреб. */
@@ -307,7 +308,6 @@ class ChargeTrackerTest {
             counter = 27_000.0,
             charging = false,
             nowMs = HOUR,
-            odometerKm = 188_894.3,
         )
 
         val after = observe(
@@ -315,7 +315,7 @@ class ChargeTrackerTest {
             counter = 27_000.2,
             charging = false,
             nowMs = HOUR + 10 * HOUR,
-            odometerKm = 188_894.3,
+            socPercent = 55.0,
         )
 
         assertFalse(after.hasLastSession)
@@ -332,7 +332,6 @@ class ChargeTrackerTest {
             counter = 27_000.0,
             charging = false,
             nowMs = HOUR,
-            odometerKm = 188_894.3,
         )
 
         val after = observe(
@@ -340,7 +339,7 @@ class ChargeTrackerTest {
             counter = 27_001.0,
             charging = false,
             nowMs = HOUR + 60_000L,
-            odometerKm = 188_894.3,
+            socPercent = 55.0,
         )
 
         assertFalse(after.hasLastSession)

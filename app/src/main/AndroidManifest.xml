@@ -24,6 +24,15 @@
         зовнішній пристрій.
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+        Будильник процесу. Служби переднього плану замало: з вимкненим екраном
+        Android (а на деяких оболонках і поготів) присипляє потоки, і цикл
+        опитування зупиняється, лишаючись «підключеним». У журналі це виглядало
+        як 634 секунди без жодного зчитування при живому з'єднанні.
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Щоб можна було попросити систему не присипляти застосунок узагалі. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!-- З Android 13 без цього дозволу сповіщення служби просто не видно. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
