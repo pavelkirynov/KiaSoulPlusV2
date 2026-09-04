@@ -35,7 +35,16 @@ class FileEnergyStore(private val directory: File) : EnergyStore {
             if (energy == null || percent == null || samples == null) {
                 null
             } else {
-                LevelsSnapshot(energy, percent, samples)
+                LevelsSnapshot(
+                    sumKwh = energy,
+                    sumPercent = percent,
+                    samples = samples,
+                    totalSumKwh = values["totalSumKwh"] as? Double ?: 0.0,
+                    fullChargeSamples = (values["fullChargeSamples"] as? Double)?.toInt() ?: 0,
+                    pendingSocPercent = values["pendingSocPercent"] as? Double ?: -1.0,
+                    pendingChargedKwh = values["pendingChargedKwh"] as? Double ?: 0.0,
+                    pendingDischargedKwh = values["pendingDischargedKwh"] as? Double ?: 0.0,
+                )
             }
         }
     } catch (_: IOException) {
@@ -56,6 +65,11 @@ class FileEnergyStore(private val directory: File) : EnergyStore {
                         "sumKwh" to snapshot.sumKwh.toList(),
                         "sumPercent" to snapshot.sumPercent.toList(),
                         "samples" to snapshot.samples.toDouble(),
+                        "totalSumKwh" to snapshot.totalSumKwh,
+                        "fullChargeSamples" to snapshot.fullChargeSamples.toDouble(),
+                        "pendingSocPercent" to snapshot.pendingSocPercent,
+                        "pendingChargedKwh" to snapshot.pendingChargedKwh,
+                        "pendingDischargedKwh" to snapshot.pendingDischargedKwh,
                     ),
                 ),
             )

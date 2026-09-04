@@ -384,6 +384,71 @@ class EnergyCurveTest {
         assertEquals(90.0, curve.measuredToPercent!!, 0.001)
     }
 
+    /**
+     * ЗАРЯДКУ МИ НЕ БАЧИМО ЦІЛКОМ, і вимір мусить це переживати. OBD-порт гасне,
+     * щойно авто йде в режим зарядки: у журналі адаптер відвалюється за хвилину
+     * після початку й до ранку не повертається.
+     *
+     * Тому замір тримається на двох кінцях: закладка на початку і перше читання,
+     * коли шкала вже вгорі. Скільки годин між ними — байдуже, лічильник веде сама
+     * батарея.
+     */
+    @Test
+    fun `a charge measured only at its two ends still counts`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        // Увечері: побачили початок зарядки на 3 % і одразу втратили зв'язок.
+        publish(socPercent = 3.0, dischargedKwh = 26_000.0, chargedKwh = 27_000.0, charging = true)
+
+        // Вранці: зарядка давно скінчилася, шкала вгорі, лічильник виріс на 49.3.
+        now += 8 * 60 * 60 * 1000L
+        publish(socPercent = 100.0, dischargedKwh = 26_000.0, chargedKwh = 27_049.3, charging = false)
+
+        val curve = GeneralData.state.value.curve
+        assertTrue("Повну ємність не зміряно", curve.totalMeasured)
+        assertEquals(50.8, curve.totalKwh, 0.2)
+        assertEquals(1, curve.fullChargeSamples)
+    }
+
+    /** Закладка мусить пережити перезапуск: телефон їде з машиною, а не з зарядкою. */
+    @Test
+    fun `the start of a charge survives a restart`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+        publish(socPercent = 3.0, dischargedKwh = 26_000.0, chargedKwh = 27_000.0, charging = true)
+
+        // Застосунок перезапустили: новий блок, той самий файл.
+        scope.cancel()
+        GeneralData.reset()
+        val second = CoroutineScope(Dispatchers.Unconfined)
+        try {
+            EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(second)
+            now += 8 * 60 * 60 * 1000L
+            publish(socPercent = 100.0, dischargedKwh = 26_000.0, chargedKwh = 27_049.3, charging = false)
+
+            assertTrue("Закладка не пережила перезапуск", GeneralData.state.value.curve.totalMeasured)
+        } finally {
+            second.cancel()
+        }
+    }
+
+    /** Якщо між закладкою й ранком авто ще й їздило, розділити нічим. */
+    @Test
+    fun `a charge with a drive in the middle is dropped`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        publish(socPercent = 3.0, dischargedKwh = 26_000.0, chargedKwh = 27_000.0, charging = true)
+        now += 8 * 60 * 60 * 1000L
+        publish(socPercent = 100.0, dischargedKwh = 26_012.0, chargedKwh = 27_049.3, charging = false)
+
+        assertFalse(GeneralData.state.value.curve.totalMeasured)
+    }
+
     @Test
     fun `the curve can be forgotten on request`() {
         val levels = EnergyLevels()

@@ -73,7 +73,16 @@ class EnergyBlock(
 
     fun start(scope: CoroutineScope) {
         scope.launch(ioDispatcher) {
-            store.load()?.let { levels.restore(it) }
+            store.load()?.let { saved ->
+                levels.restore(saved)
+                if (saved.pendingSocPercent >= 0.0) {
+                    chargeStart = ChargeStart(
+                        socPercent = saved.pendingSocPercent,
+                        chargedKwh = saved.pendingChargedKwh,
+                        dischargedKwh = saved.pendingDischargedKwh,
+                    )
+                }
+            }
             publish()
 
             GeneralData.state.collect { state ->
@@ -81,6 +90,7 @@ class EnergyBlock(
                     GeneralData.clearCurveRequest()
                     levels.reset()
                     anchor = null
+                    chargeStart = null
                     withContext(ioDispatcher) { store.clear() }
                     publish()
                     return@collect
@@ -88,11 +98,14 @@ class EnergyBlock(
 
                 val reading = readingOf(state) ?: return@collect
                 val learnedShape = accept(reading)
-                val learnedTotal = watchCharge(reading)
-                if (learnedShape || learnedTotal) {
-                    withContext(ioDispatcher) { store.save(levels.snapshot()) }
-                    publish()
+                val charge = watchCharge(reading)
+
+                // Зберігаємо й тоді, коли лише поставили закладку: без цього
+                // початок зарядки не дожив би до ранку.
+                if (learnedShape || charge != ChargeWatch.Nothing) {
+                    withContext(ioDispatcher) { store.save(snapshot()) }
                 }
+                if (learnedShape || charge == ChargeWatch.Learned) publish()
             }
         }
     }
@@ -144,28 +157,39 @@ class EnergyBlock(
      * Веде зарядну сесію й закриває її замiром повної ємності, коли шкала дійшла
      * до сотні.
      *
-     * Якір ставиться на будь-якому зарядному читанні з низьким відсотком, а не
-     * лише на переході «не заряджаюсь → заряджаюсь»: телефон часто під'єднується
-     * посеред зарядки, і чекати наступного разу означало б не зміряти нічого.
+     * ЗАРЯДКУ МИ ПРАКТИЧНО НІКОЛИ НЕ БАЧИМО ЦІЛКОМ, і на це розраховано все тут.
+     * OBD-порт гасне, щойно авто йде в режим зарядки: у журналі адаптер відвалюється
+     * за хвилину після початку й до ранку не повертається. Тому замір тримається на
+     * ДВОХ КІНЦЯХ — закладці на початку і першому читанні, коли шкала вже вгорі, — а
+     * не на спостереженні за процесом. Різниця пожиттєвого лічильника між ними і є
+     * прийнята енергія, скільки б годин між ними не пройшло.
      *
-     * @return чи додався замір повної ємності.
+     * Через це ж закладка лежить у файлі, а не в пам'яті: телефон їде з машиною, і
+     * до ранку процес може не дожити.
+     *
+     * Якір ставиться на будь-якому зарядному читанні з низьким відсотком, а не лише
+     * на переході «не заряджаюсь → заряджаюсь»: телефон часто під'єднується посеред
+     * зарядки, і чекати наступного разу означало б не зміряти нічого.
      */
-    private fun watchCharge(reading: Reading): Boolean {
-        if (!reading.charging) {
-            // Зарядка скінчилася, не дійшовши до сотні: міряти нічого.
-            chargeStart = null
-            return false
-        }
-
+    private fun watchCharge(reading: Reading): ChargeWatch {
         val started = chargeStart
         if (started == null) {
-            if (reading.socPercent <= EnergyLevels.MAX_START_PERCENT) {
-                chargeStart = ChargeStart(reading.socPercent, reading.chargedKwh)
+            if (reading.charging && reading.socPercent <= EnergyLevels.MAX_START_PERCENT) {
+                chargeStart = ChargeStart(reading.socPercent, reading.chargedKwh, reading.dischargedKwh)
+                return ChargeWatch.Anchored
             }
-            return false
+            return ChargeWatch.Nothing
         }
 
-        if (reading.socPercent < EnergyLevels.MIN_FINISH_PERCENT) return false
+        // Авто щось віддавало — отже їхало, і між закладкою та зараз була не сама
+        // лише зарядка. Розділити нічим, тож закладку викидаємо.
+        if (reading.dischargedKwh - started.dischargedKwh > MAX_DISCHARGE_DURING_CHARGE_KWH) {
+            chargeStart = null
+            return ChargeWatch.Anchored
+        }
+
+        // Ще не долило. Чекаємо далі — хоч до завтра: закладка нікуди не дінеться.
+        if (reading.socPercent < EnergyLevels.MIN_FINISH_PERCENT) return ChargeWatch.Nothing
 
         val learned = levels.learnFullCharge(
             fromPercent = started.socPercent,
@@ -175,7 +199,19 @@ class EnergyBlock(
         // Хай там прийнято чи ні, сесія закрита: другого разу той самий вимір
         // додавати не можна.
         chargeStart = null
-        return learned
+        return if (learned) ChargeWatch.Learned else ChargeWatch.Anchored
+    }
+
+    /** Що сталося із закладкою на зарядку за це читання. */
+    private enum class ChargeWatch {
+        /** Нічого не змінилося. */
+        Nothing,
+
+        /** Закладку поставлено або викинуто: змінилося те, що треба зберегти. */
+        Anchored,
+
+        /** Замір повної ємності додано. */
+        Learned,
     }
 
     private fun publish() {
@@ -201,7 +237,21 @@ class EnergyBlock(
         }
     }
 
-    private data class ChargeStart(val socPercent: Double, val chargedKwh: Double)
+    /** Знімок разом із закладкою: у файл вони мусять іти нероздільно. */
+    private fun snapshot(): LevelsSnapshot {
+        val pending = chargeStart
+        return levels.snapshot().copy(
+            pendingSocPercent = pending?.socPercent ?: -1.0,
+            pendingChargedKwh = pending?.chargedKwh ?: 0.0,
+            pendingDischargedKwh = pending?.dischargedKwh ?: 0.0,
+        )
+    }
+
+    private data class ChargeStart(
+        val socPercent: Double,
+        val chargedKwh: Double,
+        val dischargedKwh: Double,
+    )
 
     private fun readingOf(state: State): Reading? {
         val vehicle = state.vehicle
@@ -266,5 +316,12 @@ class EnergyBlock(
 
         /** Шкала подеколи здригається на десяті — це ще не зарядка. */
         const val SOC_RISE_TOLERANCE = 0.2
+
+        /**
+         * Скільки дозволено вирости лічильнику ВІДДАНОЇ енергії між закладкою й
+         * кінцем зарядки. Практично нуль: авто на зарядці нічого не віддає, а
+         * десята частка — крок самого лічильника.
+         */
+        const val MAX_DISCHARGE_DURING_CHARGE_KWH = 0.3
     }
 }

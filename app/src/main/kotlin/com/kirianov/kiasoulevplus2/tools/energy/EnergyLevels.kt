@@ -333,6 +333,19 @@ data class LevelsSnapshot(
     val samples: Int,
     val totalSumKwh: Double = 0.0,
     val fullChargeSamples: Int = 0,
+
+    /**
+     * Закладка на початок зарядки, яку ще не дораховано.
+     *
+     * Лежить у тому самому файлі, що й заміри, бо мусить пережити не лише обрив
+     * зв'язку, а й перезапуск застосунку: телефон їде з машиною, зарядка йде без
+     * нього годинами, і закладку в пам'яті процесу до ранку не донести.
+     *
+     * Від'ємний відсоток означає «закладки немає».
+     */
+    val pendingSocPercent: Double = -1.0,
+    val pendingChargedKwh: Double = 0.0,
+    val pendingDischargedKwh: Double = 0.0,
 ) {
     // equals/hashCode для масивів data class не робить сам, а тести їх порівнюють.
     override fun equals(other: Any?): Boolean {
@@ -341,6 +354,9 @@ data class LevelsSnapshot(
         return samples == other.samples &&
             fullChargeSamples == other.fullChargeSamples &&
             totalSumKwh == other.totalSumKwh &&
+            pendingSocPercent == other.pendingSocPercent &&
+            pendingChargedKwh == other.pendingChargedKwh &&
+            pendingDischargedKwh == other.pendingDischargedKwh &&
             sumKwh.contentEquals(other.sumKwh) &&
             sumPercent.contentEquals(other.sumPercent)
     }

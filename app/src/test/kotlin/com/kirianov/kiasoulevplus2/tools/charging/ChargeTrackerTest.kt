@@ -240,6 +240,84 @@ class ChargeTrackerTest {
     }
 
     /**
+     * РЕГРЕСІЯ НА ЗАРЯДКУ, ЯКУ ЗАСТОСУНОК БАЧИВ І ВСЕ ОДНО НЕ ПОРАХУВАВ.
+     *
+     * Найзвичайніший сценарій із життя, і саме він не працював. Числа — з журналу:
+     *
+     *     00:11  приїхав, поставив на зарядку. Застосунок бачить chg=1,
+     *            socD=15 %, лічильник 27061.3 і встигає записати 0.1 кВт·год
+     *     00:12  адаптер відвалився (OBD-порт гасне, коли авто йде в зарядку)
+     *     08:09  під'єднався зранку: socD=95.2 %, лічильник 27098.4
+     *
+     * За ніч у батарею зайшло 37 кВт·год, а на екрані лишалося 0.1 — рівно те,
+     * що встигли побачити живцем. Причина була в одному рядку: пошук пропущеної
+     * зарядки починався з «якщо сесія відкрита — не рахувати нічого». Хоча саме
+     * у відкритій сесії ми знаємо найбільше: зарядка почалася на наших очах.
+     */
+    @Test
+    fun `a charge that finished while we were away lands in its session`() {
+        val evening = observe(
+            ChargeLog(),
+            counter = 27_061.3,
+            charging = true,
+            nowMs = HOUR,
+            dischargedKwh = 26_034.8,
+            socPercent = 15.0,
+        )
+        // Устигли побачити перші 0.1 кВт·год і на цьому зв'язок обірвався.
+        val seen = observe(
+            evening,
+            counter = 27_061.4,
+            charging = true,
+            nowMs = HOUR + 60_000L,
+            dischargedKwh = 26_034.8,
+            socPercent = 15.0,
+        )
+        assertEquals(0.1, seen.sessionKwh, 0.001)
+
+        val morning = observe(
+            seen,
+            counter = 27_098.4,
+            charging = false,
+            nowMs = HOUR + 8 * HOUR,
+            dischargedKwh = 26_034.8,
+            socPercent = 95.2,
+        )
+
+        assertEquals("Ніч зникла з сесії", 37.1, morning.lastSessionKwh, 0.01)
+        assertEquals(37.1, morning.todayKwh, 0.01)
+        assertFalse(morning.charging)
+    }
+
+    /**
+     * А якщо після зарядки авто ще й поїхало, розділити зарядку й рекуперацію
+     * нічим: лічильник відданої виріс. Тоді в сесію йде лише побачене — краще
+     * недорахувати, ніж вигадати.
+     */
+    @Test
+    fun `a drive after an unseen charge leaves only what was seen`() {
+        val evening = observe(
+            ChargeLog(),
+            counter = 27_061.3,
+            charging = true,
+            nowMs = HOUR,
+            dischargedKwh = 26_034.8,
+            socPercent = 15.0,
+        )
+
+        val later = observe(
+            evening,
+            counter = 27_098.4,
+            charging = false,
+            nowMs = HOUR + 8 * HOUR,
+            dischargedKwh = 26_050.0,
+            socPercent = 60.0,
+        )
+
+        assertEquals(0.0, later.lastSessionKwh, 0.001)
+    }
+
+    /**
      * Регресія на зарядку, якої не було.
      *
      * Авто за годину проїхало 51 км, застосунок повернувся й побачив «лічильник
