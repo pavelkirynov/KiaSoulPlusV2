@@ -1,5 +1,13 @@
-// Графік «скільки кВт·год на цьому відсотку». По горизонталі — відсоток шкали,
-// по вертикалі — кВт·год, які в батареї лишаються.
+// Графік «скільки кВт·год на цьому відсотку» плюс крива напруги на тому самому
+// полотні. По горизонталі — відсоток шкали, СПРАВА НАЛІВО: сто зліва, нуль
+// справа. Так прийнято малювати розрядні криві, і так воно читається як рух —
+// зліва повна батарея, праворуч порожня.
+//
+// Двi кривi тут не для краси. Саме напруга пояснює, ЧОМУ шкала нерівна: BMS
+// розкладає відсотки за заводською таблицею напруг, а комірки стоять інші, з
+// іншим діапазоном. Де напруга йде рівно, а кіловат-години ні — там і сидить
+// уся розбіжність. Тому в кожної кривої своя вертикаль: кВт·год ліворуч,
+// вольти праворуч.
 //
 // ЧОМУ ОКРЕМИЙ ГРАФІК, А НЕ ДРУГА КРИВА НА СУСІДНЬОМУ. Дві величини з різними
 // одиницями на одному полотні читаються погано: спільна вертикаль означає, що одна
@@ -55,6 +63,10 @@ private val PLOT_HEIGHT = 200.dp
 /** Ширина стовпчика цифр біля вертикальної осі. */
 private val AXIS_WIDTH = 34.dp
 
+/** Межі вертикалі напруги, В: робоче вікно цього пакета з запасом. */
+private const val MIN_VOLTS = 300.0
+private const val MAX_VOLTS = 420.0
+
 /**
  * Скільки кВт·год показувати на осі, поки не зміряно нічого.
  *
@@ -73,6 +85,7 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
             Text(text = "Ємність по шкалі", fontSize = 18.sp)
 
             val lineColor = MaterialTheme.colorScheme.primary
+            val voltsColor = MaterialTheme.colorScheme.tertiary
             val inferredColor = MaterialTheme.colorScheme.outline
             val gridColor = MaterialTheme.colorScheme.outlineVariant
             val markerRing = MaterialTheme.colorScheme.surface
@@ -113,7 +126,8 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
                         .height(PLOT_HEIGHT),
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        fun x(percent: Double) = (percent / 100.0).toFloat() * size.width
+                        // Справа наліво: сто відсотків зліва, нуль справа.
+                        fun x(percent: Double) = (1.0 - percent / 100.0).toFloat() * size.width
                         fun y(kwh: Double) = (1.0 - kwh / topKwh).toFloat() * size.height
 
                         // Сітка: кожні 20 % і кожні step кВт·год. Рідка навмисно —
@@ -140,6 +154,19 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
                             )
                         }
 
+                        // Крива напруги: своя вертикаль, свій колір. Точки є лише
+                        // там, де замірів вистачило прибрати просадку під струмом.
+                        fun yVolts(volts: Double) =
+                            (1.0 - (volts - MIN_VOLTS) / (MAX_VOLTS - MIN_VOLTS)).toFloat() * size.height
+                        curve.voltagePoints.zipWithNext { from, to ->
+                            drawLine(
+                                color = voltsColor,
+                                start = Offset(x(from.socPercent), yVolts(from.volts)),
+                                end = Offset(x(to.socPercent), yVolts(to.volts)),
+                                strokeWidth = 3f,
+                            )
+                        }
+
                         // Де авто зараз: точка на кривій, щоб число з екрана мало місце.
                         nowSoc?.let { soc ->
                             curve.energyAt(soc)?.let { energy ->
@@ -150,24 +177,60 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
                         }
                     }
                 }
+
+                // Права вісь — вольти. Ставиться тільки коли є що на ній читати.
+                Box(
+                    modifier = Modifier
+                        .width(AXIS_WIDTH)
+                        .height(PLOT_HEIGHT),
+                ) {
+                    if (curve.voltagePoints.isNotEmpty()) {
+                        var volts = MIN_VOLTS
+                        while (volts <= MAX_VOLTS) {
+                            val share = 1.0 - (volts - MIN_VOLTS) / (MAX_VOLTS - MIN_VOLTS)
+                            Text(
+                                text = formatDecimal(volts, 0),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = voltsColor,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 4.dp)
+                                    .offset(y = PLOT_HEIGHT * share.toFloat() - 8.dp),
+                            )
+                            volts += 30.0
+                        }
+                    }
+                }
             }
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = AXIS_WIDTH),
+                    .padding(start = AXIS_WIDTH, end = AXIS_WIDTH),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "0 %", style = MaterialTheme.typography.bodySmall)
-                Text(text = "50 %", style = MaterialTheme.typography.bodySmall)
                 Text(text = "100 %", style = MaterialTheme.typography.bodySmall)
+                Text(text = "50 %", style = MaterialTheme.typography.bodySmall)
+                Text(text = "0 %", style = MaterialTheme.typography.bodySmall)
             }
 
             Text(
-                text = "Вертикаль — кВт·год, горизонталь — відсоток шкали.",
+                text = "Ліворуч кВт·год, праворуч вольти. Шкала йде від повної " +
+                    "батареї до порожньої, як розрядна крива.",
                 style = MaterialTheme.typography.bodySmall,
             )
+
+            if (curve.voltagePoints.isNotEmpty()) {
+                val cell = curve.voltagePoints
+                Text(
+                    text = "Напруга зміряна на ${cell.size} ділянках шкали, від " +
+                        "${formatDecimal(cell.last().voltsPerCell, 3)} до " +
+                        "${formatDecimal(cell.first().voltsPerCell, 3)} В на комірку. " +
+                        "Просадка під струмом прибрана, тож це напруга спокою.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
 
             if (!curve.hasMeasurements) {
                 Text(

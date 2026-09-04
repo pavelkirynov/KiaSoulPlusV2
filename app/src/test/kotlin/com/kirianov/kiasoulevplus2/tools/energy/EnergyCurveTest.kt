@@ -86,26 +86,27 @@ class EnergyCurveTest {
     fun `a longer pass weighs more than a short one`() {
         val levels = EnergyLevels()
 
-        levels.learn(fromPercent = 90.0, toPercent = 80.0, netKwh = 5.0)  // весь кошик 85, нахил 0.5
-        levels.learn(fromPercent = 85.5, toPercent = 85.0, netKwh = 0.05) // пів кошика, нахил 0.1
+        levels.learn(fromPercent = 90.0, toPercent = 85.0, netKwh = 2.5)  // весь кошик 85, нахил 0.5
+        levels.learn(fromPercent = 86.0, toPercent = 85.0, netKwh = 0.1)  // п'ята частина, нахил 0.1
 
-        // Кошик 85 бачив 1 % при 0.5 і 0.5 % при 0.1 — з вагою це 0.367, а не
-        // просте середнє 0.3: коротший прохід важить рівно вдвічі менше.
-        val rate = levels.rateAt(85.2)!!
-        assertEquals(0.367, rate, 0.005)
+        // Кошик 85 бачив 5 % при 0.5 і 1 % при 0.1 — з вагою це 0.433, а не
+        // просте середнє 0.3: коротший прохід важить рівно вп'ятеро менше.
+        val rate = levels.rateAt(87.0)!!
+        assertEquals(0.433, rate, 0.005)
     }
 
     /** Замір розкладається по кошиках пропорційно пройденій у кожному частині. */
     @Test
-    fun `a measurement spanning several percents is spread across them`() {
+    fun `a measurement spanning several bins is spread across them`() {
         val levels = EnergyLevels()
 
-        levels.learn(fromPercent = 93.7, toPercent = 91.2, netKwh = 1.25)
+        // 96 -> 84 % шкали накриває три кошики: 95, 90 і 85.
+        levels.learn(fromPercent = 96.0, toPercent = 84.0, netKwh = 6.0)
 
-        // 2.5 % шкали на 1.25 кВт·год — це 0.5 на відсоток у кожному з кошиків.
+        assertEquals(0.5, levels.rateAt(96.0)!!, 0.001)
         assertEquals(0.5, levels.rateAt(92.0)!!, 0.001)
-        assertEquals(0.5, levels.rateAt(93.0)!!, 0.001)
-        assertNull("Кошик 90 не міряли", levels.rateAt(90.0))
+        assertEquals(0.5, levels.rateAt(86.0)!!, 0.001)
+        assertNull("Кошик 70 не міряли", levels.rateAt(72.0))
     }
 
     /** Нефізичний нахил — це помилка читання, а не батарея. */
@@ -137,7 +138,7 @@ class EnergyCurveTest {
 
         val curve = levels.curve(totalKwh = 51.0)
 
-        assertEquals(101, curve.size)
+        assertEquals(21, curve.size)
         assertEquals(0.0, curve.first().energyKwh, 0.001)
         assertTrue("Виміряне не позначене", curve.any { it.socPercent == 85.0 && it.measured })
         assertTrue("Доведене позначене як вимір", curve.any { it.socPercent == 50.0 && !it.measured })
@@ -162,14 +163,14 @@ class EnergyCurveTest {
         val curve = levels.curve(totalKwh = 51.0)
 
         assertEquals("Сума кривої мусить лишитися повною ємністю", 51.0, curve.last().energyKwh, 0.01)
-        // Зміряна ділянка лишається зі своїм нахилом...
-        val measuredSlope = curve.first { it.socPercent == 95.0 }.energyKwh -
-            curve.first { it.socPercent == 88.0 }.energyKwh
-        assertEquals(2.03, measuredSlope, 0.05)
+        // Зміряна ділянка лишається зі своїм дешевим нахилом...
+        val measuredSlope = (curve.first { it.socPercent == 95.0 }.energyKwh -
+            curve.first { it.socPercent == 85.0 }.energyKwh) / 10.0
+        assertTrue("Зміряний нахил спотворено: $measuredSlope", measuredSlope < 0.35)
         // ...а решта ємності дісталася невиміряній частині, і там відсоток дорожчий.
-        val tailSlope = curve.first { it.socPercent == 50.0 }.energyKwh -
-            curve.first { it.socPercent == 49.0 }.energyKwh
-        assertTrue("Невиміряна частина мусить бути дорожчою: $tailSlope", tailSlope > 0.29)
+        val tailSlope = (curve.first { it.socPercent == 55.0 }.energyKwh -
+            curve.first { it.socPercent == 50.0 }.energyKwh) / 5.0
+        assertTrue("Невиміряна частина мусить бути дорожчою: $tailSlope", tailSlope > measuredSlope)
     }
 
     /**
@@ -185,8 +186,8 @@ class EnergyCurveTest {
         levels.learn(fromPercent = 20.0, toPercent = 15.0, netKwh = 4.0)  // 0.8 на відсоток
 
         val curve = levels.curve(totalKwh = 51.0)
-        fun rateAt(percent: Double) = curve.first { it.socPercent == percent }.energyKwh -
-            curve.first { it.socPercent == percent - 1.0 }.energyKwh
+        fun rateAt(percent: Double) = (curve.first { it.socPercent == percent }.energyKwh -
+            curve.first { it.socPercent == percent - 5.0 }.energyKwh) / 5.0
 
         // Посередині прогалини нахил мусить бути між сусідами, а не однаковий скрізь.
         val low = rateAt(25.0)
@@ -194,6 +195,75 @@ class EnergyCurveTest {
         val high = rateAt(85.0)
         assertTrue("Перехід не плавний: $low, $middle, $high", low > middle && middle > high)
         assertEquals("Сума кривої мусить лишитися повною ємністю", 51.0, curve.last().energyKwh, 0.01)
+    }
+
+    // --- Крива напруги ------------------------------------------------------------
+
+    /**
+     * Просадку під струмом прибирає пряма, а не фільтр «беремо лише спокій».
+     *
+     * Інакше довелося б викидати майже всі заміри: авто в русі майже завжди під
+     * навантаженням, і кошики зі спокоєм набиралися б місяцями. Пряма ж бере всі
+     * заміри до дозволеного навантаження і прибирає рівно ту частину просадки,
+     * яка пояснюється струмом.
+     */
+    @Test
+    fun `the sag under load is fitted out of the voltage`() {
+        val levels = EnergyLevels()
+        // Батарея тримає 390 В без струму, внутрішній опір 0.08 Ом.
+        // Домовленість застосунку: від'ємний струм — розряд, тобто просадка.
+        listOf(-60.0, -60.0, -30.0, -30.0, 0.0, 0.0, 20.0, 20.0).forEach { amps ->
+            assertTrue(levels.learnVoltage(50.0, volts = 390.0 + amps * 0.08, amps = amps))
+        }
+
+        assertEquals(390.0, levels.restVoltageAt(50.0)!!, 0.01)
+    }
+
+    /** Під великим навантаженням просадка вже не пряма — такі заміри не беремо. */
+    @Test
+    fun `a heavy load is refused`() {
+        val levels = EnergyLevels()
+
+        assertFalse(levels.learnVoltage(50.0, volts = 350.0, amps = -200.0))
+        assertNull(levels.restVoltageAt(50.0))
+    }
+
+    /** Поки замірів у кошику мало, кривої немає: одна точка нічого не каже. */
+    @Test
+    fun `too few samples give no voltage`() {
+        val levels = EnergyLevels()
+        repeat(3) { levels.learnVoltage(50.0, volts = 390.0, amps = 0.0) }
+
+        assertNull(levels.restVoltageAt(50.0))
+    }
+
+    /** Якщо струм у всіх замірах однаковий, прямої не побудувати — беремо середнє. */
+    @Test
+    fun `a constant load falls back to the mean voltage`() {
+        val levels = EnergyLevels()
+        repeat(10) { levels.learnVoltage(50.0, volts = 385.0, amps = -20.0) }
+
+        assertEquals(385.0, levels.restVoltageAt(50.0)!!, 0.01)
+    }
+
+    /** Крива напруги мусить пережити перезапуск разом з рештою. */
+    @Test
+    fun `the voltage curve survives a restart`() {
+        val levels = EnergyLevels()
+        listOf(-60.0, -60.0, -30.0, -30.0, 0.0, 0.0, 20.0, 20.0).forEach { amps ->
+            levels.learnVoltage(50.0, volts = 390.0 + amps * 0.08, amps = amps)
+        }
+
+        val dir = File.createTempFile("curve", "dir").apply { delete(); mkdirs() }
+        try {
+            val store = FileEnergyStore(dir)
+            store.save(levels.snapshot())
+            val restored = EnergyLevels().apply { restore(store.load()!!) }
+
+            assertEquals(390.0, restored.restVoltageAt(50.0)!!, 0.01)
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 
     // --- Повна ємність із зарядки ------------------------------------------------
@@ -318,8 +388,8 @@ class EnergyCurveTest {
         // 16 комірок CATL по 3.18 кВт·год — рівно те, що стоїть в авто.
         assertEquals(Pack.USABLE_CAPACITY_KWH, curve.totalKwh, 0.001)
         assertFalse(curve.totalMeasured)
-        assertEquals(0.5, curve.points.first { it.socPercent == 85.0 }.energyKwh -
-            curve.points.first { it.socPercent == 84.0 }.energyKwh, 0.01)
+        assertEquals(2.5, curve.points.first { it.socPercent == 85.0 }.energyKwh -
+            curve.points.first { it.socPercent == 80.0 }.energyKwh, 0.05)
     }
 
     /** Поки лічильник не набрав кіловат-години, замір брати рано. */

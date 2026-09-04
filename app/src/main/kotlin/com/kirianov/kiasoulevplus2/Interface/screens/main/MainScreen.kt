@@ -2,7 +2,7 @@
 
 package com.kirianov.kiasoulevplus2.Interface.screens.main
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import android.content.Context
@@ -31,7 +32,6 @@ import android.provider.Settings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -40,6 +40,7 @@ import com.kirianov.kiasoulevplus2.Data.CalculatedData
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
+import com.kirianov.kiasoulevplus2.Data.PairedDevice
 import com.kirianov.kiasoulevplus2.Data.State
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WindowStats
@@ -55,19 +56,9 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
     val bms = state.bms
     val calculated = state.calculated
 
-    // Обрив зв'язку видно за кольором, не вчитуючись у рядок статусу: за кермом
-    // читати нема коли. Персиковий узятий із прозорістю, а не суцільним, щоб у
-    // темній темі він лишався теплим відтінком, а не засвіченим тлом.
-    val background = if (state.isConnected) {
-        Color.Transparent
-    } else {
-        DISCONNECTED_TINT
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(background)
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -79,6 +70,12 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
         )
 
         BackgroundWorkCard()
+
+        WakeOnCarCard(
+            devices = state.pairedDevices,
+            selected = state.settings.wakeOnDeviceAddress,
+            onSelected = mainViewModel::onWakeDeviceChange,
+        )
 
         // Усі картки на місці з першої секунди, ще до підключення: інакше екран
         // після запуску виглядає напівпорожнім, і незрозуміло, чи застосунок
@@ -428,12 +425,6 @@ private fun MetricRow(label: String, value: String) {
 
 private const val NO_VALUE = "--"
 
-/**
- * Персиковий відтінок на час обриву зв'язку. З прозорістю, а не суцільним: у
- * темній темі суцільний персиковий засвітив би екран і зіпсував читабельність
- * тексту, а прозорий лишається теплим натяком в обох темах.
- */
-private val DISCONNECTED_TINT = Color(0xFFFFCBA4).copy(alpha = 0.45f)
 
 /**
  * Прохання до системи не присипляти застосунок.
@@ -502,4 +493,77 @@ private fun askToRunUnrestricted(context: Context) {
     )
     if (runCatching { context.startActivity(direct) }.isSuccess) return
     runCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+}
+
+/**
+ * Вибір пристрою, поява якого будить застосунок.
+ *
+ * Задум простий: магнітола з'єднується з телефоном щоразу, коли ви сіли в авто, —
+ * надійнішої ознаки «поїхали» в телефона просто немає. Сам ELM для цього годиться
+ * гірше: клони не підіймають зв'язок самі, а чекають, поки під'єднаються до них,
+ * тобто саме тоді, коли застосунок уже працює.
+ *
+ * Картка згорнута, поки пристрій не обрано або поки її не розкрили: список
+ * спарованих пристроїв довгий, а звертаються до нього раз у житті.
+ */
+@Composable
+private fun WakeOnCarCard(
+    devices: List<PairedDevice>,
+    selected: String,
+    onSelected: (String) -> Unit,
+) {
+    if (devices.isEmpty()) return
+    var open by remember { mutableStateOf(false) }
+    val chosen = devices.firstOrNull { it.address == selected }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Прокидатися в авто", fontSize = 18.sp)
+                Text(
+                    text = if (open) "згорнути" else "змінити",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { open = !open },
+                )
+            }
+
+            Text(
+                text = chosen?.let { "Будить: ${it.name}" }
+                    ?: "Пристрій не обрано — застосунок доведеться відкривати вручну.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            if (open) {
+                Text(
+                    text = "Оберіть магнітолу авто: телефон з'єднується з нею щоразу, " +
+                        "коли ви сідаєте за кермо. Для роботи потрібен дозвіл із картки вище.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                devices.forEach { device ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onSelected(if (device.address == selected) "" else device.address)
+                                open = false
+                            }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(text = device.name)
+                        if (device.address == selected) {
+                            Text(text = "обрано", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

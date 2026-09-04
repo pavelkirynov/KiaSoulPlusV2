@@ -51,7 +51,14 @@ class ArchitectureTest {
      * MainActivity та місце, де перелічені всі блоки.
      * Їм за визначенням видно всіх — на те вони й точка збірки.
      */
-    private val compositionRoot = listOf("App.kt", "MainActivity.kt", "AppBlocks.kt")
+    private val compositionRoot = listOf(
+        "App.kt",
+        "MainActivity.kt",
+        "AppBlocks.kt",
+        // Приймач будильника: його створює Android, і він піднімає службу — така
+        // сама точка входу, як активність.
+        "WakeOnCarReceiver.kt",
+    )
 
     @Test
     fun `no block imports another block`() {

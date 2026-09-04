@@ -45,6 +45,7 @@ class FileEnergyStore(private val directory: File) : EnergyStore {
                     pendingChargedKwh = values["pendingChargedKwh"] as? Double ?: 0.0,
                     pendingDischargedKwh = values["pendingDischargedKwh"] as? Double ?: 0.0,
                     pendingAtMs = (values["pendingAtMs"] as? Double)?.toLong() ?: 0L,
+                    voltage = voltageSums(values),
                 )
             }
         }
@@ -72,6 +73,11 @@ class FileEnergyStore(private val directory: File) : EnergyStore {
                         "pendingChargedKwh" to snapshot.pendingChargedKwh,
                         "pendingDischargedKwh" to snapshot.pendingDischargedKwh,
                         "pendingAtMs" to snapshot.pendingAtMs.toDouble(),
+                        "volN" to (snapshot.voltage?.n?.toList() ?: emptyList<Double>()),
+                        "volI" to (snapshot.voltage?.i?.toList() ?: emptyList<Double>()),
+                        "volU" to (snapshot.voltage?.u?.toList() ?: emptyList<Double>()),
+                        "volII" to (snapshot.voltage?.ii?.toList() ?: emptyList<Double>()),
+                        "volIU" to (snapshot.voltage?.iu?.toList() ?: emptyList<Double>()),
                     ),
                 ),
             )
@@ -86,6 +92,17 @@ class FileEnergyStore(private val directory: File) : EnergyStore {
 
     override fun clear() {
         runCatching { file.delete() }
+    }
+
+    /** Суми кривої напруги. Немає бодай однієї — немає й кривої: рахувати нема з чого. */
+    private fun voltageSums(values: Map<String, Any?>): VoltageSums? {
+        val n = doubles(values["volN"]) ?: return null
+        val i = doubles(values["volI"]) ?: return null
+        val u = doubles(values["volU"]) ?: return null
+        val ii = doubles(values["volII"]) ?: return null
+        val iu = doubles(values["volIU"]) ?: return null
+        if (n.isEmpty()) return null
+        return VoltageSums(n, i, u, ii, iu)
     }
 
     private fun doubles(raw: Any?): DoubleArray? {

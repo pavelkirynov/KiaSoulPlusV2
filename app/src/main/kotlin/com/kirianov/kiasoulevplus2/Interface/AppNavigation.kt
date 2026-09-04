@@ -3,6 +3,7 @@
 
 package com.kirianov.kiasoulevplus2.Interface
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -17,10 +18,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsScreen
 import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsViewModel
 import com.kirianov.kiasoulevplus2.Interface.screens.experiments.ProbeScreen
@@ -34,6 +38,13 @@ fun AppNavigation() {
     RequestBluetoothPermissions()
 
     var currentScreen by remember { mutableStateOf(AppScreen.MAIN) }
+
+    // Обрив зв'язку видно за кольором, не вчитуючись у рядок статусу: за кермом
+    // читати нема коли. Фарбуємо тут, а не на головному екрані, бо втрата
+    // зв'язку однаково стосується всіх сторінок — на «Прогнозі» навіть більше,
+    // ніж на «Головній»: там числа живуть довше й виглядають свіжими.
+    val connected by GeneralData.state.collectAsState()
+    val tint = if (connected.isConnected) Color.Transparent else DISCONNECTED_TINT
 
     MaterialTheme {
         Scaffold(
@@ -56,13 +67,19 @@ fun AppNavigation() {
                     .fillMaxSize()
                     .padding(paddingValues),
             ) {
-                when (currentScreen) {
-                    AppScreen.MAIN -> MainScreen()
-                    AppScreen.PREDICTION ->
-                        PredictionScreen(predictionViewModel = viewModel<PredictionViewModel>())
-                    AppScreen.CELLS -> CellsScreen(cellsViewModel = viewModel<CellsViewModel>())
-                    AppScreen.EXPERIMENTS -> ProbeScreen(probeViewModel = viewModel<ProbeViewModel>())
-                    AppScreen.SETTINGS -> ScreenPlaceholder("Калібрування")
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(tint),
+                ) {
+                    when (currentScreen) {
+                        AppScreen.MAIN -> MainScreen()
+                        AppScreen.PREDICTION ->
+                            PredictionScreen(predictionViewModel = viewModel<PredictionViewModel>())
+                        AppScreen.CELLS -> CellsScreen(cellsViewModel = viewModel<CellsViewModel>())
+                        AppScreen.EXPERIMENTS -> ProbeScreen(probeViewModel = viewModel<ProbeViewModel>())
+                        AppScreen.SETTINGS -> ScreenPlaceholder("Калібрування")
+                    }
                 }
             }
         }
@@ -75,3 +92,9 @@ private fun ScreenPlaceholder(text: String) {
         Text(text = text, fontSize = 18.sp)
     }
 }
+
+/**
+ * Персиковий, і саме з прозорістю, а не суцільний: у темній темі суцільний
+ * виглядав би засвіченим тлом, а так лишається теплим відтінком.
+ */
+private val DISCONNECTED_TINT = Color(0xFFFFCBA4).copy(alpha = 0.45f)

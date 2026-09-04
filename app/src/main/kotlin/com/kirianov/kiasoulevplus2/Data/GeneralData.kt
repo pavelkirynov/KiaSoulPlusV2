@@ -89,6 +89,13 @@ object GeneralData {
     fun setAutoConnect(enabled: Boolean) =
         _state.update { it.copy(settings = it.settings.copy(autoConnect = enabled)) }
 
+    fun setWakeOnDevice(address: String) =
+        _state.update { it.copy(settings = it.settings.copy(wakeOnDeviceAddress = address)) }
+
+    /** Список спарованих пристроїв: публікує блок Bluetooth. */
+    fun updatePairedDevices(devices: List<PairedDevice>) =
+        _state.update { it.copy(pairedDevices = devices) }
+
     fun setJournalEnabled(enabled: Boolean) =
         _state.update { it.copy(settings = it.settings.copy(journal = enabled)) }
 

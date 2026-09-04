@@ -44,6 +44,9 @@
 package com.kirianov.kiasoulevplus2.tools.energy
 
 import com.kirianov.kiasoulevplus2.Data.CurvePoint
+import com.kirianov.kiasoulevplus2.Data.Pack
+import com.kirianov.kiasoulevplus2.Data.VoltagePoint
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -65,6 +68,25 @@ class EnergyLevels {
 
     var fullChargeSamples: Int = 0
         private set
+
+    /**
+     * Суми для кривої НАПРУГИ по шкалі.
+     *
+     * Зберігаються не середні, а суми найменших квадратів: n, ΣI, ΣU, ΣI², ΣI·U.
+     * З них виходить пряма U = U0 − I·R, тобто одразу дві речі — напруга спокою
+     * U0 і внутрішній опір R.
+     *
+     * ЧОМУ НЕ ПРОСТО СЕРЕДНЄ. Під навантаженням напруга просідає, і просідає
+     * по-різному залежно від струму. Середнє по замірах змішало б криву самої
+     * батареї з тим, як водій тиснув педаль. Пряма ж прибирає просадку рівно
+     * настільки, наскільки вона пояснюється струмом, — і лишає те, що від струму
+     * не залежить.
+     */
+    private val volN = DoubleArray(BINS)
+    private val volI = DoubleArray(BINS)
+    private val volU = DoubleArray(BINS)
+    private val volII = DoubleArray(BINS)
+    private val volIU = DoubleArray(BINS)
 
     /**
      * Додає замір: шкала пройшла від [fromPercent] до [toPercent], і за цей час
@@ -134,6 +156,58 @@ class EnergyLevels {
     val measuredTotalKwh: Double?
         get() = if (fullChargeSamples > 0) totalSumKwh / fullChargeSamples else null
 
+    /**
+     * Додає замір напруги: на цьому відсотку шкали пакет тримав [volts] під
+     * струмом [amps] (від'ємний — розряд, за домовленістю застосунку).
+     *
+     * @return чи прийнято замір. Відмова означає, що навантаження завелике: під
+     * ним просадка вже не лінійна, і пряма почала б брехати.
+     */
+    fun learnVoltage(socPercent: Double, volts: Double, amps: Double): Boolean {
+        if (!volts.isFinite() || volts < MIN_PLAUSIBLE_VOLTS || volts > MAX_PLAUSIBLE_VOLTS) return false
+        if (!amps.isFinite() || abs(amps) > MAX_LOAD_AMPS) return false
+        if (socPercent < 0.0 || socPercent > 100.0) return false
+
+        val bin = binOf(socPercent)
+        volN[bin] += 1.0
+        volI[bin] += amps
+        volU[bin] += volts
+        volII[bin] += amps * amps
+        volIU[bin] += amps * volts
+        return true
+    }
+
+    /**
+     * Напруга спокою на цьому відсотку шкали, В; null — замірів замало.
+     *
+     * Якщо струми в кошику майже однакові, прямої не побудувати — тоді береться
+     * середня напруга. Це чесно: за однакового навантаження просадка теж
+     * однакова, і криву вона зміщує, але не спотворює її форму.
+     */
+    fun restVoltageAt(socPercent: Double): Double? = restVoltageOfBin(binOf(socPercent))
+
+    private fun restVoltageOfBin(bin: Int): Double? {
+        val n = volN[bin]
+        if (n < MIN_VOLTAGE_SAMPLES) return null
+
+        val meanI = volI[bin] / n
+        val meanU = volU[bin] / n
+        val spread = volII[bin] / n - meanI * meanI
+        if (spread < MIN_CURRENT_SPREAD) return meanU
+
+        // Нахил прямої = -R, вільний член = напруга спокою.
+        val slope = (volIU[bin] / n - meanI * meanU) / spread
+        val rest = meanU - slope * meanI
+        return if (rest in MIN_PLAUSIBLE_VOLTS..MAX_PLAUSIBLE_VOLTS) rest else meanU
+    }
+
+    /** Крива напруги по шкалі: точки лише там, де є заміри. */
+    fun voltageCurve(): List<VoltagePoint> = (0 until BINS).mapNotNull { bin ->
+        restVoltageOfBin(bin)?.let {
+            VoltagePoint(socPercent = (bin + 0.5) * BIN_WIDTH_PERCENT, volts = it)
+        }
+    }
+
     /** Нахил кривої в цьому місці шкали, кВт·год на відсоток; null — не міряли. */
     fun rateAt(socPercent: Double): Double? = rateOfBin(binOf(socPercent))
 
@@ -174,7 +248,7 @@ class EnergyLevels {
     fun curve(totalKwh: Double): List<CurvePoint> {
         if (samples == 0 || totalKwh <= 0.0) return emptyList()
 
-        val measured = DoubleArray(BINS) { rateOfBin(it) ?: Double.NaN }
+        val measured = smooth(DoubleArray(BINS) { rateOfBin(it) ?: Double.NaN })
         val measuredEnergy = measuredEnergyKwh()
         val prior = stretchOverGaps(measured)
 
@@ -211,6 +285,37 @@ class EnergyLevels {
             )
         }
         return points
+    }
+
+    /**
+     * Легке згладжування по сусідах: кошик важить удвічі більше за кожного з них.
+     *
+     * Крок лічильника лишає шум навіть у широкому кошику, а справжня крива шкали
+     * гладка — вона задана хімією, а не випадковістю. Тому сусіди трохи
+     * підтягують одне одного. Ваги навмисно скромні: сильніше згладжування вже
+     * почало б з'їдати перегин, заради якого крива й будується.
+     *
+     * Невиміряні кошики в згладжуванні не беруть участі — ні як джерело, ні як
+     * ціль: доводити порожнє місце має протягування, а не розмазування сусіда.
+     */
+    private fun smooth(rates: DoubleArray): DoubleArray {
+        val out = DoubleArray(BINS)
+        for (bin in 0 until BINS) {
+            if (rates[bin].isNaN()) {
+                out[bin] = Double.NaN
+                continue
+            }
+            var sum = rates[bin] * 2.0
+            var weight = 2.0
+            for (side in listOf(bin - 1, bin + 1)) {
+                if (side in 0 until BINS && !rates[side].isNaN()) {
+                    sum += rates[side]
+                    weight += 1.0
+                }
+            }
+            out[bin] = sum / weight
+        }
+        return out
     }
 
     /**
@@ -251,23 +356,59 @@ class EnergyLevels {
         samples = samples,
         totalSumKwh = totalSumKwh,
         fullChargeSamples = fullChargeSamples,
+        voltage = VoltageSums(
+            n = volN.copyOf(),
+            i = volI.copyOf(),
+            u = volU.copyOf(),
+            ii = volII.copyOf(),
+            iu = volIU.copyOf(),
+        ),
     )
 
     fun restore(snapshot: LevelsSnapshot) {
-        if (snapshot.sumKwh.size != BINS || snapshot.sumPercent.size != BINS) return
-        snapshot.sumKwh.copyInto(sumKwh)
-        snapshot.sumPercent.copyInto(sumPercent)
+        val energy = foldToBins(snapshot.sumKwh) ?: return
+        val percent = foldToBins(snapshot.sumPercent) ?: return
+        energy.copyInto(sumKwh)
+        percent.copyInto(sumPercent)
         samples = snapshot.samples
         totalSumKwh = snapshot.totalSumKwh
         fullChargeSamples = snapshot.fullChargeSamples
+
+        // Суми напруги теж згортаються по п'ять, як і решта: вони так само суми.
+        snapshot.voltage?.let { v ->
+            foldToBins(v.n)?.copyInto(volN)
+            foldToBins(v.i)?.copyInto(volI)
+            foldToBins(v.u)?.copyInto(volU)
+            foldToBins(v.ii)?.copyInto(volII)
+            foldToBins(v.iu)?.copyInto(volIU)
+        }
     }
 
     fun reset() {
         sumKwh.fill(0.0)
         sumPercent.fill(0.0)
+        volN.fill(0.0); volI.fill(0.0); volU.fill(0.0); volII.fill(0.0); volIU.fill(0.0)
         samples = 0
         totalSumKwh = 0.0
         fullChargeSamples = 0
+    }
+
+    /**
+     * Приводить масив із файлу до поточної кількості кошиків.
+     *
+     * Старі файли зберігали сто кошиків по одному відсотку. Оскільки в них лежать
+     * СУМИ, згортання — це просто додавання п'ятірками: жодного заміру не
+     * втрачено. Масив іншої, незнайомої довжини відкидаємо: краще почати заново,
+     * ніж мовчки перекрутити чужі числа.
+     */
+    private fun foldToBins(values: DoubleArray): DoubleArray? = when (values.size) {
+        BINS -> values.copyOf()
+        BINS * LEGACY_BINS_PER_BIN -> DoubleArray(BINS) { bin ->
+            var sum = 0.0
+            for (old in 0 until LEGACY_BINS_PER_BIN) sum += values[bin * LEGACY_BINS_PER_BIN + old]
+            sum
+        }
+        else -> null
     }
 
     private fun rateOfBin(bin: Int): Double? =
@@ -277,8 +418,25 @@ class EnergyLevels {
         (socPercent / BIN_WIDTH_PERCENT).toInt().coerceIn(0, BINS - 1)
 
     companion object {
-        const val BINS = 100
-        const val BIN_WIDTH_PERCENT = 1.0
+        /**
+         * Кошики по 5 %, а не по 1 %.
+         *
+         * Один замір коштує близько кіловат-години, а крок лічильника — 0.1, тобто
+         * ±10 % на замір. Із вузькими кошиками сусіди набиралися в різних поїздках
+         * і кожен зі своїм шумом — на графіку це виглядало сходинками, яких у
+         * батареї немає. Ширший кошик збирає вп'ятеро більше замірів і гасить
+         * шум приблизно вдвічі, а форму шкали не втрачає: вона гладка, а не
+         * зубчаста.
+         *
+         * Накопичене при переході не гине. У файлі лежать СУМИ енергії та
+         * відсотків, а суми просто складаються: п'ять старих кошиків згортаються
+         * в один новий без жодного втраченого заміру.
+         */
+        const val BINS = 20
+        const val BIN_WIDTH_PERCENT = 5.0
+
+        /** Скільки старих кошиків по 1 % припадає на один новий. */
+        const val LEGACY_BINS_PER_BIN = 5
 
         /**
          * Коротший замір нічого не дає: крок лічильника 0.1 кВт·год, і на пів
@@ -312,6 +470,24 @@ class EnergyLevels {
 
         /** Скільки відсотків шкали має охопити зарядка. */
         const val MIN_CHARGE_SPAN_PERCENT = 90.0
+
+        /**
+         * Найбільше навантаження, під яким ще беремо напругу: 30 % від струму
+         * повної потужності. Вище просадка перестає бути лінійною за струмом, і
+         * пряма, якою ми її прибираємо, почала б брехати.
+         */
+        const val MAX_LOAD_SHARE = 0.30
+        val MAX_LOAD_AMPS = Pack.MAX_CURRENT_A * MAX_LOAD_SHARE
+
+        /** Менше замірів у кошику — і пряма ще нічого не означає. */
+        const val MIN_VOLTAGE_SAMPLES = 8.0
+
+        /** Розкид струмів, нижче якого прямої не будуємо, А². */
+        const val MIN_CURRENT_SPREAD = 4.0
+
+        /** Поза цими межами це не напруга пакета, а помилка читання. */
+        const val MIN_PLAUSIBLE_VOLTS = 250.0
+        const val MAX_PLAUSIBLE_VOLTS = 450.0
 
         /** Правдоподібні межі повної ємності цього пакета, кВт·год. */
         const val MIN_TOTAL_KWH = 20.0
@@ -347,6 +523,12 @@ data class LevelsSnapshot(
     val pendingChargedKwh: Double = 0.0,
     val pendingDischargedKwh: Double = 0.0,
     val pendingAtMs: Long = 0L,
+
+    /**
+     * Суми для кривої напруги. null у старих файлах — крива просто почне
+     * набиратися заново, решта замірів від цього не постраждає.
+     */
+    val voltage: VoltageSums? = null,
 ) {
     // equals/hashCode для масивів data class не робить сам, а тести їх порівнюють.
     override fun equals(other: Any?): Boolean {
@@ -359,10 +541,31 @@ data class LevelsSnapshot(
             pendingChargedKwh == other.pendingChargedKwh &&
             pendingDischargedKwh == other.pendingDischargedKwh &&
             pendingAtMs == other.pendingAtMs &&
+            voltage == other.voltage &&
             sumKwh.contentEquals(other.sumKwh) &&
             sumPercent.contentEquals(other.sumPercent)
     }
 
     override fun hashCode(): Int =
         (sumKwh.contentHashCode() * 31 + sumPercent.contentHashCode()) * 31 + samples
+}
+
+/** Суми найменших квадратів для кривої напруги, по кошиках шкали. */
+data class VoltageSums(
+    val n: DoubleArray,
+    val i: DoubleArray,
+    val u: DoubleArray,
+    val ii: DoubleArray,
+    val iu: DoubleArray,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is VoltageSums) return false
+        return n.contentEquals(other.n) && i.contentEquals(other.i) &&
+            u.contentEquals(other.u) && ii.contentEquals(other.ii) && iu.contentEquals(other.iu)
+    }
+
+    override fun hashCode(): Int =
+        (((n.contentHashCode() * 31 + i.contentHashCode()) * 31 +
+            u.contentHashCode()) * 31 + ii.contentHashCode()) * 31 + iu.contentHashCode()
 }

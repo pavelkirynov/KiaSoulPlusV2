@@ -19,6 +19,7 @@ import com.kirianov.kiasoulevplus2.Data.AppRequest
 import com.kirianov.kiasoulevplus2.Data.BmsCommands
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.Data.PairedDevice
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +43,19 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
 
     fun start(scope: CoroutineScope) {
         this.scope = scope
+
+        // Список спарованих потрібен екрану, щоб вибрати, поява якого пристрою
+        // будить застосунок. Сам BluetoothDevice в інтерфейс не віддаємо: там
+        // Android не потрібен, потрібні назва й адреса.
+        scope.launch(Dispatchers.IO) {
+            GeneralData.updatePairedDevices(
+                runCatching {
+                    bluetoothManager.getPairedDevices().map {
+                        PairedDevice(name = it.name ?: "Без назви", address = it.address)
+                    }
+                }.getOrDefault(emptyList()),
+            )
+        }
 
         GeneralData.state
             .map { it.request }

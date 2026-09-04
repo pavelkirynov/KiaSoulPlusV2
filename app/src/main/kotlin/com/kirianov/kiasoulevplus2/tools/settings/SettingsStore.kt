@@ -41,6 +41,8 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                     Settings(
                         autoConnect = autoConnect,
                         journal = values["journal"] as? Boolean ?: defaults.journal,
+                        wakeOnDeviceAddress = values["wakeOnDevice"] as? String
+                            ?: defaults.wakeOnDeviceAddress,
                     )
                 }
             }
@@ -59,6 +61,7 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                     linkedMapOf(
                         "autoConnect" to settings.autoConnect,
                         "journal" to settings.journal,
+                        "wakeOnDevice" to settings.wakeOnDeviceAddress,
                     ),
                 ),
             )

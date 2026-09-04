@@ -225,15 +225,7 @@ class MlBlock(
         learnedKm = 0.0
 
         history.sortedBy { it.startedAtMs }.forEach { segment ->
-            val predicted = consumption.learn(segment)
-            if (predicted != null) quality.observe(segment, predicted)
-            capacity.learnBuffer(segment.displaySocStartPercent, segment.socStartPercent, segment.startedAtMs)
-            capacity.learnBuffer(segment.displaySocEndPercent, segment.socEndPercent, segment.startedAtMs)
-            session.add(segment)?.let {
-                capacity.learn(it.socStartPercent, it.socEndPercent, it.energyKwh, it.atMs)
-            }
-            learnedSegments++
-            learnedKm += segment.distanceKm
+            relearn(segment)
             remember(segment)
         }
     }
@@ -247,19 +239,47 @@ class MlBlock(
         }
     }
 
+    /**
+     * Підняти модель із диска — і ДОВЧИТИ її відрізками, які до знімка не встигли.
+     *
+     * Знімок пишеться раз на кілька відрізків, тому в журналі майже завжди є
+     * хвіст, новіший за нього. Раніше цей хвіст просто ігнорувався, і кожен
+     * перезапуск застосунку тихо з'їдав до двох вивчених відрізків. У журналі це
+     * видно неозброєним оком: «відрізків вивчено 13», перезапуск — і знову 12.
+     * При тринадцятьох відрізках усього це помітна частина всієї науки.
+     */
     private suspend fun restore() {
         val saved = store.loadModel()
+        val history = store.readSegments()
+
         if (saved != null && saved.featureSetId == MlCodec.FEATURE_SET) {
             consumption.restore(saved.consumption)
             capacity.restore(saved.capacity)
             quality.restore(saved.quality)
             learnedSegments = saved.segments
             learnedKm = saved.learnedKm
-            recent.addAll(store.readSegments().takeLast(RECENT_SEGMENTS))
+            recent.addAll(history.takeLast(RECENT_SEGMENTS))
+
+            // Хвіст журналу за знімком. Скільки саме відрізків новіші, каже сам
+            // знімок: він знає, скільки їх у ньому враховано.
+            history.drop(saved.segments).forEach { relearn(it) }
             return
         }
         // Файлу немає або він від іншого набору ознак: збираємо з журналу.
-        rebuild(store.readSegments())
+        rebuild(history)
+    }
+
+    /** Довчити один відрізок так само, як це робить перебудова з журналу. */
+    private fun relearn(segment: MlSegment) {
+        val predicted = consumption.learn(segment)
+        if (predicted != null) quality.observe(segment, predicted)
+        capacity.learnBuffer(segment.displaySocStartPercent, segment.socStartPercent, segment.startedAtMs)
+        capacity.learnBuffer(segment.displaySocEndPercent, segment.socEndPercent, segment.startedAtMs)
+        session.add(segment)?.let {
+            capacity.learn(it.socStartPercent, it.socEndPercent, it.energyKwh, it.atMs)
+        }
+        learnedSegments++
+        learnedKm += segment.distanceKm
     }
 
     // --- Прогноз ---------------------------------------------------------------------

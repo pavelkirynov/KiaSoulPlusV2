@@ -118,8 +118,19 @@ object JournalFormat {
         val modelAfter = after.ml.model
         if (modelBefore.segments != modelAfter.segments) {
             val segment = after.ml.recentSegments.lastOrNull()
+            // Тяга і рекуперація ОКРЕМО, і це найважливіше поле цього рядка.
+            //
+            // Обидва числа порахував сам застосунок, інтегруючи миттєву потужність,
+            // — незалежно від пожиттєвих лічильників BMS. А ті лічильники дають
+            // дивне: за поїздку «прийнято» виходить 47 % від «віддано». Стільки
+            // рекуперації на дорозі не буває: щоб повернути половину тягової
+            // енергії, треба, щоб майже вся вона йшла в гальмування, а її їдять
+            // повітря й кочення. Якщо власний інтеграл покаже звичні 15–25 %,
+            // значить лічильник «прийнято» рахує не саму лише рекуперацію — і
+            // питання про справжню ємність шкали закривається без глибокої зарядки.
             out += "$at seg n=${modelAfter.segments} km=${num(modelAfter.learnedKm)} " +
                 "last=${num(segment?.distanceKm)}/${num(segment?.energyKwh)} " +
+                "trac=${num(segment?.tractionKwh)} reg=${num(segment?.regenKwh)} " +
                 "cov=${num(segment?.coverage)} spd=${segment?.speedSamples ?: -1}"
         }
         if (modelBefore.abortedSegments != modelAfter.abortedSegments) {

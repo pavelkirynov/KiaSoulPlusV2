@@ -101,6 +101,18 @@
             android:resource="@xml/automotive_app_desc" />
 
         <!--
+            Будильник: телефон з'єднався з магнітолою — отже, ви сіли в авто.
+            exported обов'язково: інакше системний broadcast до приймача не дійде.
+        -->
+        <receiver
+            android:name=".WakeOnCarReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
             Віддає файл журналу назовні. Тека застосунку іншим застосункам
             недоступна, тож без content:// кнопка «Поділитися» не відкрила б
             нічого. Не експортований: доступ видається одноразово самим наміром.

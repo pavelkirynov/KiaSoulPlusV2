@@ -97,16 +97,21 @@ class EnergyBlock(
                     return@collect
                 }
 
+                // Напругу беремо з КОЖНОГО читання, а не лише з тих, де зрушив
+                // SOC: її крива набирається на порядок повільніше — їй потрібні
+                // десятки замірів у кошику, щоб прибрати просадку прямою.
+                val learnedVolts = learnVoltage(state)
+
                 val reading = readingOf(state) ?: return@collect
                 val learnedShape = accept(reading)
                 val charge = watchCharge(reading)
 
                 // Зберігаємо й тоді, коли лише поставили закладку: без цього
                 // початок зарядки не дожив би до ранку.
-                if (learnedShape || charge != ChargeWatch.Nothing) {
+                if (learnedShape || learnedVolts || charge != ChargeWatch.Nothing) {
                     withContext(ioDispatcher) { store.save(snapshot()) }
                 }
-                if (learnedShape || charge == ChargeWatch.Learned) publish()
+                if (learnedShape || learnedVolts || charge == ChargeWatch.Learned) publish()
             }
         }
     }
@@ -237,6 +242,7 @@ class EnergyBlock(
                 measuredFromPercent = levels.measuredFromPercent,
                 measuredToPercent = levels.measuredToPercent,
                 coveredPercent = levels.coveredPercent,
+                voltagePoints = levels.voltageCurve(),
                 totalKwh = total,
                 totalMeasured = measuredTotal != null,
                 fullChargeSamples = levels.fullChargeSamples,
@@ -263,6 +269,23 @@ class EnergyBlock(
         /** Час закладки: за ним рахується поблажливість до стоянкового відбору. */
         val atMs: Long,
     )
+
+    /**
+     * Напруга проти шкали. Зарядка виключена: там напругу тримає зарядний, а не
+     * батарея, і це вже не характеристика комірок.
+     */
+    private fun learnVoltage(state: State): Boolean {
+        val vehicle = state.vehicle
+        val bms = state.bms
+        if (!vehicle.hasPreciseSoc || !bms.hasData) return false
+        if (vehicle.charging.isCharging) return false
+
+        return levels.learnVoltage(
+            socPercent = vehicle.preciseSocPercent,
+            volts = bms.batteryVoltage,
+            amps = bms.batteryCurrent,
+        )
+    }
 
     private fun readingOf(state: State): Reading? {
         val vehicle = state.vehicle

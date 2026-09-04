@@ -44,6 +44,9 @@ data class State(
     /** Налаштування користувача: їх веде блок tools/settings. */
     val settings: Settings = Settings(),
 
+    /** Спаровані Bluetooth-пристрої: їх публікує блок services/bluetooth. */
+    val pairedDevices: List<PairedDevice> = emptyList(),
+
     /** Виміряна крива ємності: її веде блок tools/energy. */
     val curve: BatteryCurve = BatteryCurve(),
 
@@ -75,3 +78,13 @@ enum class AppRequest {
     Connect,
     Disconnect,
 }
+
+/**
+ * Спарований пристрій — рівно те, що потрібно екрану для вибору «будити по
+ * цьому». Тип android.bluetooth.BluetoothDevice в інтерфейс не потрапляє:
+ * сховище стану лишається без Android, як і решта Data.
+ */
+data class PairedDevice(
+    val name: String,
+    val address: String,
+)
