@@ -4,11 +4,13 @@ import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CalculatedData
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
+import com.kirianov.kiasoulevplus2.Data.MlPrediction
 import com.kirianov.kiasoulevplus2.Data.State
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WindowStats
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -162,5 +164,90 @@ class CarMediaModelTest {
 
         assertEquals(CarMediaModel.NO_DATA_TEXT, rows["Остання зарядка"])
         assertEquals(CarMediaModel.NO_DATA_TEXT, rows["Заряджено за добу"])
+    }
+
+    // --- Прилади на іконках -------------------------------------------------------
+
+    /**
+     * Дуга заряду мусить показувати РЕАЛЬНИЙ відсоток, коли прогноз його знає.
+     * У цьому й сенс застосунку: панель бреше, а на іконці має бути правда.
+     */
+    @Test
+    fun `the charge gauge prefers the real percent over the panel`() {
+        val state = connected().let { base ->
+            base.copy(
+                ml = base.ml.copy(
+                    prediction = MlPrediction(
+                        rangeKm = 180.0,
+                        rangeFromKm = 150.0,
+                        rangeToKm = 210.0,
+                        realPercent = 62.0,
+                        usableEnergyRemainingKwh = 30.0,
+                        whPerKm = 165.0,
+                    ),
+                ),
+            )
+        }
+
+        val gauge = CarMediaModel.gaugeFor(CarMediaModel.BATTERY_ID, state)!!
+
+        assertEquals(CarGauge.Kind.Arc, gauge.kind)
+        assertEquals(0.62, gauge.fill, 0.001)
+        assertEquals("62 %", gauge.label)
+        assertEquals("180 км", gauge.caption)
+    }
+
+    /** Поки прогнозу немає, беремо панельний — але кажемо, що він панельний. */
+    @Test
+    fun `without a prediction the gauge falls back to the panel`() {
+        val gauge = CarMediaModel.gaugeFor(CarMediaModel.BATTERY_ID, connected())!!
+
+        assertEquals("за панеллю", gauge.caption)
+    }
+
+    /**
+     * Смуга потужності від центру: розряд праворуч, рекуперація ліворуч.
+     * Домовленість застосунку — від'ємна потужність означає розряд.
+     */
+    @Test
+    fun `the power gauge puts spending to the right and regen to the left`() {
+        val base = connected()
+        val spending = base.copy(calculated = base.calculated.copy(powerKw = -40.0))
+        val regen = base.copy(calculated = base.calculated.copy(powerKw = 20.0))
+
+        val out = CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, spending)!!
+        val back = CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, regen)!!
+
+        assertTrue("Розряд мусить бути праворуч: ${out.fill}", out.fill > 0.0)
+        assertEquals(0.5, out.fill, 0.001)
+        assertEquals("віддає", out.caption)
+        assertTrue("Рекуперація мусить бути ліворуч: ${back.fill}", back.fill < 0.0)
+        assertEquals("приймає", back.caption)
+    }
+
+    /** За межі шкали смуга не вилазить: інакше вона намалювалася б повз іконку. */
+    @Test
+    fun `the power gauge is clamped to its scale`() {
+        val base = connected()
+        val huge = base.copy(calculated = base.calculated.copy(powerKw = -300.0))
+
+        assertEquals(1.0, CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, huge)!!.fill, 0.001)
+    }
+
+    /**
+     * Приладів немає там, де вони нічого не означають: у пробігу немає «повного
+     * бака», у лічильниках за весь час — краю шкали.
+     */
+    @Test
+    fun `sections without a natural scale get no gauge`() {
+        assertNull(CarMediaModel.gaugeFor(CarMediaModel.ENERGY_ID, connected()))
+        assertNull(CarMediaModel.gaugeFor(CarMediaModel.TRIP_ID, connected()))
+    }
+
+    /** Без даних із шини малювати нічого. */
+    @Test
+    fun `no data means no gauge`() {
+        assertNull(CarMediaModel.gaugeFor(CarMediaModel.BATTERY_ID, State()))
+        assertNull(CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, State()))
     }
 }

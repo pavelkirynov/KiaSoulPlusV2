@@ -96,6 +96,10 @@ class CarMediaService : MediaBrowserServiceCompat() {
             .setMediaId(item.id)
             .setTitle(item.title)
             .setSubtitle(item.subtitle)
+            // Іконка — єдина щілина, крізь яку медіа-браузер дає показати своє:
+            // хост бере її як картинку й малює як є. Там, де приладу немає,
+            // іконки теж немає: хай хост малює свою піктограму.
+            .apply { item.gauge?.let { setIconBitmap(CarGaugeArtist.bitmapOf(it)) } }
             .build()
 
         val flags = if (item.browsable) {
