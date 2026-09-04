@@ -44,6 +44,7 @@ class FileEnergyStore(private val directory: File) : EnergyStore {
                     pendingSocPercent = values["pendingSocPercent"] as? Double ?: -1.0,
                     pendingChargedKwh = values["pendingChargedKwh"] as? Double ?: 0.0,
                     pendingDischargedKwh = values["pendingDischargedKwh"] as? Double ?: 0.0,
+                    pendingAtMs = (values["pendingAtMs"] as? Double)?.toLong() ?: 0L,
                 )
             }
         }
@@ -70,6 +71,7 @@ class FileEnergyStore(private val directory: File) : EnergyStore {
                         "pendingSocPercent" to snapshot.pendingSocPercent,
                         "pendingChargedKwh" to snapshot.pendingChargedKwh,
                         "pendingDischargedKwh" to snapshot.pendingDischargedKwh,
+                        "pendingAtMs" to snapshot.pendingAtMs.toDouble(),
                     ),
                 ),
             )

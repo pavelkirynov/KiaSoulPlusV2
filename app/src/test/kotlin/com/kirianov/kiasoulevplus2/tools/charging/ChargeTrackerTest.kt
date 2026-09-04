@@ -290,6 +290,94 @@ class ChargeTrackerTest {
     }
 
     /**
+     * РЕГРЕСІЯ НА ПІДЗАРЯДКУ, ЯКУ ВІДКИНУВ ЗАНАДТО ТІСНИЙ ПОРІГ. Числа з журналу:
+     *
+     *     12:35:58  chg=1  socD=88.5  kWhIn=27084.9  kWhOut=26037.9
+     *     13:15:02         socD=95    kWhIn=27086.9  kWhOut=26038.2
+     *
+     * Прийнято 2 кВт·год, заряд піднявся на 6.5 % — обидві головні перевірки
+     * пройшли. А відкинула третя: лічильник ВІДДАНОЇ виріс на 0.3 кВт·год, тоді
+     * як дозволено було 0.2. Авто сорок хвилин стояло на зарядці й живило власну
+     * електроніку від тягового пакета — це нормальна фізика, а не поїздка.
+     */
+    @Test
+    fun `the car feeding itself on the charger does not cancel the charge`() {
+        val plugged = observe(
+            ChargeLog(),
+            counter = 27_084.9,
+            charging = true,
+            nowMs = HOUR,
+            dischargedKwh = 26_037.9,
+            socPercent = 88.5,
+        )
+
+        val back = observe(
+            plugged,
+            counter = 27_086.9,
+            charging = false,
+            nowMs = HOUR + 37 * MINUTE,
+            dischargedKwh = 26_038.2,
+            socPercent = 95.0,
+        )
+
+        assertEquals(2.0, back.lastSessionKwh, 0.01)
+        assertTrue("Рішення не записане: «${back.lastDecision}»", back.lastDecision.contains("зараховано"))
+    }
+
+    /** І коли паузу не зарахували, у журналі мусить бути видно, який поріг спрацював. */
+    @Test
+    fun `a refused pause says which threshold stopped it`() {
+        val before = observe(
+            ChargeLog(),
+            counter = 27_000.0,
+            charging = false,
+            nowMs = HOUR,
+            dischargedKwh = 26_000.0,
+            socPercent = 43.0,
+        )
+
+        val after = observe(
+            before,
+            counter = 27_006.7,
+            charging = false,
+            nowMs = HOUR + HOUR,
+            dischargedKwh = 26_012.0,
+            socPercent = 23.0,
+        )
+
+        assertFalse(after.hasLastSession)
+        assertTrue("Причина не записана: «${after.lastDecision}»", after.lastDecision.contains("заряд не піднявся"))
+    }
+
+    /**
+     * Поблажливість пропорційна часу, і за ніч вона більша. Інакше саме ті
+     * зарядки, заради яких усе робиться, відкидалися б найохочіше.
+     */
+    @Test
+    fun `an overnight charge tolerates a whole night of standby draw`() {
+        val plugged = observe(
+            ChargeLog(),
+            counter = 27_000.0,
+            charging = true,
+            nowMs = HOUR,
+            dischargedKwh = 26_000.0,
+            socPercent = 15.0,
+        )
+
+        val morning = observe(
+            plugged,
+            counter = 27_038.0,
+            charging = false,
+            nowMs = HOUR + 8 * HOUR,
+            // За вісім годин стоянки на зарядці набігло 2.5 кВт·год відбору.
+            dischargedKwh = 26_002.5,
+            socPercent = 95.0,
+        )
+
+        assertEquals(38.0, morning.lastSessionKwh, 0.01)
+    }
+
+    /**
      * А якщо після зарядки авто ще й поїхало, розділити зарядку й рекуперацію
      * нічим: лічильник відданої виріс. Тоді в сесію йде лише побачене — краще
      * недорахувати, ніж вигадати.
@@ -424,6 +512,7 @@ class ChargeTrackerTest {
     }
 
     private companion object {
-        const val HOUR = 60 * 60 * 1000L
+        const val MINUTE = 60 * 1000L
+        const val HOUR = 60 * MINUTE
     }
 }

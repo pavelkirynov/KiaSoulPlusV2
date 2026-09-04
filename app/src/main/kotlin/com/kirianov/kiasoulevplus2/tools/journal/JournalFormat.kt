@@ -110,6 +110,9 @@ object JournalFormat {
                 "last=${num(chargeAfter.lastSessionKwh)} today=${num(chargeAfter.todayKwh)} " +
                 "base=${num(chargeAfter.counterBaselineKwh)}"
         }
+        if (chargeBefore.lastDecision != chargeAfter.lastDecision && chargeAfter.lastDecision.isNotEmpty()) {
+            out += "$at charge? «${chargeAfter.lastDecision}»"
+        }
 
         val modelBefore = before.ml.model
         val modelAfter = after.ml.model

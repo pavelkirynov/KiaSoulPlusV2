@@ -80,6 +80,7 @@ class EnergyBlock(
                         socPercent = saved.pendingSocPercent,
                         chargedKwh = saved.pendingChargedKwh,
                         dischargedKwh = saved.pendingDischargedKwh,
+                        atMs = saved.pendingAtMs,
                     )
                 }
             }
@@ -175,15 +176,22 @@ class EnergyBlock(
         val started = chargeStart
         if (started == null) {
             if (reading.charging && reading.socPercent <= EnergyLevels.MAX_START_PERCENT) {
-                chargeStart = ChargeStart(reading.socPercent, reading.chargedKwh, reading.dischargedKwh)
+                chargeStart = ChargeStart(
+                    socPercent = reading.socPercent,
+                    chargedKwh = reading.chargedKwh,
+                    dischargedKwh = reading.dischargedKwh,
+                    atMs = reading.atMs,
+                )
                 return ChargeWatch.Anchored
             }
             return ChargeWatch.Nothing
         }
 
-        // Авто щось віддавало — отже їхало, і між закладкою та зараз була не сама
-        // лише зарядка. Розділити нічим, тож закладку викидаємо.
-        if (reading.dischargedKwh - started.dischargedKwh > MAX_DISCHARGE_DURING_CHARGE_KWH) {
+        // Авто віддало більше, ніж могло з'їсти, просто стоячи на зарядці — отже
+        // воно ще й їхало. Розділити нічим, тож закладку викидаємо.
+        val hours = (reading.atMs - started.atMs).coerceAtLeast(0L) / MS_PER_HOUR
+        val allowance = maxOf(MIN_DISCHARGE_ALLOWANCE_KWH, PARASITIC_DRAW_KW * hours)
+        if (reading.dischargedKwh - started.dischargedKwh > allowance) {
             chargeStart = null
             return ChargeWatch.Anchored
         }
@@ -244,6 +252,7 @@ class EnergyBlock(
             pendingSocPercent = pending?.socPercent ?: -1.0,
             pendingChargedKwh = pending?.chargedKwh ?: 0.0,
             pendingDischargedKwh = pending?.dischargedKwh ?: 0.0,
+            pendingAtMs = pending?.atMs ?: 0L,
         )
     }
 
@@ -251,6 +260,8 @@ class EnergyBlock(
         val socPercent: Double,
         val chargedKwh: Double,
         val dischargedKwh: Double,
+        /** Час закладки: за ним рахується поблажливість до стоянкового відбору. */
+        val atMs: Long,
     )
 
     private fun readingOf(state: State): Reading? {
@@ -314,14 +325,23 @@ class EnergyBlock(
          */
         const val MAX_GAP_MS = 10 * 60 * 1000L
 
+        private const val MS_PER_HOUR = 3_600_000.0
+
         /** Шкала подеколи здригається на десяті — це ще не зарядка. */
         const val SOC_RISE_TOLERANCE = 0.2
 
         /**
-         * Скільки дозволено вирости лічильнику ВІДДАНОЇ енергії між закладкою й
-         * кінцем зарядки. Практично нуль: авто на зарядці нічого не віддає, а
-         * десята частка — крок самого лічильника.
+         * Скільки авто їсть із ТЯГОВОЇ батареї, просто стоячи на зарядці, кВт.
+         *
+         * Поріг тут пропорційний часу, а не абсолютний, і це принципово: авто на
+         * зарядці живить свою ж електроніку від тягового пакета, тож лічильник
+         * ВІДДАНОЇ енергії росте й на стоянці. За сорок хвилин це виходило
+         * 0.3 кВт·год, за ніч набіжить кілька — абсолютний поріг відкидав би
+         * саме ті зарядки, заради яких усе це й робиться.
          */
-        const val MAX_DISCHARGE_DURING_CHARGE_KWH = 0.3
+        const val PARASITIC_DRAW_KW = 0.8
+
+        /** Мінімальна поблажливість: на коротких паузах працює крок лічильника. */
+        const val MIN_DISCHARGE_ALLOWANCE_KWH = 0.3
     }
 }

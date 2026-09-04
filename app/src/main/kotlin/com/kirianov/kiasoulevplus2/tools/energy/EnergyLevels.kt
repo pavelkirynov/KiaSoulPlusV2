@@ -346,6 +346,7 @@ data class LevelsSnapshot(
     val pendingSocPercent: Double = -1.0,
     val pendingChargedKwh: Double = 0.0,
     val pendingDischargedKwh: Double = 0.0,
+    val pendingAtMs: Long = 0L,
 ) {
     // equals/hashCode для масивів data class не робить сам, а тести їх порівнюють.
     override fun equals(other: Any?): Boolean {
@@ -357,6 +358,7 @@ data class LevelsSnapshot(
             pendingSocPercent == other.pendingSocPercent &&
             pendingChargedKwh == other.pendingChargedKwh &&
             pendingDischargedKwh == other.pendingDischargedKwh &&
+            pendingAtMs == other.pendingAtMs &&
             sumKwh.contentEquals(other.sumKwh) &&
             sumPercent.contentEquals(other.sumPercent)
     }

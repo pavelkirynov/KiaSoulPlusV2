@@ -84,11 +84,24 @@ object ChargeTracker {
     const val MIN_MISSED_SOC_RISE = 2.0
 
     /**
-     * Скільки дозволено вирости лічильнику ВІДДАНОЇ енергії за паузу, щоб пауза
-     * все ще вважалася зарядкою. Практично нуль: під час зарядки авто нічого не
-     * віддає, а десята частка — це крок самого лічильника.
+     * Скільки авто їсть із ТЯГОВОЇ батареї, просто стоячи на зарядці, кВт.
+     *
+     * Це не нуль, і саме на цьому вимір зривався. Поки авто на зарядці, воно
+     * живить свою ж електроніку від тягового пакета: борткомп'ютер, BMS,
+     * охолодження зарядного. У журналі підзарядка на 40 хвилин дала 0.3 кВт·год
+     * по лічильнику ВІДДАНОЇ енергії — і абсолютний поріг у 0.2 її відкинув.
+     *
+     * Тому поріг не абсолютний, а на годину. За сорок хвилин це пів
+     * кіловат-години, за ніч — кілька, і обидва випадки правильні. Число близьке
+     * до постійного відбору, який застосунок вивчив сам (близько 0.63 кВт).
      */
-    const val MAX_MISSED_DISCHARGE_KWH = 0.2
+    const val PARASITIC_DRAW_KW = 0.8
+
+    /**
+     * Мінімальна поблажливість, кВт·год: на коротких паузах працює крок самого
+     * лічильника, а не споживання.
+     */
+    const val MIN_DISCHARGE_ALLOWANCE_KWH = 0.3
 
     /**
      * @param counterKwh пожиттєвий лічильник прийнятої енергії, кВт·год.
@@ -125,8 +138,16 @@ object ChargeTracker {
         val step = counterKwh - rolled.counterBaselineKwh
 
         if (!isCharging) {
-            val missed = missedCharge(rolled, step, dischargedKwh, socPercent, nowMs)
-            return notCharging(rolled, counterKwh, dischargedKwh, socPercent, nowMs, missed ?: 0.0, dayKey)
+            val verdict = missedCharge(rolled, step, dischargedKwh, socPercent, nowMs)
+            return notCharging(
+                log = if (verdict.reason.isEmpty()) rolled else rolled.copy(lastDecision = verdict.reason),
+                counterKwh = counterKwh,
+                dischargedKwh = dischargedKwh,
+                socPercent = socPercent,
+                nowMs = nowMs,
+                missedKwh = verdict.kwh ?: 0.0,
+                dayKey = dayKey,
+            )
         }
 
         // Щойно почалася зарядка: беремо новий базовий показ і НЕ нараховуємо цю
@@ -173,7 +194,8 @@ object ChargeTracker {
      * рахувати її треба тим охочіше, а не менш охоче.
      *
      * Умови лишилися ті самі, і всі — з одного кадру: була пауза, за неї набігло
-     * помітно, заряд ВИРІС, а лічильник відданої стояв.
+     * помітно, заряд ВИРІС, а лічильник відданої не виріс більше, ніж авто могло
+     * з'їсти, просто стоячи на зарядці.
      */
     private fun missedCharge(
         log: ChargeLog,
@@ -181,13 +203,45 @@ object ChargeTracker {
         dischargedKwh: Double,
         socPercent: Double,
         nowMs: Long,
-    ): Double? {
-        if (!gapPassed(log, nowMs)) return null
-        if (step < MIN_MISSED_KWH || step > MAX_PLAUSIBLE_STEP_KWH) return null
-        if (socPercent - log.socBaselinePercent < MIN_MISSED_SOC_RISE) return null
-        if (dischargedKwh - log.dischargedBaselineKwh > MAX_MISSED_DISCHARGE_KWH) return null
-        return step
+    ): Verdict {
+        // Ні паузи, ні приросту — це звичайний хід опитування, а не рішення.
+        // Писати про нього причину немає сенсу: вона б затерла справжню.
+        if (!gapPassed(log, nowMs) || step < MIN_MISSED_KWH) return Verdict(null, "")
+
+        if (step > MAX_PLAUSIBLE_STEP_KWH) {
+            return Verdict(null, "приріст ${round(step)} кВт·год неправдоподібний")
+        }
+
+        val rise = socPercent - log.socBaselinePercent
+        if (rise < MIN_MISSED_SOC_RISE) {
+            return Verdict(null, "заряд не піднявся: ${round(rise)} %")
+        }
+
+        val out = dischargedKwh - log.dischargedBaselineKwh
+        val allowance = allowedDischarge(log, nowMs)
+        if (out > allowance) {
+            return Verdict(null, "віддано ${round(out)} при дозволених ${round(allowance)} кВт·год")
+        }
+
+        return Verdict(step, "зараховано ${round(step)} кВт·год за паузу")
     }
+
+    /** Рішення про паузу: скільки зарахувати і чому саме так. */
+    private data class Verdict(val kwh: Double?, val reason: String)
+
+    private fun round(value: Double): String = (kotlin.math.round(value * 10.0) / 10.0).toString()
+
+    /**
+     * Скільки лічильник відданої енергії міг чесно вирости за паузу, поки авто
+     * стояло на зарядці. Пропорційно часу: за сорок хвилин це пів кіловат-години,
+     * за ніч — кілька.
+     */
+    private fun allowedDischarge(log: ChargeLog, nowMs: Long): Double {
+        val hours = (nowMs - log.lastSeenAtMs).coerceAtLeast(0L) / MS_PER_HOUR
+        return maxOf(MIN_DISCHARGE_ALLOWANCE_KWH, PARASITIC_DRAW_KW * hours)
+    }
+
+    private const val MS_PER_HOUR = 3_600_000.0
 
     private fun gapPassed(log: ChargeLog, nowMs: Long): Boolean =
         log.lastSeenAtMs > 0L && nowMs - log.lastSeenAtMs >= MISSED_GAP_MS
