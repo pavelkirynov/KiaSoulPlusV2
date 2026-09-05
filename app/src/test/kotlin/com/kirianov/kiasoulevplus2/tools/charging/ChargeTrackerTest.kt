@@ -175,15 +175,38 @@ class ChargeTrackerTest {
         assertEquals(40.0, log.sessionKwh, 0.001)
     }
 
-    /** Лічильник не може зменшитись: це інша батарея або хибне читання. */
+    /**
+     * ЛІЧИЛЬНИК, ЩО ВПАВ, — ЗІПСОВАНЕ ЧИТАННЯ, А НЕ НОВА ТОЧКА ВІДЛІКУ.
+     *
+     * Цей тест раніше стверджував протилежне: падіння вважалося приводом узяти нову
+     * точку відліку. Саме це й зламалося на живій машині. На шині на три хвилини
+     * з'явився ЗВ'ЯЗНИЙ набір чужих чисел — 5905 кВт·год замість 27131, і всі
+     * лічильники узгоджені між собою так, ніби це інше авто. Застосунок узяв їх за
+     * базовий показ і втратив відкриту сесію зарядки.
+     *
+     * Пожиттєвий лічильник не вміє зменшуватись — у цьому вся його суть. Отже
+     * читання нижче базового показу треба відкидати, а базовий показ берегти.
+     */
     @Test
-    fun `a counter going backwards is re-baselined, not counted`() {
-        var log = observe(ChargeLog(), counter = 26_937.9, charging = false)
-        log = observe(log, counter = 26_937.9, charging = true, nowMs = 30_000)
-        log = observe(log, counter = 12_000.0, nowMs = 60_000)
+    fun `a counter that fell is refused, and the baseline is kept`() {
+        var log = observe(ChargeLog(), counter = 27_131.9, charging = false)
+        log = observe(log, counter = 27_131.9, charging = true, nowMs = 30_000)
+        log = observe(log, counter = 5_905.0, nowMs = 60_000)
 
-        assertEquals(12_000.0, log.counterBaselineKwh, 0.001)
-        assertEquals(0.0, log.todayKwh, 0.001)
+        assertEquals("базовий показ мав вціліти", 27_131.9, log.counterBaselineKwh, 0.001)
+        assertTrue("сесія мала лишитися відкритою", log.charging)
+        assertTrue("а причина — потрапити в журнал", log.lastDecision.contains("упав"))
+    }
+
+    /** І коли лічильник повернувся до тями, облік іде далі, ніби нічого й не було. */
+    @Test
+    fun `after a bad reading the count carries on`() {
+        var log = observe(ChargeLog(), counter = 27_131.9, charging = false)
+        log = observe(log, counter = 27_131.9, charging = true, nowMs = 30_000)
+        log = observe(log, counter = 5_905.0, nowMs = 60_000)
+        log = observe(log, counter = 27_133.9, charging = true, nowMs = 90_000)
+
+        assertEquals("два кіловат-години після збою", 2.0, log.sessionKwh, 0.001)
     }
 
     /**

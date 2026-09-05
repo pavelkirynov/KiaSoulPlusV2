@@ -18,16 +18,37 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 
-class DecoderBlock(private val cellDecoder: CellDecoder = CellDecoder()) {
+class DecoderBlock(
+    private val cellDecoder: CellDecoder = CellDecoder(),
+    private val watermark: CounterWatermark = CounterWatermark(),
+    private val nowMs: () -> Long = System::currentTimeMillis,
+) {
 
     fun start(scope: CoroutineScope) {
+        // Інше авто — інші лічильники, і падіння там законне.
+        GeneralData.state
+            .map { it.garage.activeVin }
+            .distinctUntilChanged()
+            .onEach { watermark.forgetCar() }
+            .launchIn(scope)
+
         GeneralData.state
             .map { it.can.batteryFrames }
             .filterNotNull()
             .distinctUntilChanged()
             .onEach { frames ->
                 val bytes = FrameParser.parse(frames.responses.firstOrNull().orEmpty())
-                GeneralData.updateBms(BmsResponseDecoder.decode(bytes))
+                val bms = BmsResponseDecoder.decode(bytes)
+
+                // Сторож пожиттєвих лічильників стоїть саме тут, на вході: далі ці
+                // числа розходяться в криву ємності, облік зарядок і модель
+                // прогнозу, і ловити зіпсоване читання в кожному з них окремо
+                // означало б тричі писати той самий захист і двічі його забути.
+                if (!watermark.accept(bms, nowMs())) {
+                    GeneralData.updateDebugInfo(watermark.lastRejection)
+                    return@onEach
+                }
+                GeneralData.updateBms(bms)
             }
             .launchIn(scope)
 
