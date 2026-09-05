@@ -15,6 +15,9 @@ data class State(
     /** Розібрані показники: сюди пише блок декодерів. */
     val bms: BmsData = BmsData(),
     val cells: CellData = CellData(),
+
+    /** Тест комірок під навантаженням: веде блок tools/cells. */
+    val cellTest: CellTestState = CellTestState(),
     val vehicle: VehicleData = VehicleData(),
 
     /** Що відомо про зарядки: рахується за пожиттєвим лічильником BMS. */

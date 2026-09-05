@@ -77,6 +77,42 @@ object GeneralData {
 
     fun updateCells(cells: CellData) = _state.update { it.copy(cells = cells) }
 
+    // --- Тест комірок під навантаженням ------------------------------------------
+
+    /** Сирий прохід: пише блок Bluetooth, читає блок декодерів. */
+    fun publishCellSweep(
+        beforeResponse: String,
+        cellCommands: List<String>,
+        cellResponses: List<String>,
+        afterResponse: String,
+        atMs: Long,
+    ) = _state.update {
+        it.copy(
+            can = it.can.copy(
+                cellSweep = CellSweepFrames(
+                    beforeResponse = beforeResponse,
+                    cellCommands = cellCommands,
+                    cellResponses = cellResponses,
+                    afterResponse = afterResponse,
+                    atMs = atMs,
+                    sequence = ++sequence,
+                ),
+            ),
+        )
+    }
+
+    /** Розібраний прохід: пише блок декодерів, накопичує блок тесту. */
+    fun publishDecodedSweep(sweep: CellSweep) =
+        _state.update { it.copy(cellTest = it.cellTest.copy(lastSweep = sweep)) }
+
+    fun updateCellTest(transform: (CellTestState) -> CellTestState) =
+        _state.update { it.copy(cellTest = transform(it.cellTest)) }
+
+    fun requestCellTest(request: CellTestRequest) =
+        updateCellTest { it.copy(request = request) }
+
+    fun clearCellTestRequest() = updateCellTest { it.copy(request = CellTestRequest.None) }
+
     fun updateVehicle(vehicle: VehicleData) = _state.update { it.copy(vehicle = vehicle) }
 
     /** Облік зарядок за пожиттєвим лічильником: пише блок tools/charging. */

@@ -8,6 +8,7 @@
 package com.kirianov.kiasoulevplus2.Interface.screens.cells
 
 import androidx.lifecycle.ViewModel
+import com.kirianov.kiasoulevplus2.Data.CellTestRequest
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.State
 import com.kirianov.kiasoulevplus2.tools.format.parseDecimalInput
@@ -31,6 +32,27 @@ class CellsViewModel : ViewModel() {
         GeneralData.updateInputBms { it.copy(scanCellsRequested = true) }
         GeneralData.updateDebugInfo("Запит зчитування комірок...")
     }
+
+    /**
+     * Почати або спинити тест під навантаженням.
+     *
+     * Без зв'язку тест не має сенсу взагалі: проходи брати нізвідки. Мовчазна
+     * кнопка гірша за кнопку, яка каже, чому вона нічого не зробила.
+     */
+    fun onLoadTestToggle() {
+        val state = GeneralData.state.value
+        if (state.cellTest.running) {
+            GeneralData.requestCellTest(CellTestRequest.Stop)
+            return
+        }
+        if (!state.isConnected) {
+            GeneralData.updateDebugInfo("Немає з'єднання з адаптером — спершу підключіться")
+            return
+        }
+        GeneralData.requestCellTest(CellTestRequest.Start)
+    }
+
+    fun onLoadTestClear() = GeneralData.requestCellTest(CellTestRequest.Clear)
 
     /** Зберігає введену вручну напругу; сам запис на диск робить блок сховища. */
     fun onManualVoltageEntered(index: Int, text: String) {

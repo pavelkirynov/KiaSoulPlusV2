@@ -261,6 +261,15 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
             readVin()
         }
 
+        // Тест комірок їсть шину цілком: проходи мають іти якнайчастіше, тож на
+        // час тесту звичайне опитування спиняється. Вікна монітора теж: пробіг і
+        // швидкість почекають хвилину, а от прохід, розтягнутий вікном монітора,
+        // порівнювати вже нема з чим.
+        if (GeneralData.state.value.cellTest.running) {
+            runCellSweep(header, inputBms.cellCommands.ifEmpty { BmsCommands.REQUEST_CELL_VOLTAGES })
+            return
+        }
+
         if (!inputBms.scanCellsRequested) {
             val command = BmsCommands.REQUEST_BATTERY_MAIN
             val response = canBridge.sendCANCommand(header, command)
@@ -280,6 +289,34 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
             // залишалася б заблокованою назавжди після першої ж помилки.
             GeneralData.updateInputBms { it.copy(scanCellsRequested = false) }
         }
+    }
+
+    /**
+     * Один прохід тесту комірок: струм — напруги — струм.
+     *
+     * Струм читається двічі навмисно. Прохід по 96 комірках це три запити й до
+     * секунди часу; під розгоном струм за цю секунду встигає змінитися вдвічі, і
+     * одне значення на початку означало б, що останні тридцять комірок ми приписали
+     * чужій нагрузці. Розбіжність між двома замірами й каже потім, чи можна цьому
+     * проходу вірити.
+     *
+     * Помилка тут не рве з'єднання: тест — справа добровільна, і зірваний прохід
+     * означає лише те, що його не буде в підсумку.
+     */
+    private suspend fun runCellSweep(header: String, commands: List<String>) {
+        val before = canBridge.sendCANCommand(header, BmsCommands.REQUEST_BATTERY_MAIN)
+        val cells = commands.map { canBridge.sendCANCommand(header, it) }
+        val after = canBridge.sendCANCommand(header, BmsCommands.REQUEST_BATTERY_MAIN)
+
+        // Показники теж оновлюємо: під час тесту екран не має завмирати.
+        GeneralData.publishBatteryFrames(listOf(BmsCommands.REQUEST_BATTERY_MAIN), listOf(after))
+        GeneralData.publishCellSweep(
+            beforeResponse = before,
+            cellCommands = commands,
+            cellResponses = cells,
+            afterResponse = after,
+            atMs = System.currentTimeMillis(),
+        )
     }
 
     /**

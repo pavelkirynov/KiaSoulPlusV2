@@ -14,6 +14,7 @@ import com.kirianov.kiasoulevplus2.services.bluetooth.ElmBluetoothManager
 import com.kirianov.kiasoulevplus2.services.foreground.ForegroundBlock
 import com.kirianov.kiasoulevplus2.tools.autoconnect.AutoConnectBlock
 import com.kirianov.kiasoulevplus2.tools.battery.DecoderBlock
+import com.kirianov.kiasoulevplus2.tools.cells.CellTestBlock
 import com.kirianov.kiasoulevplus2.tools.charging.ChargingBlock
 import com.kirianov.kiasoulevplus2.tools.charging.FileChargeStore
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
@@ -46,6 +47,8 @@ class AppBlocks(context: Context) {
     private val autoConnect = AutoConnectBlock()
     private val charging = ChargingBlock(FileChargeStore(context.applicationContext.filesDir))
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
+    // Тест комірок під навантаженням: накопичує проходи й рахує підсумок.
+    private val cellTest = CellTestBlock()
     // Каталог, а не Context: так сховище моделей лишається чистим Kotlin і
     // перевіряється тестами без емулятора, як і решта логіки проєкту.
     private val prediction = MlBlock(FileMlStore(context.applicationContext.filesDir))
@@ -69,6 +72,7 @@ class AppBlocks(context: Context) {
         garage.start(scope)
         autoConnect.start(scope)
         storage.start(scope)
+        cellTest.start(scope)
         prediction.start(scope)
         energy.start(scope)
         foreground.start(scope)

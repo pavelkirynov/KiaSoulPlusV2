@@ -50,6 +50,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kirianov.kiasoulevplus2.Data.CellData
+import com.kirianov.kiasoulevplus2.Data.CellHealth
+import com.kirianov.kiasoulevplus2.Data.CellTestState
 import com.kirianov.kiasoulevplus2.Data.ManualCells
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
@@ -102,11 +104,19 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
 
         Button(
             onClick = { cellsViewModel.onRequestReadCells() },
-            enabled = !isLoading,
+            enabled = !isLoading && !appState.cellTest.running,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(if (isLoading) "Зчитую..." else "Зчитати комірки з авто")
         }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        LoadTestCard(
+            test = appState.cellTest,
+            onToggle = cellsViewModel::onLoadTestToggle,
+            onClear = cellsViewModel::onLoadTestClear,
+        )
 
         Spacer(modifier = Modifier.height(6.dp))
 
@@ -137,7 +147,7 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
         Spacer(modifier = Modifier.height(6.dp))
 
         when (viewMode) {
-            CellsViewMode.GRID -> CompactGridView(cellsViewModel, cellData, manualCells)
+            CellsViewMode.GRID -> CompactGridView(cellsViewModel, cellData, manualCells, appState.cellTest)
             CellsViewMode.BLOCKS -> BlocksView(cellsViewModel, cellData, manualCells)
         }
     }
@@ -194,6 +204,7 @@ private fun CompactCellCell(
     cellData: CellData,
     manualCells: ManualCells,
     modifier: Modifier,
+    loadColor: Color? = null,
 ) {
     val canVoltage = cellData.cellVoltages.getOrElse(index) { 0.0 }
     val activeVoltage = if (canVoltage > 0.0) canVoltage else manualCells.voltageAt(index)
@@ -203,7 +214,13 @@ private fun CompactCellCell(
     }
 
     Box(
-        modifier = modifier.border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(3.dp)),
+        modifier = modifier
+            // Заливка від тесту під навантаженням, якщо він щось знайшов. Рамка
+            // лишається на місці: колір тут доповнює число, а не замінює його.
+            .let { base ->
+                if (loadColor == null) base else base.background(loadColor, RoundedCornerShape(3.dp))
+            }
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(3.dp)),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -235,6 +252,7 @@ private fun CompactGridView(
     cellsViewModel: CellsViewModel,
     cellData: CellData,
     manualCells: ManualCells,
+    test: CellTestState,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(GRID_COLUMNS),
@@ -245,7 +263,14 @@ private fun CompactGridView(
             .height(420.dp),
     ) {
         items(CellData.TOTAL_CELLS) { index ->
-            CompactCellCell(index, cellsViewModel, cellData, manualCells, Modifier.size(34.dp))
+            CompactCellCell(
+                index = index,
+                cellsViewModel = cellsViewModel,
+                cellData = cellData,
+                manualCells = manualCells,
+                modifier = Modifier.size(34.dp),
+                loadColor = loadColorOf(index, test),
+            )
         }
     }
 }
@@ -290,3 +315,106 @@ private fun BlocksView(
         }
     }
 }
+
+
+/**
+ * ТЕСТ ПІД НАВАНТАЖЕННЯМ.
+ *
+ * Слабку комірку в спокої не видно: напруга в неї така сама, як у сусідів. Вона
+ * проявляється під струмом — власний опір більший, тож просідає вона глибше за
+ * решту. Тест і потрібен, щоб цю різницю виміряти, а не вгадати.
+ *
+ * ЯК КОРИСТУВАТИСЯ: натиснути «Почати», проїхати кілька хвилин ЗІ ЗМІННИМ
+ * навантаженням — розгони й гальмування, а не рівний хід, — і натиснути «Спинити».
+ * Рівний хід або стоянка дадуть проходи, з яких опір не виводиться, і тест про це
+ * прямо скаже.
+ *
+ * ЧОМУ ТУТ ПОКАЗАНО РОЗМАХ СТРУМУ. Це єдине число, за яким видно, чи тест узагалі
+ * набирає щось корисне. Дивитися на нього треба ПІД ЧАС тесту: тоді ще можна
+ * розігнатися, а після — уже ні.
+ */
+@Composable
+private fun LoadTestCard(
+    test: CellTestState,
+    onToggle: () -> Unit,
+    onClear: () -> Unit,
+) {
+    val result = test.result
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(text = "Тест під навантаженням", fontSize = 16.sp)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onToggle, modifier = Modifier.weight(1f)) {
+                Text(if (test.running) "Спинити тест" else "Почати тест")
+            }
+            if (test.hasSweeps && !test.running) {
+                Button(onClick = onClear, modifier = Modifier.weight(1f)) {
+                    Text("Очистити")
+                }
+            }
+        }
+
+        if (!test.hasSweeps && !test.running) {
+            Text(
+                text = "Натисніть «Почати» і проїдьте кілька хвилин зі змінним " +
+                    "навантаженням — розгони й гальмування. Рівний хід чи стоянка " +
+                    "нічого не покажуть: слабка комірка видно лише під струмом.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            return@Column
+        }
+
+        Text(
+            text = "Проходів ${result.sweeps}, придатних ${result.steadySweeps}. " +
+                "Розмах струму ${formatDecimal(result.currentSpreadA, 0)} А, " +
+                "середня потужність ${formatDecimal(result.averagePowerKw, 1)} кВт.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        if (result.note.isNotEmpty()) {
+            Text(
+                text = result.note,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        result.weakest?.let { weak ->
+            Text(
+                text = "Найслабша — комірка ${weak.index + 1}: " +
+                    "+${formatDecimal(weak.excessMilliOhm ?: 0.0, 2)} мОм до середньої, " +
+                    "мінімум ${formatDecimal(weak.minVolts, 3)} В.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        if (result.resistanceKnown) {
+            Text(
+                text = "Комірки нижче пофарбовані за надлишковим опором: жовті — " +
+                    "слабші за середню, червоні — помітно слабші.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+/**
+ * Колір комірки за результатом тесту, або null, коли фарбувати нема за чим.
+ *
+ * Фарбуємо за ОПОРОМ, а не за вольтами. У спокої напруга слабкої комірки нормальна,
+ * і розфарбувати за нею означало б показати різнобій там, де його немає, і не
+ * показати там, де він є.
+ */
+private fun loadColorOf(index: Int, test: CellTestState): Color? =
+    when (test.result.cells.getOrNull(index)?.health) {
+        CellHealth.Critical -> Color(0xFFFF6347)
+        CellHealth.Weak -> Color(0xFFFFC43D)
+        else -> null
+    }

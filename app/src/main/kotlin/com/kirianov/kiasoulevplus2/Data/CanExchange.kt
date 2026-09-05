@@ -12,6 +12,26 @@ data class CanExchange(
 
     /** Сирі рядки, зняті за одне вікно режиму монітора. */
     val monitor: MonitorCapture? = null,
+
+    /** Один прохід тесту комірок: напруги в обрамленні двох замірів струму. */
+    val cellSweep: CellSweepFrames? = null,
+)
+
+/**
+ * Сирий прохід тесту комірок.
+ *
+ * Струм читається ДВІЧІ — до напруг і після. Прохід по 96 комірках це три запити й
+ * до секунди часу; під розгоном струм за цю секунду встигає змінитися вдвічі, і
+ * одне значення на початку означало б, що останні тридцять комірок ми приписали
+ * чужій нагрузці.
+ */
+data class CellSweepFrames(
+    val beforeResponse: String,
+    val cellCommands: List<String>,
+    val cellResponses: List<String>,
+    val afterResponse: String,
+    val atMs: Long,
+    val sequence: Long,
 )
 
 /**

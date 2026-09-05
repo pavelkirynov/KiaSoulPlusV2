@@ -34,6 +34,7 @@ class ArchitectureTest {
         "tools.json",
         "tools.journal",
         "tools.energy",
+        "tools.cells",
         "tools.garage",
         "tools.paths",
     )

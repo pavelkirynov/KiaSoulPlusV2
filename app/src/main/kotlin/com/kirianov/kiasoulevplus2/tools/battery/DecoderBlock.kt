@@ -8,6 +8,7 @@
 
 package com.kirianov.kiasoulevplus2.tools.battery
 
+import com.kirianov.kiasoulevplus2.Data.CellSweep
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +28,34 @@ class DecoderBlock(private val cellDecoder: CellDecoder = CellDecoder()) {
             .onEach { frames ->
                 val bytes = FrameParser.parse(frames.responses.firstOrNull().orEmpty())
                 GeneralData.updateBms(BmsResponseDecoder.decode(bytes))
+            }
+            .launchIn(scope)
+
+        // Прохід тесту комірок: напруги в обрамленні двох замірів струму. Розбирає
+        // його той самий декодер — просто збирає з трьох відповідей одну картину.
+        GeneralData.state
+            .map { it.can.cellSweep }
+            .filterNotNull()
+            .distinctUntilChanged()
+            .onEach { frames ->
+                val before = BmsResponseDecoder.decode(FrameParser.parse(frames.beforeResponse))
+                val after = BmsResponseDecoder.decode(FrameParser.parse(frames.afterResponse))
+                val cells = cellDecoder.decodeResponses(frames.cellCommands, frames.cellResponses)
+                if (cells.cellVoltages.isEmpty()) return@onEach
+
+                GeneralData.publishDecodedSweep(
+                    CellSweep(
+                        voltages = cells.cellVoltages,
+                        currentBeforeA = before.batteryCurrent,
+                        currentAfterA = after.batteryCurrent,
+                        // Напруга пакета береться з ПЕРШОГО заміру: другий уже
+                        // після проходу, а нам потрібна та, при якій читалися
+                        // комірки. Різниця між ними — і є та невизначеність, яку
+                        // ловить розбіжність струмів.
+                        packVolts = before.batteryVoltage,
+                        atMs = frames.atMs,
+                    ),
+                )
             }
             .launchIn(scope)
 
