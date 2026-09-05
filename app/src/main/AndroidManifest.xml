@@ -1,33 +1,94 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.kirianov.kiasoulevplus2">
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!-- Легасі-дозволи потрібні лише до Android 11: на 12+ їх замінюють BLUETOOTH_CONNECT/SCAN. -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Сканування використовується тільки для пошуку OBD-адаптера, не для геолокації. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        tools:targetApi="s"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- Location потрібен лише на Android 11 і нижче, де без нього не працює Bluetooth. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+
+    <!--
+        Служба переднього плану: без неї Android заморожує, а потім вивантажує процес,
+        щойно застосунок згорнули, і опитування зупиняється посеред поїздки.
+        Тип connectedDevice — саме наш випадок: робота триває, поки під'єднаний
+        зовнішній пристрій.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+        Будильник процесу. Служби переднього плану замало: з вимкненим екраном
+        Android (а на деяких оболонках і поготів) присипляє потоки, і цикл
+        опитування зупиняється, лишаючись «підключеним». У журналі це виглядало
+        як 634 секунди без жодного зчитування при живому з'єднанні.
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Щоб можна було попросити систему не присипляти застосунок узагалі. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- З Android 13 без цього дозволу сповіщення служби просто не видно. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="true" />
 
     <application
+        android:name=".App"
         android:allowBackup="true"
-        android:icon="@drawable/ic_app_logo"
-        android:roundIcon="@drawable/ic_app_logo"
-        android:label="Kia EV Plus 2"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.NoTitleBar">
+        android:theme="@style/Theme.App">
 
-        <!-- Android Auto Service -->
+        <!--
+            Тримає процес живим, поки триває з'єднання з адаптером. Не експортована:
+            її піднімає й прибирає тільки сам застосунок.
+        -->
+        <service
+            android:name=".services.foreground.ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- Android Auto -->
         <service
             android:name=".services.AndroidAuto.CarAppService"
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
+                <!--
+                    Android Auto на телефоні показує сторонні template-застосунки лише в
+                    категоріях navigation / parking / charging. POI розрахована на
+                    Android Automotive OS і вимагає вищого minCarApiLevel, тому з нею
+                    хост цей сервіс просто не підхоплював. CHARGING підтримується з
+                    рівня 1 і відповідає змісту застосунка.
+                -->
+                <category android:name="androidx.car.app.category.CHARGING" />
+            </intent-filter>
+        </service>
 
-              <category android:name="androidx.car.app.category.NAVIGATION" /> 
-                
-                <!-- ДОДАНО: обов'язкова категорія для лаунчера Android Auto -->
-                <category android:name="android.intent.category.LAUNCHER" />
+        <!--
+            Медіа-браузер для Android Auto.
+
+            Template-сервіс вище хост показує лише для застосунків з Play Market або
+            коли в налаштуваннях Android Auto увімкнені «невідомі джерела». Медіа-браузер
+            такого обмеження не має: хост знаходить будь-який встановлений сервіс із цим
+            intent-filter. Тому показники віддаються як «медіатека».
+        -->
+        <service
+            android:name=".services.AndroidAuto.CarMediaService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 
@@ -38,6 +99,42 @@
         <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
+
+        <!--
+            Будильник: телефон з'єднався з магнітолою — отже, ви сіли в авто.
+            exported обов'язково: інакше системний broadcast до приймача не дійде.
+        -->
+        <receiver
+            android:name=".WakeOnCarReceiver"
+            android:exported="true">
+            <intent-filter>
+                <!--
+                    Три дії замість однієї навмисно. ACL_CONNECTED — найзагальніша,
+                    але магнітола з'єднується профілями, і на частині прошивок до
+                    приймача доходить саме профільна подія, а не ACL. Дублювання тут
+                    нешкідливе: приймач однаково перевіряє адресу й піднімає службу,
+                    яка вже працює, — повторний startService нічого не ламає.
+                -->
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
+                <action android:name="android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            Віддає файл журналу назовні. Тека застосунку іншим застосункам
+            недоступна, тож без content:// кнопка «Поділитися» не відкрила б
+            нічого. Не експортований: доступ видається одноразово самим наміром.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <activity
             android:name=".MainActivity"
