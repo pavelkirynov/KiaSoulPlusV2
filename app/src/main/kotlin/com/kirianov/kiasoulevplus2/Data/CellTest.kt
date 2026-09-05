@@ -70,7 +70,28 @@ data class CellVerdict(
     /** Найглибше відхилення від середнього по пакету за один прохід. */
     val worstDeviationVolts: Double,
 
+    /** Висновок за надлишковим опором. Потребує розмаху струму за тест. */
     val health: CellHealth = CellHealth.Unknown,
+
+    /**
+     * Наскільки мінімум цієї комірки нижчий за мінімум СЕРЕДНЬОЇ комірки, В.
+     *
+     * Береться від медіани, а не від середнього: медіану кілька провалених комірок
+     * не тягнуть за собою, а середнє тягнуть — і тоді на тлі просілого середнього
+     * провалені виглядають нормальними.
+     */
+    val minBelowMedianVolts: Double = 0.0,
+
+    /**
+     * Висновок за мінімальною напругою — другий погляд на ті самі дані.
+     *
+     * Він простіший і зрозуміліший: «ось ця комірка просіла найнижче за весь тест».
+     * І він же грубіший: повний прохід по 96 комірках триває до секунди, тож
+     * мінімуми різних комірок узяті в різні миті розгону. Обидва висновки лежать
+     * поруч навмисно — щоб на реальних даних побачити, чи вони взагалі про одне й
+     * те саме, і лише тоді обирати.
+     */
+    val minHealth: CellHealth = CellHealth.Unknown,
 )
 
 /** Підсумок тесту. */
@@ -92,7 +113,31 @@ data class CellTestResult(
     /** Найгірша комірка за опором, якщо опір узагалі виведено. */
     val weakest: CellVerdict?
         get() = if (!resistanceKnown) null else cells.maxByOrNull { it.excessMilliOhm ?: 0.0 }
+
+    /** Найгірші за опором, від найгіршої. Порожньо — опір не виведено. */
+    val worstByResistance: List<CellVerdict>
+        get() = if (!resistanceKnown) {
+            emptyList()
+        } else {
+            cells.sortedByDescending { it.excessMilliOhm ?: 0.0 }
+        }
+
+    /**
+     * Найгірші за мінімальною напругою. Доступні завжди: мінімум не потребує ні
+     * розмаху струму, ні прямої — його видно з будь-якого тесту.
+     */
+    val worstByMinimum: List<CellVerdict>
+        get() = cells.filter { it.minVolts > 0.0 }.sortedByDescending { it.minBelowMedianVolts }
 }
+
+/**
+ * Яким із двох висновків фарбувати комірки.
+ *
+ * Два погляди на ті самі дані лежать поруч навмисно. Опір — точніший, але вимагає
+ * розгонів; мінімум — простіший і працює завжди, зате грубіший. Який із них
+ * корисніший на практиці, покажуть реальні тести, а не міркування.
+ */
+enum class CellColorMode { Resistance, Minimum }
 
 /** Що екран просить зробити з тестом комірок. */
 enum class CellTestRequest { None, Start, Stop, Clear }
@@ -106,6 +151,7 @@ enum class CellTestRequest { None, Start, Stop, Clear }
  */
 data class CellTestState(
     val request: CellTestRequest = CellTestRequest.None,
+    val colorMode: CellColorMode = CellColorMode.Resistance,
     val running: Boolean = false,
     val sweeps: List<CellSweep> = emptyList(),
 

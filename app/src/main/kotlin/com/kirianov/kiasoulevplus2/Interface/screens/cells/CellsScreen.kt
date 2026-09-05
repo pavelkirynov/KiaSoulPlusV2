@@ -50,7 +50,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kirianov.kiasoulevplus2.Data.CellData
+import com.kirianov.kiasoulevplus2.Data.CellColorMode
 import com.kirianov.kiasoulevplus2.Data.CellHealth
+import com.kirianov.kiasoulevplus2.Data.CellVerdict
 import com.kirianov.kiasoulevplus2.Data.CellTestState
 import com.kirianov.kiasoulevplus2.Data.ManualCells
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
@@ -116,6 +118,7 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
             test = appState.cellTest,
             onToggle = cellsViewModel::onLoadTestToggle,
             onClear = cellsViewModel::onLoadTestClear,
+            onMode = cellsViewModel::onColorModeChange,
         )
 
         Spacer(modifier = Modifier.height(6.dp))
@@ -338,6 +341,7 @@ private fun LoadTestCard(
     test: CellTestState,
     onToggle: () -> Unit,
     onClear: () -> Unit,
+    onMode: (CellColorMode) -> Unit,
 ) {
     val result = test.result
 
@@ -386,20 +390,39 @@ private fun LoadTestCard(
             )
         }
 
-        result.weakest?.let { weak ->
-            Text(
-                text = "Найслабша — комірка ${weak.index + 1}: " +
-                    "+${formatDecimal(weak.excessMilliOhm ?: 0.0, 2)} мОм до середньої, " +
-                    "мінімум ${formatDecimal(weak.minVolts, 3)} В.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
+        // ДВА ПОГЛЯДИ НА ОДНІ Й ТІ САМІ ДАНІ, поруч і навмисно.
+        //
+        // Опір точніший: він відповідає на питання «чим ця комірка відрізняється»,
+        // і струм у ньому скорочується. Мінімум простіший і зрозуміліший: «ось ця
+        // просіла найнижче», — і працює навіть тоді, коли розгонів не було. Зате
+        // мінімуми різних комірок узяті в різні миті проходу, тож він грубіший.
+        //
+        // Який корисніший на практиці — покажуть живі тести, а не міркування. Тому
+        // обидва списки видно одночасно: якщо вони називають ті самі комірки,
+        // достатньо простішого; якщо різні — цікаве саме те, чим вони різні.
+        Text(
+            text = "Найгірші за опором: " + worstLine(result.worstByResistance) { verdict ->
+                "+${formatDecimal(verdict.excessMilliOhm ?: 0.0, 2)} мОм"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = "Найгірші за мінімумом: " + worstLine(result.worstByMinimum) { verdict ->
+                "${formatDecimal(verdict.minVolts, 3)} В"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
 
-        if (result.resistanceKnown) {
-            Text(
-                text = "Комірки нижче пофарбовані за надлишковим опором: жовті — " +
-                    "слабші за середню, червоні — помітно слабші.",
-                style = MaterialTheme.typography.bodySmall,
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = test.colorMode == CellColorMode.Resistance,
+                onClick = { onMode(CellColorMode.Resistance) },
+                label = { Text("Фарбувати за опором") },
+            )
+            FilterChip(
+                selected = test.colorMode == CellColorMode.Minimum,
+                onClick = { onMode(CellColorMode.Minimum) },
+                label = { Text("за мінімумом") },
             )
         }
     }
@@ -412,9 +435,30 @@ private fun LoadTestCard(
  * і розфарбувати за нею означало б показати різнобій там, де його немає, і не
  * показати там, де він є.
  */
-private fun loadColorOf(index: Int, test: CellTestState): Color? =
-    when (test.result.cells.getOrNull(index)?.health) {
+private fun loadColorOf(index: Int, test: CellTestState): Color? {
+    val verdict = test.result.cells.getOrNull(index) ?: return null
+    val health = when (test.colorMode) {
+        CellColorMode.Resistance -> verdict.health
+        CellColorMode.Minimum -> verdict.minHealth
+    }
+    return when (health) {
         CellHealth.Critical -> Color(0xFFFF6347)
         CellHealth.Weak -> Color(0xFFFFC43D)
         else -> null
     }
+}
+
+/**
+ * Трійка найгірших одним рядком.
+ *
+ * Три, а не десять: список, у якому половина пакета, читається як «усе погано» і не
+ * допомагає нічому. А порожній список чесніше назвати словами, ніж лишити порожнє
+ * місце — воно виглядає як недомальований екран.
+ */
+private fun worstLine(cells: List<CellVerdict>, value: (CellVerdict) -> String): String {
+    val top = cells.take(WORST_SHOWN)
+    if (top.isEmpty()) return "поки нема з чого судити"
+    return top.joinToString(", ") { "№${it.index + 1} (${value(it)})" }
+}
+
+private const val WORST_SHOWN = 3

@@ -162,6 +162,57 @@ class CellLoadTest {
         assertTrue(result.cells.all { it.health == CellHealth.Unknown })
     }
 
+    /**
+     * ДРУГИЙ ПОГЛЯД: за мінімальною напругою. Він простіший і працює навіть тоді,
+     * коли струм не мінявся — мінімум це просто найнижче побачене число.
+     */
+    @Test
+    fun `the minimum voltage view works even when the current never varied`() {
+        val steady = (0 until 5).map { i ->
+            val voltages = (0 until cells).map { index ->
+                if (index == 7) 3.83 else 3.90
+            }
+            CellSweep(voltages, 2.0, 2.0, voltages.sum(), i * 1000L)
+        }
+
+        val result = CellLoad.summarize(steady)
+
+        assertFalse("про опір сказати нічого", result.resistanceKnown)
+        assertEquals("а про мінімум — можна", CellHealth.Critical, result.cells[7].minHealth)
+        assertEquals(7, result.worstByMinimum.first().index)
+        assertEquals(0.07, result.cells[7].minBelowMedianVolts, 1e-6)
+    }
+
+    /**
+     * Медіана, а не середнє: кілька провалених комірок тягнуть середнє за собою, і
+     * на тлі просілого середнього вони самі виглядають нормальними.
+     */
+    @Test
+    fun `a few collapsed cells do not hide behind a sagging average`() {
+        val bad = listOf(3, 9, 15, 21, 30, 41, 55, 60, 70, 80)
+        val sweeps = (0 until 5).map { i ->
+            val voltages = (0 until cells).map { index -> if (index in bad) 3.70 else 3.90 }
+            CellSweep(voltages, 2.0, 2.0, voltages.sum(), i * 1000L)
+        }
+
+        val result = CellLoad.summarize(sweeps)
+
+        bad.forEach { assertEquals(CellHealth.Critical, result.cells[it].minHealth) }
+        assertEquals(CellHealth.Normal, result.cells[0].minHealth)
+    }
+
+    /**
+     * Обидва погляди мають знаходити ту саму комірку, коли вона справді одна. Якщо
+     * колись розійдуться на живих даних — це й буде найцікавіше, що покаже тест.
+     */
+    @Test
+    fun `both views point at the same cell when there is only one`() {
+        val result = run(0.0, 30.0, 60.0, 90.0, 120.0, weakIndex = 42, extra = 4.0)
+
+        assertEquals(42, result.worstByResistance.first().index)
+        assertEquals(42, result.worstByMinimum.first().index)
+    }
+
     /** Порожній тест не має вигадувати результатів. */
     @Test
     fun `an empty test says so`() {

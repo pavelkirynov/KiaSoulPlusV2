@@ -113,6 +113,9 @@ object GeneralData {
 
     fun clearCellTestRequest() = updateCellTest { it.copy(request = CellTestRequest.None) }
 
+    /** Яким із двох висновків фарбувати комірки. Вибір людини, не блока. */
+    fun setCellColorMode(mode: CellColorMode) = updateCellTest { it.copy(colorMode = mode) }
+
     fun updateVehicle(vehicle: VehicleData) = _state.update { it.copy(vehicle = vehicle) }
 
     /** Облік зарядок за пожиттєвим лічильником: пише блок tools/charging. */

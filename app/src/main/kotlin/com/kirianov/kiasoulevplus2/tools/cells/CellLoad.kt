@@ -69,6 +69,20 @@ object CellLoad {
     const val CRITICAL_EXCESS_MILLI_OHM = 1.5
 
     /**
+     * Наскільки мінімум комірки може бути нижчим за медіанний, щоб це ще не
+     * турбувало, В.
+     *
+     * Числа тут ЗУМИСНО попередні, і це чесніше сказати прямо, ніж видати їх за
+     * істину. Двадцять мілівольт узято з того, що звичайний розбаланс справного
+     * пакета на око не виходить за десяток-другий; п'ятдесят — з того, що така
+     * різниця під навантаженням уже помітна очима в журналі. Уточнити їх можна
+     * лише на живих тестах цієї батареї, і саме заради цього обидва погляди —
+     * і за опором, і за мінімумом — лежать поруч.
+     */
+    const val WEAK_BELOW_MEDIAN_VOLTS = 0.020
+    const val CRITICAL_BELOW_MEDIAN_VOLTS = 0.050
+
+    /**
      * Підсумок тесту з набраних проходів.
      *
      * Напруги повертаються завжди, навіть коли опір вивести нема з чого: мінімум за
@@ -90,7 +104,7 @@ object CellLoad {
             return CellTestResult(sweeps.size, steady.size, spread, power, note = "Напруг не прочитано")
         }
 
-        val basic = (0 until cellCount).map { index -> basicVerdict(index, sweeps) }
+        val basic = withMinimumHealth((0 until cellCount).map { index -> basicVerdict(index, sweeps) })
 
         val enough = steady.size >= MIN_SWEEPS && spread >= MIN_CURRENT_SPREAD_A
         if (!enough) {
@@ -132,6 +146,35 @@ object CellLoad {
         excessMilliOhm >= CRITICAL_EXCESS_MILLI_OHM -> CellHealth.Critical
         excessMilliOhm >= WEAK_EXCESS_MILLI_OHM -> CellHealth.Weak
         else -> CellHealth.Normal
+    }
+
+    /**
+     * Другий погляд: наскільки мінімум комірки нижчий за мінімум середньої.
+     *
+     * Медіана, а не середнє. Кілька провалених комірок тягнуть середнє за собою, і
+     * на тлі просілого середнього вони самі виглядають нормальними — рівно та вада,
+     * через яку розбаланс «у середньому по пакету» нічого й не показує.
+     *
+     * Працює завжди, навіть коли струм не мінявся: мінімум — це просто найнижче
+     * побачене число, для нього ні прямої, ні розгонів не треба.
+     */
+    private fun withMinimumHealth(cells: List<CellVerdict>): List<CellVerdict> {
+        val minima = cells.map { it.minVolts }.filter { it > 0.0 }.sorted()
+        if (minima.isEmpty()) return cells
+        val median = minima[minima.size / 2]
+
+        return cells.map { verdict ->
+            if (verdict.minVolts <= 0.0) return@map verdict
+            val below = median - verdict.minVolts
+            verdict.copy(
+                minBelowMedianVolts = below,
+                minHealth = when {
+                    below >= CRITICAL_BELOW_MEDIAN_VOLTS -> CellHealth.Critical
+                    below >= WEAK_BELOW_MEDIAN_VOLTS -> CellHealth.Weak
+                    else -> CellHealth.Normal
+                },
+            )
+        }
     }
 
     private fun whyNoResistance(steady: Int, spread: Double): String = when {

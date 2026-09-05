@@ -8,6 +8,7 @@
 package com.kirianov.kiasoulevplus2.Interface.screens.cells
 
 import androidx.lifecycle.ViewModel
+import com.kirianov.kiasoulevplus2.Data.CellColorMode
 import com.kirianov.kiasoulevplus2.Data.CellTestRequest
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.State
@@ -53,6 +54,8 @@ class CellsViewModel : ViewModel() {
     }
 
     fun onLoadTestClear() = GeneralData.requestCellTest(CellTestRequest.Clear)
+
+    fun onColorModeChange(mode: CellColorMode) = GeneralData.setCellColorMode(mode)
 
     /** Зберігає введену вручну напругу; сам запис на диск робить блок сховища. */
     fun onManualVoltageEntered(index: Int, text: String) {
