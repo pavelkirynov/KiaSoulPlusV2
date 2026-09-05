@@ -59,9 +59,11 @@ object BroadcastDecoder {
                 ambientTempC = b[5] / 2.0 - 40.0,
             )
 
+            // Копія, а не новий стан: висновок зі струму лежить у тому самому
+            // місці й не має права зникати від кожного кадру бортового зарядного.
             CHARGING -> if (b.size < 8) data else data.copy(
-                charging = ChargingState(
-                    isCharging = b[3] != 0,
+                charging = data.charging.copy(
+                    reported = b[3] != 0,
                     chargerType = when (b[5]) {
                         0x0D -> ChargerType.Type1
                         0x0E -> ChargerType.J1772

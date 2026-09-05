@@ -57,12 +57,26 @@ class ChargingBlock(
                         isCharging = it.vehicle.charging.isCharging,
                         ignitionOn = ignitionOn(it.vehicle),
                         request = it.charge.request,
+                        carKnown = it.carAccounting,
                     )
                 }
                 .distinctUntilChanged()
                 .collect { reading ->
                     val now = nowMs()
                     val day = dayKey()
+
+                    // Хто на шині — ще не з'ясовано. Ці числа може давати сусідня
+                    // машина, і зарахувати їх активному авто означає збити його
+                    // відкриту сесію: рівно так одна нічна зарядка й почалася з
+                    // нуля. Мовчати про пропуск теж не можна — інакше цього не
+                    // видно ані в журналі, ані на екрані.
+                    if (!reading.carKnown) {
+                        if (log.lastDecision != UNKNOWN_CAR) {
+                            log = log.copy(lastDecision = UNKNOWN_CAR)
+                            GeneralData.updateChargeLog(log)
+                        }
+                        return@collect
+                    }
 
                     // Прохання з екрана виконуємо першим і окремо: у нього свої
                     // правила — жодних порогів, бо зарядку бачила людина.
@@ -110,6 +124,9 @@ class ChargingBlock(
         val isCharging: Boolean,
         val ignitionOn: Boolean,
         val request: ChargeRequest,
+
+        /** Чи підтверджено, що числа дає саме активне авто. */
+        val carKnown: Boolean,
     )
 
     /**
@@ -131,6 +148,10 @@ class ChargingBlock(
      */
     private fun ignitionOn(vehicle: VehicleData): Boolean =
         vehicle.hasSpeed && vehicle.speedKmh > 0.0
+
+    private companion object {
+        const val UNKNOWN_CAR = "авто ще не назвало VIN — читання не зараховані"
+    }
 }
 
 /**

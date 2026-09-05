@@ -182,7 +182,10 @@ class MlBlock(
     private fun collectSamples(scope: CoroutineScope) {
         GeneralData.state
             .onEach { state ->
-                if (!state.isConnected || !state.bms.hasData) {
+                // Невідоме авто прирівняне до обриву, і це не строгість заради
+                // строгості: відрізок, що перетнув пересадку в іншу машину, склеїв
+                // би два пробіги в один і навчив би модель нісенітниці.
+                if (!state.isConnected || !state.bms.hasData || !state.carLearning) {
                     // Розрив: далі знімки підуть із діркою в часі, а відрізок крізь
                     // дірку рахувати не можна.
                     val hadOpenSegment = segments.reset()

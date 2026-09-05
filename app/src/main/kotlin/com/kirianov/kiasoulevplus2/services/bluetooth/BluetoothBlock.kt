@@ -210,6 +210,9 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         // питання коштує один запит.
         vinKnown = false
         vinAttempts = 0
+        // Поки авто не назвалося, його числа нікуди не записуються: гараж не має
+        // права здогадуватись, що це та сама машина, з якою прощалися.
+        GeneralData.beginCarIdentification()
         pollingJob = scope.launch(Dispatchers.IO) {
             var consecutiveFailures = 0
 
@@ -274,6 +277,7 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
             lastVinRecheck = recheck
             vinKnown = false
             vinAttempts = 0
+            GeneralData.beginCarIdentification()
         }
 
         // Тест комірок їсть шину цілком: проходи мають іти якнайчастіше, тож на

@@ -69,6 +69,10 @@ object JournalFormat {
             add("amb=${num(vehicle.ambientTempC.takeIf { vehicle.hasAmbientTemp })}")
             add("batT=${num(bms.batteryTempC)}")
             state.can.monitor?.let { add("mon=${it.filterId}/${it.lines.size}") }
+            // ЧИЇ ЦЕ ЧИСЛА. Знак питання тут коштує рівно одного символа, а
+            // відповідає на найдорожче питання журналу: чи належать усі попередні
+            // поля тому авто, за яке застосунок рахує.
+            add("car=" + if (state.garage.identified) vinTail(state.garage.activeVin) else "?")
         }
         return "${stamp(atMs)} snap ${fields.joinToString(" ")}"
     }
@@ -120,6 +124,9 @@ object JournalFormat {
         // мовчала, запит провалився — і застосунок цілу поїздку рахував чуже за своє.
         if (before.garage.vinNote != after.garage.vinNote && after.garage.vinNote.isNotEmpty()) {
             out += "$at vin «${after.garage.vinNote}»"
+        }
+        if (before.garage.identified != after.garage.identified) {
+            out += "$at car? ${if (after.garage.identified) "підтверджено" else "не підтверджено"}"
         }
         if (before.garage.activeVin != after.garage.activeVin && after.garage.activeVin.isNotEmpty()) {
             out += "$at car ...${after.garage.activeVin.takeLast(6)} " +
@@ -193,6 +200,9 @@ object JournalFormat {
         }
 
     private fun flag(value: Boolean): String = if (value) "1" else "0"
+
+    /** Хвіст VIN: цього досить, щоб відрізнити авто, і замало, щоб його впізнати. */
+    private fun vinTail(vin: String): String = if (vin.isEmpty()) "—" else "...${vin.takeLast(6)}"
 
     /**
      * SimpleDateFormat не потокобезпечний, а рядки складаються з корутини блока.

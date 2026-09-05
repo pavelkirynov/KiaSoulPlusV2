@@ -404,7 +404,7 @@ class EnergyCurveTest {
         GeneralData.updateVehicle(
             VehicleData(
                 preciseSocPercent = socPercent,
-                charging = ChargingState(isCharging = charging),
+                charging = ChargingState(reported = charging),
             ),
         )
     }

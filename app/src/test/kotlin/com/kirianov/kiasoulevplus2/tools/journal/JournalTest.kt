@@ -123,7 +123,7 @@ class JournalTest {
     fun `the charging flag is written together with the counter`() {
         val before = State()
         val after = State(
-            vehicle = VehicleData(charging = ChargingState(isCharging = true)),
+            vehicle = VehicleData(charging = ChargingState(reported = true)),
             bms = BmsData(cumulativeEnergyChargedKwh = 27_036.3),
         )
 

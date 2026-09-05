@@ -156,11 +156,39 @@ object GeneralData {
 
     /** VIN, прочитаний із шини в цьому підключенні. Пише блок Bluetooth. */
     fun noteDetectedVin(vin: String) =
-        _state.update { it.copy(garage = it.garage.copy(detectedVin = vin, vinNote = "прочитано $vin")) }
+        _state.update {
+            it.copy(
+                garage = it.garage.copy(
+                    detectedVin = vin,
+                    vinNote = "прочитано $vin",
+                    vinConfirmed = true,
+                    vinPending = false,
+                ),
+            )
+        }
 
-    /** Чому VIN не прочитався. Мовчазна невдача тут коштувала переплутаних авто. */
+    /**
+     * Нове підключення: хто перед нами — питання відкрите, поки не відповіли.
+     *
+     * Викликається на початку кожного опитування шини. Доти дані показуються, але
+     * в теку авто не пишуться — див. [com.kirianov.kiasoulevplus2.Data.State.carAccounting].
+     */
+    fun beginCarIdentification() =
+        _state.update {
+            it.copy(
+                garage = it.garage.copy(vinConfirmed = false, vinPending = true, detectedVin = ""),
+            )
+        }
+
+    /**
+     * Чому VIN не прочитався. Мовчазна невдача тут коштувала переплутаних авто.
+     *
+     * Пишеться, коли спроби скінчилися, — тобто це не «ще питаємо», а «спитали й
+     * не почули». Питання закривається: далі облік іде під наглядом сторожа
+     * лічильників, бо чекати відповіді, якої не буде, означає не рахувати нічого.
+     */
     fun noteVinFailure(reason: String) =
-        _state.update { it.copy(garage = it.garage.copy(vinNote = reason)) }
+        _state.update { it.copy(garage = it.garage.copy(vinNote = reason, vinPending = false)) }
 
     /**
      * Перечитати VIN негайно: щось указує, що авто могло змінитися.

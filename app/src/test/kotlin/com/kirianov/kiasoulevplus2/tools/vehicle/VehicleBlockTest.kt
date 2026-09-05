@@ -1,5 +1,7 @@
 package com.kirianov.kiasoulevplus2.tools.vehicle
 
+import com.kirianov.kiasoulevplus2.Data.BmsData
+import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,10 +17,12 @@ class VehicleBlockTest {
 
     private val scope = CoroutineScope(Dispatchers.Unconfined)
 
+    private var now = 0L
+
     @Before
     fun setUp() {
         GeneralData.reset()
-        VehicleBlock().start(scope)
+        VehicleBlock(nowMs = { now }).start(scope)
     }
 
     @After
@@ -92,5 +96,96 @@ class VehicleBlockTest {
 
         assertFalse(GeneralData.state.value.vehicle.hasOdometer)
         assertEquals(10.0, GeneralData.state.value.vehicle.ambientTempC, 0.001)
+    }
+
+    // --- Зарядка, про яку кадр 581 не оголошує ------------------------------------
+
+    /**
+     * Швидка зарядка постійним струмом: бортове зарядне в ній не бере участі, тож
+     * кадр 581 мовчить усю сесію. Саме так одна зарядка на 8 кВт і пройшла повз
+     * облік. Лишається струм: довге рівне приймання на місці — це зарядка.
+     */
+    @Test
+    fun `a long steady current into a parked car reads as charging`() {
+        connect()
+        stopped()
+
+        readCurrent(22.0)
+        assertFalse("Три хвилини ще не минули", charging())
+
+        now = 200_000
+        readCurrent(22.0)
+
+        assertTrue(charging())
+    }
+
+    /** Рекуперація — це секунди, і вона не має права виглядати як зарядка. */
+    @Test
+    fun `a burst of regen is not charging`() {
+        connect()
+        moving(60.0)
+
+        readCurrent(60.0)
+        now = 200_000
+        readCurrent(60.0)
+
+        assertFalse(charging())
+    }
+
+    /** Рух знімає ознаку негайно: авто, що їде, точно не стоїть на зарядці. */
+    @Test
+    fun `moving off cancels the sensed charge`() {
+        connect()
+        stopped()
+        readCurrent(22.0)
+        now = 200_000
+        readCurrent(22.0)
+        assertTrue(charging())
+
+        moving(30.0)
+        now = 210_000
+        readCurrent(22.0)
+
+        assertFalse(charging())
+    }
+
+    /**
+     * Розрив зв'язку знімає ознаку заряджання цілком — і ту, що з кадру 581, теж.
+     *
+     * Інакше виходило так: телефон від'єднався на зарядці, авто поїхало, телефон
+     * під'єднався вже на ходу — і приріст лічильника, який за поїздку набігав від
+     * рекуперації, лягав у ту саму, досі відкриту сесію зарядки.
+     */
+    @Test
+    fun `losing the link clears the charging flag`() {
+        connect()
+        GeneralData.publishMonitorLines(listOf("581 00 00 00 01 00 0D 00 10"), "581")
+        assertTrue(charging())
+
+        GeneralData.updateConnection(ConnectionState.Disconnected, "обрив")
+
+        assertFalse(charging())
+    }
+
+    private fun connect() = GeneralData.updateConnection(ConnectionState.Connected, "тест")
+
+    private fun charging(): Boolean = GeneralData.state.value.vehicle.charging.isCharging
+
+    private fun stopped() = GeneralData.publishMonitorLines(listOf("4F0 00 00 00 00 00 B3 C1 1C"), "4F0")
+
+    private fun moving(kmh: Double) {
+        val raw = (kmh * 2).toInt()
+        GeneralData.publishMonitorLines(
+            listOf("4F0 00 %02X 00 00 00 B3 C1 1C".format(raw and 0xFF)),
+            "4F0",
+        )
+    }
+
+    private var sequence = 0L
+
+    private fun readCurrent(amps: Double) {
+        // Струм у домовленості застосунку: додатний — у батарею.
+        GeneralData.publishBatteryFrames(listOf("2101"), listOf("resp${sequence++}"))
+        GeneralData.updateBms(BmsData(displaySoc = 50.0, batteryCurrent = amps))
     }
 }

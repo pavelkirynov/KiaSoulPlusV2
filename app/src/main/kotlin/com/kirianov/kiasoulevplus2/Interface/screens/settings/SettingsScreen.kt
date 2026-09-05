@@ -162,6 +162,22 @@ private fun CarProfileCard(
                 style = MaterialTheme.typography.bodySmall,
             )
 
+            // Поки авто не назвалося, облік стоїть — і людина має знати, чому
+            // числа на екрані живі, а лічильник зарядки не рухається.
+            if (connected && !garage.identified) {
+                Text(
+                    text = if (garage.vinPending) {
+                        "Авто ще не назвало VIN. Дані показуються, але нікуди не " +
+                            "записуються: поки невідомо, чиї вони."
+                    } else {
+                        "Авто не назвало VIN. Облік іде за обраним авто — " +
+                            "перевірте, що це саме воно."
+                    },
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
             if (garage.mismatched) {
                 Text(
                     text = "Увага: на шині інше авто (...${garage.detectedVin.takeLast(6)}). " +
