@@ -87,6 +87,9 @@ class FileMlStore(private val root: File) : MlStore, CarDataStore {
      * апріорі, а зібрати те саме з журналу приймальна сторона вміє сама — і зробить
      * це вже зі СВОЄЮ ємністю.
      */
+    override fun hasLegacyData(): Boolean =
+        OWN_FILES.any { name -> File(root, name).isFile }
+
     override fun exportTo(directory: File) {
         runCatching {
             directory.mkdirs()

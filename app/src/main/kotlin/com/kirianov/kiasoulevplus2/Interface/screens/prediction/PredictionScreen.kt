@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.material3.TextButton
+import com.kirianov.kiasoulevplus2.Data.Garage
+import com.kirianov.kiasoulevplus2.Data.Pack
 import com.kirianov.kiasoulevplus2.Data.RangeAccuracy
 import com.kirianov.kiasoulevplus2.Data.MlConfidence
 import com.kirianov.kiasoulevplus2.Data.PredictionBasis
@@ -50,6 +52,8 @@ fun PredictionScreen(predictionViewModel: PredictionViewModel = viewModel()) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        UnknownPackCard(garage = state.garage, learnedSegments = ml.model.segments)
+
         RangeCard(ml.prediction, ml.model.confidence, state.vehicle)
 
         RangeAccuracyCard(state.rangeAccuracy, predictionViewModel::onResetAccuracy)
@@ -505,4 +509,45 @@ private fun capacityProgressText(model: MlModelInfo): String {
         "спостереження; набрано ${formatDecimal(span, 1)} %. " +
         "Обрив зв'язку спостереження більше не скидає, але стрибок SOC за час " +
         "обриву — скидає: перевірити його нічим."
+}
+
+
+/**
+ * Попередження про незадану ємність пакета.
+ *
+ * ЗАРАДИ ЧОГО. Коли ємність невідома, застосунок рахує за рідним пакетом — 27 кВт·год.
+ * Для стокового авто це правда; для перепакованого запас ходу виходить занижений у
+ * стільки ж разів, у скільки новий пакет більший. І число при цьому виглядає цілком
+ * звичайно: не нуль, не прочерк, а просто менше, ніж має бути.
+ *
+ * Один раз саме так і вийшло: після оновлення крива з моделлю мовчки перебудувалися
+ * на 27, і помітили це лише тому, що спеціально пішли перевіряти. Напис у
+ * налаштуваннях був — але на екран налаштувань не дивляться щодня.
+ *
+ * Тому попередження стоїть тут, над самим запасом ходу, і лише тоді, коли має сенс:
+ * якщо застосунок уже щось вивчив, а ємності так і не спитали. На свіжому
+ * встановленні, де вчитися ще нічого, воно б лише заважало.
+ */
+@Composable
+private fun UnknownPackCard(garage: Garage, learnedSegments: Int) {
+    if (garage.active.packKnown || learnedSegments == 0) return
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = "Ємність батареї не задана",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = "Рахуємо за рідним пакетом — ${formatDecimal(Pack.ORIGINAL_CAPACITY_KWH, 1)} " +
+                    "кВт·год. Якщо батарею міняли, впишіть справжню ємність у налаштуваннях: " +
+                    "інакше все нижче занижене в стільки ж разів, у скільки новий пакет більший.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
 }

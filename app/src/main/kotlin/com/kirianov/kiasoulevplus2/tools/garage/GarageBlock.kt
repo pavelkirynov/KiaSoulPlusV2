@@ -26,6 +26,7 @@ package com.kirianov.kiasoulevplus2.tools.garage
 import com.kirianov.kiasoulevplus2.Data.CarProfile
 import com.kirianov.kiasoulevplus2.Data.Garage
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.Data.Pack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -36,6 +37,20 @@ import kotlinx.coroutines.launch
 
 class GarageBlock(
     private val store: GarageStore,
+    /**
+     * Чи лежать у застосунку дані, записані ще до появи гаража.
+     *
+     * До гаража ємність пакета була константою в коді — 50.88, тобто шістнадцять
+     * комірок CATL. Отже застосунок із такими даними міряв саме ту машину, і перше
+     * авто, яке він побачить, мусить успадкувати ту саму ємність. Без цього
+     * оновлення тихо переводить запас ходу на рідні 27 і вдвічі його вкорочує —
+     * рівно це одного разу й сталося.
+     *
+     * Питати треба ДО того, як сховища переселять свої файли: після переїзду
+     * відповідь буде «ні» назавжди. Тому це не функція, а вже готова відповідь,
+     * узята в точці збірки.
+     */
+    private val hadDataBeforeGarage: Boolean = false,
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
 
@@ -63,7 +78,8 @@ class GarageBlock(
                 if (vin.isEmpty()) return@onEach
                 GeneralData.updateGarage { garage ->
                     val known = garage.cars.firstOrNull { it.vin == vin }
-                    val car = (known ?: CarProfile(vin = vin)).copy(lastSeenAtMs = nowMs())
+                    val fresh = known ?: CarProfile(vin = vin, packKwh = inheritedPack(garage))
+                    val car = fresh.copy(lastSeenAtMs = nowMs())
                     garage.copy(
                         activeVin = vin,
                         cars = if (known == null) {
@@ -76,6 +92,17 @@ class GarageBlock(
             }
             .launchIn(scope)
     }
+
+    /**
+     * Ємність для авто, яке бачимо вперше.
+     *
+     * Успадковується лише ПЕРШИМ авто й лише в застосунку, який жив до гаража: там
+     * усі накопичені дані зміряні на пакеті з [Pack], бо іншого коду тоді й не було.
+     * Друге авто в тому самому гаражі нічого не успадковує — про його батарею ми не
+     * знаємо нічого, і рідний пакет там чесніше за здогад.
+     */
+    private fun inheritedPack(garage: Garage): Double =
+        if (hadDataBeforeGarage && garage.cars.isEmpty()) Pack.USABLE_CAPACITY_KWH else 0.0
 
     private fun persist(scope: CoroutineScope) {
         GeneralData.state

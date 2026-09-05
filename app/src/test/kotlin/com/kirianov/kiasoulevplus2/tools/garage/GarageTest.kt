@@ -60,6 +60,70 @@ class GarageTest {
         assertEquals(1_000L, garage.active.lastSeenAtMs)
     }
 
+    /**
+     * ЦЕ ТЕСТ НА ПОМИЛКУ, ЯКА ВДВІЧІ ВКОРОТИЛА ЗАПАС ХОДУ.
+     *
+     * До гаража ємність пакета була константою в коді — 50.88, шістнадцять комірок
+     * CATL. Застосунок із даними тих часів міряв саме ту машину. Коли ємність стала
+     * налаштуванням, перенести її забули: перше ж авто отримало «не задано», за яким
+     * береться рідний пакет, і крива з моделлю мовчки перебудувалися на 27 кВт·год.
+     * У журналі це виглядало як «total=27?» там, де вчора стояло 50.88.
+     */
+    @Test
+    fun `the first car of an app that lived before the garage keeps its pack`() {
+        GarageBlock(MemoryStore(), hadDataBeforeGarage = true).start(scope)
+
+        GeneralData.noteDetectedVin(vin)
+
+        assertEquals(
+            Pack.USABLE_CAPACITY_KWH,
+            GeneralData.state.value.garage.active.packKwh,
+            0.001,
+        )
+    }
+
+    /**
+     * А ДРУГЕ авто нічого не успадковує: про його батарею ми не знаємо нічого, і
+     * рідний пакет там чесніший за здогад. Успадкування — це перенос відомого факту,
+     * а не припущення, що всі машини однакові.
+     */
+    @Test
+    fun `a second car inherits nothing`() {
+        GarageBlock(MemoryStore(), hadDataBeforeGarage = true).start(scope)
+
+        GeneralData.noteDetectedVin(vin)
+        GeneralData.noteDetectedVin(other)
+
+        assertFalse(GeneralData.state.value.garage.active.packKnown)
+    }
+
+    /** Свіжий застосунок нічого не успадковує: даних до гаража в нього не було. */
+    @Test
+    fun `a fresh install inherits nothing`() {
+        GarageBlock(MemoryStore(), hadDataBeforeGarage = false).start(scope)
+
+        GeneralData.noteDetectedVin(vin)
+
+        assertFalse(GeneralData.state.value.garage.active.packKnown)
+    }
+
+    /**
+     * Питати про спадщину треба ДО переселення: перше ж перемикання на авто її
+     * переносить, і після цього відповідь «ні» назавжди.
+     */
+    @Test
+    fun `legacy data is only visible before the first move`() {
+        val root = directory()
+        val store = FileChargeStore(root)
+        store.save(ChargeLog(counterBaselineKwh = 27_094.0, hasBaseline = true))
+
+        assertTrue("до переїзду спадщина видна", store.hasLegacyData())
+
+        store.useCar(vin)
+
+        assertFalse("після переїзду її вже немає", store.hasLegacyData())
+    }
+
     /** Знайоме авто не дублюється, лише оновлює час останньої зустрічі. */
     @Test
     fun `a known car is not added twice`() {

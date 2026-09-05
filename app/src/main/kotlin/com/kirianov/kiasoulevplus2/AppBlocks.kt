@@ -43,20 +43,33 @@ class AppBlocks(context: Context) {
     private val probe = ProbeBlock()
     private val vehicle = VehicleBlock()
     private val settings = SettingsBlock(FileSettingsStore(context.applicationContext.filesDir))
-    // Хто це авто. Від нього залежить, у якій теці лежать дані решти блоків.
-    private val garage = GarageBlock(FileGarageStore(context.applicationContext.filesDir))
-    private val autoConnect = AutoConnectBlock()
+
+    private val mlStore = FileMlStore(context.applicationContext.filesDir)
+    private val energyStore = FileEnergyStore(context.applicationContext.filesDir)
     private val chargeStore = FileChargeStore(context.applicationContext.filesDir)
+
+    /** Усе, що зберігає дані одного авто. Порядок значення не має. */
+    private val carStores = listOf(mlStore, energyStore, chargeStore)
+    /**
+     * Хто це авто. Від нього залежить, у якій теці лежать дані решти блоків.
+     *
+     * Питання «чи були тут дані ще до гаража» ставиться ЗАРАЗ, у точці збірки, а не
+     * потім: переселяють ці дані самі сховища, і після першого ж перемикання на авто
+     * відповідь буде «ні» назавжди.
+     */
+    private val garage = GarageBlock(
+        store = FileGarageStore(context.applicationContext.filesDir),
+        hadDataBeforeGarage = carStores.any { it.hasLegacyData() },
+    )
+    private val autoConnect = AutoConnectBlock()
     private val charging = ChargingBlock(chargeStore)
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
     // Тест комірок під навантаженням: накопичує проходи й рахує підсумок.
     private val cellTest = CellTestBlock()
     // Каталог, а не Context: так сховище моделей лишається чистим Kotlin і
     // перевіряється тестами без емулятора, як і решта логіки проєкту.
-    private val mlStore = FileMlStore(context.applicationContext.filesDir)
     private val prediction = MlBlock(mlStore)
     // Міряє криву ємності різницею пожиттєвих лічильників.
-    private val energyStore = FileEnergyStore(context.applicationContext.filesDir)
     private val energy = EnergyBlock(energyStore)
     private val foreground = ForegroundBlock(context.applicationContext)
 
@@ -69,7 +82,7 @@ class AppBlocks(context: Context) {
     private val share = ShareBlock(
         root = context.applicationContext.filesDir,
         cache = context.applicationContext.cacheDir,
-        stores = listOf(mlStore, energyStore, chargeStore),
+        stores = carStores,
     )
 
     // Свідок усього, що відбувається: пише в файл те саме, що бачить екран.

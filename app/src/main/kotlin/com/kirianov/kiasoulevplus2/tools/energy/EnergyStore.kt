@@ -69,6 +69,9 @@ class FileEnergyStore(private val root: File) : EnergyStore, CarDataStore {
 
     private val file get() = File(directory, FILE_NAME)
 
+    override fun hasLegacyData(): Boolean =
+        OWN_FILES.any { name -> File(root, name).isFile }
+
     override fun exportTo(directory: File) {
         runCatching {
             directory.mkdirs()
