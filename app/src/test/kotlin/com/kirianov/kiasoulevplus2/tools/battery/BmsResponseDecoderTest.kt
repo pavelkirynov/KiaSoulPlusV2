@@ -179,4 +179,26 @@ class BmsResponseDecoderTest {
         assertEquals(26937.9, data.cumulativeEnergyChargedKwh, 0.001)
         assertEquals(0.0, data.cumulativeEnergyDischargedKwh, 0.001)
     }
+
+    /**
+     * Кадр із самих 0xFF правильної довжини. У журналі він з'явився посеред
+     * швидкої зарядки: «socD 127.5, I −1043.5 А, U 6455.1 В» — і пішов на екран
+     * та в криву нарівні зі справжніми числами. Довжина кадру не доводить нічого.
+     */
+    @Test
+    fun `a frame of all ones is refused`() {
+        val data = BmsResponseDecoder.decode(List(48) { 0xFF })
+
+        assertFalse("Кадр зі сміттям не має вважатися даними", data.hasData)
+    }
+
+    /** Справжній кадр межі не зачіпає: заряд, напруга і струм лишаються на місці. */
+    @Test
+    fun `a real frame passes the plausibility check`() {
+        val data = BmsResponseDecoder.decode(frame())
+
+        assertTrue(data.hasData)
+        assertTrue(data.displaySoc in 0.0..100.0)
+        assertTrue(data.batteryVoltage in 200.0..450.0)
+    }
 }

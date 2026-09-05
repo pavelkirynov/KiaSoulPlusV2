@@ -53,6 +53,31 @@ object BmsResponseDecoder {
     fun decode(bytes: List<Int>): BmsData {
         if (bytes.size < MIN_FRAME_SIZE) return BmsData()
 
+        return decoded(bytes).takeIf { plausible(it) } ?: BmsData()
+    }
+
+    /**
+     * Чи схоже це взагалі на показники батареї.
+     *
+     * Довжина кадру нічого не гарантує: у журналі є рядок «socD 127.5, I −1043.5 А,
+     * U 6455.1 В» — це кадр із самих 0xFF, який прийшов посеред зарядки, коли
+     * адаптер захлинувся. Довжина в нього правильна, а числа — ні, і далі вони
+     * ідуть на екран і в криву нарівні зі справжніми.
+     *
+     * Межі взяті з широким запасом до всього, що Soul EV може віддати: заряд не
+     * буває більшим за сотню, пакет живе між 240 і 420 В, а струм навіть на
+     * швидкій зарядці й повному газі не сягає й трьохсот ампер.
+     */
+    private fun plausible(bms: BmsData): Boolean =
+        bms.displaySoc <= MAX_SOC &&
+            bms.batteryVoltage <= MAX_PACK_VOLTS &&
+            kotlin.math.abs(bms.batteryCurrent) <= MAX_CURRENT_A
+
+    private const val MAX_SOC = 100.0
+    private const val MAX_PACK_VOLTS = 500.0
+    private const val MAX_CURRENT_A = 600.0
+
+    private fun decoded(bytes: List<Int>): BmsData {
         return BmsData(
             displaySoc = bytes[SOC_INDEX] / 2.0,
             batteryVoltage = FrameParser.unsigned16(bytes, VOLTAGE_HIGH_INDEX) / 10.0,
