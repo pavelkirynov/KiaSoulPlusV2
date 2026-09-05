@@ -16,7 +16,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 class ChargingBlock(
     private val store: ChargeStore,
@@ -40,7 +39,7 @@ class ChargingBlock(
                         dischargedKwh = it.bms.cumulativeEnergyDischargedKwh,
                         socPercent = it.bms.displaySoc,
                         isCharging = it.vehicle.charging.isCharging,
-                        ignitionOn = ignitionOn(it.bms.batteryCurrent, it.vehicle),
+                        ignitionOn = ignitionOn(it.vehicle),
                         request = it.charge.request,
                     )
                 }
@@ -100,18 +99,22 @@ class ChargingBlock(
     /**
      * Чи авто ввімкнене.
      *
-     * Прямої ознаки запалювання шина не передає, тож збираємо її з двох свідчень.
-     * Рух — свідчення беззаперечне. Тяговий струм — майже таке саме: коли авто
-     * стоїть вимкненим, він у журналі не виходить за ±3 А, а щойно його вмикають,
-     * DC-DC і клімат дають десятки ампер.
+     * Прямої ознаки запалювання шина не передає, тож беремо єдине беззаперечне
+     * свідчення — рух. Авто, що їде, точно не стоїть на зарядці.
      *
-     * Помилитися в бік «увімкнене» тут не страшно: цей висновок закриває зарядку,
-     * а зарядка, закрита на кілька хвилин раніше, все одно порахована повністю —
-     * різниця лічильника береться від її початку.
+     * ЧОМУ НЕ СТРУМ, хоч він і напрошується. У журналі зарядка від розетки дає
+     * +10…14 А, а розгін — +57…78 А: за модулем це один і той самий бік шкали.
+     * Поріг «великий струм — отже, увімкнене» спрацював би посеред живої зарядки,
+     * якби ознака 581 на мить блимнула. Ціна такої помилки несиметрична: закрита
+     * зарядка більше не поповнюється, і решта ночі пропаде — рівно та біда, яку
+     * ми тут і лікуємо. Тому струм не бере участі.
+     *
+     * Випадок «зарядка скінчилась, а авто ще стоїть» ця перевірка не ловить — і не
+     * мусить. Його ловить пошук пропущеної зарядки за паузою, і після того, як
+     * базовий показ став зберігатися цілком, він нарешті працює.
      */
-    private fun ignitionOn(currentA: Double, vehicle: VehicleData): Boolean =
-        (vehicle.hasSpeed && vehicle.speedKmh > 0.0) ||
-            abs(currentA) >= ChargeTracker.IGNITION_CURRENT_A
+    private fun ignitionOn(vehicle: VehicleData): Boolean =
+        vehicle.hasSpeed && vehicle.speedKmh > 0.0
 }
 
 /**
