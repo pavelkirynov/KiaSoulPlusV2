@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.onEach
 class DecoderBlock(
     private val cellDecoder: CellDecoder = CellDecoder(),
     private val watermark: CounterWatermark = CounterWatermark(),
-    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
 
     fun start(scope: CoroutineScope) {
@@ -44,7 +43,15 @@ class DecoderBlock(
                 // числа розходяться в криву ємності, облік зарядок і модель
                 // прогнозу, і ловити зіпсоване читання в кожному з них окремо
                 // означало б тричі писати той самий захист і двічі його забути.
-                if (!watermark.accept(bms, nowMs())) {
+                val ok = watermark.accept(bms)
+                if (watermark.wantsVinRecheck) {
+                    // Найімовірніша причина падіння лічильників — інше авто. Питаємо
+                    // прямо: перечитаний VIN або перемкне теку, або підтвердить, що
+                    // машина та сама й це заміна блока BMS.
+                    watermark.vinRecheckAsked()
+                    GeneralData.requestVinRecheck()
+                }
+                if (!ok) {
                     GeneralData.updateDebugInfo(watermark.lastRejection)
                     return@onEach
                 }

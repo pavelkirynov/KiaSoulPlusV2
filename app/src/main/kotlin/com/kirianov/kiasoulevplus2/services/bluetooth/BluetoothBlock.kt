@@ -208,7 +208,8 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         // Нове підключення — новий привід спитати VIN: могли пересісти в іншу
         // машину, а могли просто перепідключитися до тієї самої, і в обох випадках
         // питання коштує один запит.
-        vinAsked = false
+        vinKnown = false
+        vinAttempts = 0
         pollingJob = scope.launch(Dispatchers.IO) {
             var consecutiveFailures = 0
 
@@ -246,8 +247,10 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
     /** Номер вікна монітора: за ним обирається наступний фільтр із черги. */
     private var monitorWindow = 0L
 
-    /** Чи питали вже VIN у цьому підключенні. Скидається на кожному з'єднанні. */
-    private var vinAsked = false
+    /** Чи прочитали вже VIN. Скидається на кожному з'єднанні й на підозрі. */
+    private var vinKnown = false
+    private var vinAttempts = 0
+    private var lastVinRecheck = 0L
 
     private suspend fun pollOnce() {
         val inputBms = GeneralData.state.value.inputBms
@@ -256,9 +259,21 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         // VIN — один раз на підключення, першим ділом. Поки він невідомий, блоки
         // рахують за минуле авто, а якщо машина інша, це вже зіпсовані дані. Тому
         // питаємо до всього іншого, а не між справами.
-        if (!vinAsked) {
-            vinAsked = true
+        // VIN питаємо, поки не прочитається, а не один раз. Одного разу «один раз»
+        // коштувало переплутаних машин: зв'язок піднявся, шина ще мовчала, запит
+        // провалився — і застосунок цілу поїздку рахував дані другого авто за перше.
+        if (!vinKnown && vinAttempts < VIN_ATTEMPTS) {
+            vinAttempts++
             readVin()
+        }
+
+        // Підозра, що авто змінилося, скидає лічильник спроб: питання «а хто це?»
+        // треба ставити негайно, а не після наступного підключення.
+        val recheck = GeneralData.state.value.garage.vinRecheck
+        if (recheck != lastVinRecheck) {
+            lastVinRecheck = recheck
+            vinKnown = false
+            vinAttempts = 0
         }
 
         // Тест комірок їсть шину цілком: проходи мають іти якнайчастіше, тож на
@@ -330,10 +345,23 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
     private suspend fun readVin() {
         val response = runCatching {
             canBridge.sendCANCommand(BmsCommands.HEADER_OBD, BmsCommands.REQUEST_VIN)
-        }.getOrNull() ?: return
+        }.getOrElse { error ->
+            note("шина не відповіла на запит VIN: ${error.message ?: "без пояснень"}")
+            return
+        }
 
-        val vin = VinDecoder.decode(FrameParser.parse(response)) ?: return
+        val vin = VinDecoder.decode(FrameParser.parse(response))
+        if (vin == null) {
+            note("відповідь на VIN не розібрано (спроба $vinAttempts із $VIN_ATTEMPTS)")
+            return
+        }
+        vinKnown = true
         GeneralData.noteDetectedVin(vin)
+    }
+
+    /** Причина невдачі пишеться лише коли спроби скінчилися: проміжні лише шумлять. */
+    private fun note(reason: String) {
+        if (vinAttempts >= VIN_ATTEMPTS) GeneralData.noteVinFailure(reason)
     }
 
     /**
@@ -430,6 +458,16 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
          * немає чого.
          */
         const val SWEEP_WINDOW_MS = 500L
+
+        /**
+         * Скільки разів питати VIN за одне підключення.
+         *
+         * Десять спроб — це близько хвилини опитування. Шина після з'єднання
+         * інколи мовчить кілька секунд, і одна спроба в таку мить означала б, що
+         * авто лишиться невпізнаним до наступного разу. Більше десяти не потрібно:
+         * якщо блок не відповідає хвилину, він не відповість і за годину.
+         */
+        const val VIN_ATTEMPTS = 10
 
         /** Скільки слухати шину за одне вікно: з фільтром кадр приходить кілька разів. */
         const val MONITOR_WINDOW_MS = 700L

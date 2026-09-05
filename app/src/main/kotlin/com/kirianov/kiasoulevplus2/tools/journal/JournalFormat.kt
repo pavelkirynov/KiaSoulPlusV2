@@ -115,6 +115,17 @@ object JournalFormat {
             out += "$at charge? «${chargeAfter.lastDecision}»"
         }
 
+        // ЯКЕ ЦЕ АВТО. Мовчазна невдача при читанні VIN одного разу коштувала того,
+        // що дані другої машини лягли в теку першої: зв'язок піднявся, шина ще
+        // мовчала, запит провалився — і застосунок цілу поїздку рахував чуже за своє.
+        if (before.garage.vinNote != after.garage.vinNote && after.garage.vinNote.isNotEmpty()) {
+            out += "$at vin «${after.garage.vinNote}»"
+        }
+        if (before.garage.activeVin != after.garage.activeVin && after.garage.activeVin.isNotEmpty()) {
+            out += "$at car ...${after.garage.activeVin.takeLast(6)} " +
+                "пакет=${num(after.garage.active.packKwh.takeIf { it > 0.0 })}"
+        }
+
         out += busSnapshots(before, after, at)
         out += cellTest(before, after, at)
 

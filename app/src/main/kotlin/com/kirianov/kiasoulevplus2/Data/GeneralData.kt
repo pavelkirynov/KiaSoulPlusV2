@@ -156,7 +156,20 @@ object GeneralData {
 
     /** VIN, прочитаний із шини в цьому підключенні. Пише блок Bluetooth. */
     fun noteDetectedVin(vin: String) =
-        _state.update { it.copy(garage = it.garage.copy(detectedVin = vin)) }
+        _state.update { it.copy(garage = it.garage.copy(detectedVin = vin, vinNote = "прочитано $vin")) }
+
+    /** Чому VIN не прочитався. Мовчазна невдача тут коштувала переплутаних авто. */
+    fun noteVinFailure(reason: String) =
+        _state.update { it.copy(garage = it.garage.copy(vinNote = reason)) }
+
+    /**
+     * Перечитати VIN негайно: щось указує, що авто могло змінитися.
+     *
+     * Лічильник, а не прапорець: дві однакові підозри поспіль не мають злитися в
+     * одну, інакше друга загубиться.
+     */
+    fun requestVinRecheck() =
+        _state.update { it.copy(garage = it.garage.copy(vinRecheck = it.garage.vinRecheck + 1)) }
 
     fun updateShare(transform: (ShareState) -> ShareState) =
         updateGarage { it.copy(share = transform(it.share)) }
