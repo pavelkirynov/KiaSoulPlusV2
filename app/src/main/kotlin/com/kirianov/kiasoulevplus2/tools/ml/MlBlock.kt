@@ -46,6 +46,16 @@ class MlBlock(
 ) {
 
     private var consumption = ConsumptionModel()
+
+    /**
+     * Очікувана ємність, з якою зібрано поточну модель.
+     *
+     * Тримається окремо тому, що її задає користувач і може змінити: у моделі це
+     * апріорі, з якого вона стартує, і на нього спираються всі корзини, поки їх не
+     * перекриють заміри. Змінити ємність, не перезібравши модель, означало б лишити
+     * стару впевненість під новим числом.
+     */
+    private var nominalKwh = 0.0
     private var capacity = CapacityModel()
     private var quality = PredictionQuality()
     private val session = CapacitySession()
@@ -76,6 +86,12 @@ class MlBlock(
     fun start(scope: CoroutineScope) {
         scope.launch(ioDispatcher) {
             guard.withLock {
+                // Беремо ємність, яка є ЗАРАЗ, і не чекаємо на диск. Налаштування
+                // читаються своїм блоком і приходять за мить; якщо збережене число
+                // виявиться іншим, watchPack просто перезбере модель. Чекати тут
+                // означало б зупиняти запуск на чужому вводі-виводі.
+                nominalKwh = GeneralData.state.value.garage.active.effectivePackKwh
+                capacity = CapacityModel(nominalKwh)
                 restore()
                 ready = true
                 publish()
@@ -83,6 +99,71 @@ class MlBlock(
         }
         collectSamples(scope)
         answerRequests(scope)
+        watchPack(scope)
+        watchCar(scope)
+    }
+
+    /**
+     * Змінилося авто — модель іншої машини нам не підходить узагалі.
+     *
+     * Не «підправити», а взяти з нуля з теки нового авто: у кожної машини свій
+     * пакет, своя витрата й свій журнал відрізків. Домішати одне до одного означало
+     * б зіпсувати обидві моделі так, що це навіть не помітили б — числа лишилися б
+     * правдоподібними.
+     */
+    private fun watchCar(scope: CoroutineScope) {
+        GeneralData.state
+            .map { it.garage.activeVin }
+            .distinctUntilChanged()
+            .onEach { vin ->
+                if (vin.isEmpty()) return@onEach
+                guard.withLock {
+                    if (!ready) return@withLock
+                    withContext(ioDispatcher) { store.useCar(vin) }
+                    nominalKwh = GeneralData.state.value.garage.active.effectivePackKwh
+                    restoreFresh()
+                    publish()
+                }
+            }
+            .launchIn(scope)
+    }
+
+    /** Підняти модель нового авто з нуля: нічого зі старої не лишається. */
+    private suspend fun restoreFresh() {
+        consumption = ConsumptionModel()
+        capacity = CapacityModel(nominalKwh)
+        quality = PredictionQuality()
+        session.reset()
+        recent.clear()
+        learnedSegments = 0
+        learnedKm = 0.0
+        withContext(ioDispatcher) { restore() }
+    }
+
+    /**
+     * Ємність пакета змінили в налаштуваннях — модель треба зібрати заново.
+     *
+     * Не «підправити», а саме зібрати з нуля: апріорі входить у накопичені
+     * статистики, і вийняти його звідти неможливо. Зате журнал відрізків цілий,
+     * тож перезбирання нічого не втрачає — воно вчить те саме, але з правильного
+     * старту.
+     */
+    private fun watchPack(scope: CoroutineScope) {
+        GeneralData.state
+            .map { it.garage.active.effectivePackKwh }
+            .distinctUntilChanged()
+            .onEach { kwh ->
+                // Той самий замок, що й у відновлення: якщо модель ще піднімається
+                // з диска, тут просто чекаємо своєї черги, а не змагаємось із нею.
+                val rebuilt = guard.withLock {
+                    if (!ready || kwh == nominalKwh) return@withLock false
+                    rebuild(withContext(ioDispatcher) { store.readSegments() }, kwh)
+                    publish()
+                    true
+                }
+                if (rebuilt) withContext(ioDispatcher) { store.saveModel(snapshot()) }
+            }
+            .launchIn(scope)
     }
 
     // --- Навчання ----------------------------------------------------------------
@@ -215,9 +296,10 @@ class MlBlock(
         }
     }
 
-    private fun rebuild(history: List<MlSegment>) {
+    private fun rebuild(history: List<MlSegment>, nominalCapacityKwh: Double = nominalKwh) {
+        nominalKwh = nominalCapacityKwh
         consumption = ConsumptionModel()
-        capacity = CapacityModel()
+        capacity = CapacityModel(nominalCapacityKwh)
         quality = PredictionQuality()
         session.reset()
         recent.clear()
@@ -252,7 +334,10 @@ class MlBlock(
         val saved = store.loadModel()
         val history = store.readSegments()
 
-        if (saved != null && saved.featureSetId == MlCodec.FEATURE_SET) {
+        // Ємність входить у назву покоління навмисно: змінили пакет — накопичені
+        // корзини вже не про цю батарею, і брати їх означало б лишити стару
+        // впевненість під новим числом.
+        if (saved != null && saved.featureSetId == MlCodec.featureSetFor(nominalKwh)) {
             consumption.restore(saved.consumption)
             capacity.restore(saved.capacity)
             quality.restore(saved.quality)
@@ -367,7 +452,7 @@ class MlBlock(
     }
 
     private fun snapshot() = ModelSnapshot(
-        featureSetId = MlCodec.FEATURE_SET,
+        featureSetId = MlCodec.featureSetFor(nominalKwh),
         consumption = consumption.snapshot(),
         capacity = capacity.snapshot(),
         quality = quality.snapshot(),

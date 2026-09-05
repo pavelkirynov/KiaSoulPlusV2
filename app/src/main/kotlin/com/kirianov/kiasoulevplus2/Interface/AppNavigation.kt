@@ -19,10 +19,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsScreen
@@ -32,6 +30,8 @@ import com.kirianov.kiasoulevplus2.Interface.screens.experiments.ProbeViewModel
 import com.kirianov.kiasoulevplus2.Interface.screens.main.MainScreen
 import com.kirianov.kiasoulevplus2.Interface.screens.prediction.PredictionScreen
 import com.kirianov.kiasoulevplus2.Interface.screens.prediction.PredictionViewModel
+import com.kirianov.kiasoulevplus2.Interface.screens.settings.SettingsScreen
+import com.kirianov.kiasoulevplus2.Interface.screens.settings.SettingsViewModel
 
 @Composable
 fun AppNavigation() {
@@ -78,18 +78,12 @@ fun AppNavigation() {
                             PredictionScreen(predictionViewModel = viewModel<PredictionViewModel>())
                         AppScreen.CELLS -> CellsScreen(cellsViewModel = viewModel<CellsViewModel>())
                         AppScreen.EXPERIMENTS -> ProbeScreen(probeViewModel = viewModel<ProbeViewModel>())
-                        AppScreen.SETTINGS -> ScreenPlaceholder("Калібрування")
+                        AppScreen.SETTINGS ->
+                            SettingsScreen(settingsViewModel = viewModel<SettingsViewModel>())
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ScreenPlaceholder(text: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text = text, fontSize = 18.sp)
     }
 }
 

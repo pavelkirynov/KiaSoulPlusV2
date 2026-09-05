@@ -18,8 +18,6 @@ class MainViewModel : ViewModel() {
      */
     fun onWindowSelected(window: ConsumptionWindow) = GeneralData.selectConsumptionWindow(window)
 
-    fun onWakeDeviceChange(address: String) = GeneralData.setWakeOnDevice(address)
-
     fun onAutoConnectChange(enabled: Boolean) = GeneralData.setAutoConnect(enabled)
 
     fun onConnectClick() {

@@ -34,6 +34,8 @@ class ArchitectureTest {
         "tools.json",
         "tools.journal",
         "tools.energy",
+        "tools.garage",
+        "tools.paths",
     )
 
     /** Хаб: сюди дозволено звертатися будь-кому, це і є канал обміну. */
@@ -44,7 +46,7 @@ class ArchitectureTest {
      * та читання-запис JSON. Ними користуються всі блоки — це спільна бібліотека,
      * а не канал обміну даними.
      */
-    private val sharedUtilities = listOf("tools.format", "tools.frames", "tools.json")
+    private val sharedUtilities = listOf("tools.format", "tools.frames", "tools.json", "tools.paths")
 
     /**
      * Файли в корені пакета: App (піднімає блоки на весь час життя процесу),

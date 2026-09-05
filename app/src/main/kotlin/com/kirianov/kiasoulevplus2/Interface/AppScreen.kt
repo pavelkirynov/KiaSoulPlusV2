@@ -5,5 +5,5 @@ enum class AppScreen(val title: String) {
     PREDICTION("Прогноз"),
     CELLS("Комірки"),
     EXPERIMENTS("Експерименти"),
-    SETTINGS("Калібрування")
+    SETTINGS("Налаштування")
 }

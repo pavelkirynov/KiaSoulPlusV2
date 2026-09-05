@@ -139,7 +139,7 @@ class CapacityModelTest {
 
         assertEquals(
             "вікно мало важити рівно стільки, скільки виміряли",
-            CapacityModel.NOMINAL_CAPACITY_KWH,
+            Vehicle.USABLE_CAPACITY_KWH,
             model.usableCapacityKwh,
             0.2,
         )

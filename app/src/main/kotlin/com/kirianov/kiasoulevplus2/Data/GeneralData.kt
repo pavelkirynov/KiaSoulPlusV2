@@ -107,6 +107,36 @@ object GeneralData {
     fun setWakeOnDevice(address: String) =
         _state.update { it.copy(settings = it.settings.copy(wakeOnDeviceAddress = address)) }
 
+    // --- Гараж: які авто відомі й за яке рахуємо ---------------------------------
+
+    fun updateGarage(transform: (Garage) -> Garage) =
+        _state.update { it.copy(garage = transform(it.garage)) }
+
+    /** VIN, прочитаний із шини в цьому підключенні. Пише блок Bluetooth. */
+    fun noteDetectedVin(vin: String) =
+        _state.update { it.copy(garage = it.garage.copy(detectedVin = vin)) }
+
+    /** Обране авто. Вручну — лише коли зв'язку немає: на шині VIN сам себе назве. */
+    fun selectCar(vin: String) =
+        _state.update { it.copy(garage = it.garage.copy(activeVin = vin)) }
+
+    /** Корисна ємність пакета активного авто, кВт·год. Нуль означає «не задано». */
+    fun setPackKwh(kwh: Double) = updateActiveCar { it.copy(packKwh = kwh) }
+
+    fun setCarName(name: String) = updateActiveCar { it.copy(name = name) }
+
+    private fun updateActiveCar(transform: (CarProfile) -> CarProfile) =
+        _state.update { state ->
+            val garage = state.garage
+            val updated = transform(garage.active)
+            val cars = if (garage.cars.any { it.vin == updated.vin }) {
+                garage.cars.map { if (it.vin == updated.vin) updated else it }
+            } else {
+                garage.cars + updated
+            }
+            state.copy(garage = garage.copy(cars = cars, activeVin = updated.vin))
+        }
+
     /** Список спарованих пристроїв: публікує блок Bluetooth. */
     fun updatePairedDevices(devices: List<PairedDevice>) =
         _state.update { it.copy(pairedDevices = devices) }

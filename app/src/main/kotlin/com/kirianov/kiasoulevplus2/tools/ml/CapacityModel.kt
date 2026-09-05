@@ -38,6 +38,17 @@ import kotlin.math.abs
 
 class CapacityModel(
     /**
+     * Очікувана корисна ємність пакета, кВт·год: те, з чого модель стартує, поки
+     * власних вимірів немає.
+     *
+     * Задається ззовні, а не константою, і це не дрібниця. Апріорне значення
+     * тримає всю криву доти, доки її не перекриють заміри, — і якщо в авто стоїть
+     * рідний пакет, а модель стартувала з перепакованого, вона обіцятиме вдвічі
+     * більше рівно до першої глибокої зарядки. Тому число приходить із
+     * налаштувань, які заповнює власник авто.
+     */
+    private val nominalCapacityKwh: Double = Vehicle.USABLE_CAPACITY_KWH,
+    /**
      * Крива ємності по **корзинах** шкали: скільки кіловат-годин лежить у кожних
      * десяти відсотках SOC. Разом вони й складають повну ємність.
      *
@@ -58,7 +69,7 @@ class CapacityModel(
      */
     private val energy: OnlineRegression = OnlineRegression(
         size = BINS,
-        prior = DoubleArray(BINS) { PRIOR_FULL_SCALE_KWH / BINS },
+        prior = DoubleArray(BINS) { nominalCapacityKwh * PRIOR_BUFFER_SLOPE / BINS },
         priorSigma = DoubleArray(BINS) { PRIOR_BIN_SIGMA_KWH },
         noiseSigma = 0.5,
         forgetMs = OnlineRegression.FORGET_TWO_YEARS_MS,
@@ -76,6 +87,17 @@ class CapacityModel(
         forgetMs = OnlineRegression.FORGET_TWO_YEARS_MS,
     ),
 ) {
+
+    /**
+     * Апріорна енергія ВСІЄЇ шкали BMS, кВт·год.
+     *
+     * Більша за ємність пакета, і навмисно. Шкала BMS ширша за дозволене вікно
+     * рівно на буфери зверху й знизу, а нахил панельного SOC відносно точного
+     * задано `PRIOR_BUFFER_SLOPE`. Тож уся шкала апріорі важить рівно в стільки ж
+     * разів більше — і апріорне вікно інтегрується точно у виміряну зарядкою
+     * ємність, а не в дев'яносто п'ять її відсотків.
+     */
+    private val priorFullScaleKwh: Double get() = nominalCapacityKwh * PRIOR_BUFFER_SLOPE
 
     /** Сира сума виміряної енергії й пройденої шкали — без жодної моделі. */
     private var measuredEnergyKwh = 0.0
@@ -151,7 +173,7 @@ class CapacityModel(
      * саме такий, як думали»; менше — комірки віддають менше, ніж заявлено.
      */
     val capacityVersusNominalPercent: Double
-        get() = usableCapacityKwh / NOMINAL_CAPACITY_KWH * 100.0
+        get() = usableCapacityKwh / nominalCapacityKwh * 100.0
 
     /**
      * У скільки разів пакет більший за рідний, з паспорта якого BMS досі рахує
@@ -296,7 +318,7 @@ class CapacityModel(
         return if (total.isFinite() && total > 0.0) {
             total
         } else {
-            PRIOR_FULL_SCALE_KWH * (toSocPercent - fromSocPercent) / 100.0
+            priorFullScaleKwh * (toSocPercent - fromSocPercent) / 100.0
         }
     }
 
@@ -389,12 +411,6 @@ class CapacityModel(
     }
 
     companion object {
-        /**
-         * Апріорна корисна ємність: енергія **дозволеного вікна**, від нуля на
-         * панелі до сотні. Саме це й міряє зарядка від нуля до ста. Див. `Vehicle`.
-         */
-        const val NOMINAL_CAPACITY_KWH = Vehicle.USABLE_CAPACITY_KWH
-
 
         /** На скільки шматків ділиться шкала. Десять відсотків на корзину. */
         const val BINS = 10
@@ -441,7 +457,6 @@ class CapacityModel(
          * ж разів більше. Так апріорне вікно інтегрується точно у виміряне зарядкою
          * число, а не в дев'яносто п'ять його відсотків.
          */
-        const val PRIOR_FULL_SCALE_KWH = NOMINAL_CAPACITY_KWH * PRIOR_BUFFER_SLOPE
 
         /** Пряму буферів будуємо лише за серединою шкали, без «поличок» на краях. */
         const val BUFFER_FIT_FROM_PERCENT = 10.0

@@ -20,18 +20,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.os.PowerManager
-import android.provider.Settings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -41,7 +34,6 @@ import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
-import com.kirianov.kiasoulevplus2.Data.PairedDevice
 import com.kirianov.kiasoulevplus2.Data.State
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WindowStats
@@ -70,13 +62,6 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
             onAutoConnectChange = mainViewModel::onAutoConnectChange,
         )
 
-        BackgroundWorkCard()
-
-        WakeOnCarCard(
-            devices = state.pairedDevices,
-            selected = state.settings.wakeOnDeviceAddress,
-            onSelected = mainViewModel::onWakeDeviceChange,
-        )
 
         // Усі картки на місці з першої секунди, ще до підключення: інакше екран
         // після запуску виглядає напівпорожнім, і незрозуміло, чи застосунок
@@ -441,146 +426,3 @@ private fun MetricRow(label: String, value: String) {
 }
 
 private const val NO_VALUE = "--"
-
-
-/**
- * Прохання до системи не присипляти застосунок.
- *
- * ЧОМУ ЦЕ ВЗАГАЛІ ПОТРІБНО. Служба переднього плану тримає ПРОЦЕС, але не
- * гарантує, що йому дадуть працювати. У журналі поїздки є проміжок на 634
- * секунди, за який номер зчитування шини зріс лише на два: з'єднання живе,
- * сповіщення висить, а опитування фактично стоїть. Так поводяться Doze і фірмові
- * «оптимізації» оболонок — на Xiaomi особливо охоче.
- *
- * Частковий wake lock у службі — половина ліки. Друга половина ось ця: попросити
- * систему винести застосунок з-під оптимізації батареї. Дозвіл дає користувач, і
- * без нього застосунок працює, просто з дірками у фоні.
- *
- * Картки немає, коли дозвіл уже є: місце на екрані дорожче за нагадування про
- * зроблене.
- */
-@Composable
-private fun BackgroundWorkCard() {
-    val context = LocalContext.current
-    // Лічильник перевірок: після повернення з системного діалога стан треба
-    // прочитати наново, а сам PowerManager про зміну нікого не сповіщає.
-    var checks by remember { mutableIntStateOf(0) }
-    val allowed = remember(checks) { runsUnrestricted(context) }
-    if (allowed) return
-
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(text = "Робота у фоні обмежена", fontSize = 18.sp)
-            Text(
-                text = "Система присипляє застосунок зі згорнутим екраном, і опитування " +
-                    "спиняється посеред поїздки — з'єднання при цьому виглядає живим. " +
-                    "Дозвольте роботу без обмежень, щоб дані не мали дірок.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Button(
-                onClick = {
-                    askToRunUnrestricted(context)
-                    checks++
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Дозволити роботу у фоні")
-            }
-        }
-    }
-}
-
-private fun runsUnrestricted(context: Context): Boolean {
-    val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
-    return runCatching { power.isIgnoringBatteryOptimizations(context.packageName) }.getOrDefault(true)
-}
-
-/**
- * Відкриває системний діалог. Якщо оболонка його не має — відкриваємо загальний
- * список оптимізації батареї, а якщо немає й того, мовчимо: краще нічого, ніж
- * падіння застосунку через чужу прошивку.
- */
-private fun askToRunUnrestricted(context: Context) {
-    val direct = Intent(
-        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-        Uri.parse("package:${context.packageName}"),
-    )
-    if (runCatching { context.startActivity(direct) }.isSuccess) return
-    runCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
-}
-
-/**
- * Вибір пристрою, поява якого будить застосунок.
- *
- * Задум простий: магнітола з'єднується з телефоном щоразу, коли ви сіли в авто, —
- * надійнішої ознаки «поїхали» в телефона просто немає. Сам ELM для цього годиться
- * гірше: клони не підіймають зв'язок самі, а чекають, поки під'єднаються до них,
- * тобто саме тоді, коли застосунок уже працює.
- *
- * Картка згорнута, поки пристрій не обрано або поки її не розкрили: список
- * спарованих пристроїв довгий, а звертаються до нього раз у житті.
- */
-@Composable
-private fun WakeOnCarCard(
-    devices: List<PairedDevice>,
-    selected: String,
-    onSelected: (String) -> Unit,
-) {
-    if (devices.isEmpty()) return
-    var open by remember { mutableStateOf(false) }
-    val chosen = devices.firstOrNull { it.address == selected }
-
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(text = "Прокидатися в авто", fontSize = 18.sp)
-                Text(
-                    text = if (open) "згорнути" else "змінити",
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { open = !open },
-                )
-            }
-
-            Text(
-                text = chosen?.let { "Будить: ${it.name}" }
-                    ?: "Пристрій не обрано — застосунок доведеться відкривати вручну.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-
-            if (open) {
-                Text(
-                    text = "Оберіть магнітолу авто: телефон з'єднується з нею щоразу, " +
-                        "коли ви сідаєте за кермо. Для роботи потрібен дозвіл із картки вище.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                devices.forEach { device ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onSelected(if (device.address == selected) "" else device.address)
-                                open = false
-                            }
-                            .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(text = device.name)
-                        if (device.address == selected) {
-                            Text(text = "обрано", color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}

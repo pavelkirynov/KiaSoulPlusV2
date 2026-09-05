@@ -3,6 +3,7 @@ package com.kirianov.kiasoulevplus2.tools.ml
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.Data.CarProfile
 import com.kirianov.kiasoulevplus2.Data.MlSegment
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import kotlinx.coroutines.CoroutineScope
@@ -159,7 +160,7 @@ class MlBlockTest {
     @Test
     fun `a model of the current feature set is loaded as it is`() {
         store.model = ModelSnapshot(
-            featureSetId = MlCodec.FEATURE_SET,
+            featureSetId = MlCodec.featureSetFor(CarProfile().effectivePackKwh),
             consumption = ConsumptionModel().snapshot(),
             capacity = CapacityModel().snapshot(),
             quality = PredictionQuality().snapshot(),

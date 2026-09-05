@@ -4,6 +4,7 @@ import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.ChargingState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.Pack
+import com.kirianov.kiasoulevplus2.Data.CarProfile
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -39,7 +40,45 @@ class EnergyCurveTest {
     }
 
     @Before
-    fun setUp() = GeneralData.reset()
+    fun setUp() {
+        GeneralData.reset()
+        // Ємність пакета задає власник авто на екрані налаштувань. Тут ставимо
+        // перепакований пакет цього авто: без цього застосунок узяв би рідні
+        // 27 кВт·год — обережне типове значення для машини, про яку ще не питали.
+        GeneralData.updateGarage {
+            it.copy(
+                cars = listOf(CarProfile(vin = VIN, packKwh = Pack.USABLE_CAPACITY_KWH)),
+                activeVin = VIN,
+                loaded = true,
+            )
+        }
+    }
+
+    /**
+     * Стокове авто мусить лишитися стоковим. Поки ємність не задана, крива
+     * прив'язується до РІДНОГО пакета, а не до перепакованого: занизити запас ходу
+     * означає, що людина зайвий раз зарядиться, а завищити — що вона стане на
+     * дорозі.
+     */
+    @Test
+    fun `an unconfigured car is treated as the stock pack, not the repacked one`() {
+        GeneralData.updateGarage {
+            it.copy(cars = listOf(CarProfile(vin = VIN)), activeVin = VIN, loaded = true)
+        }
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        publish(socPercent = 90.0, dischargedKwh = 1_000.0, chargedKwh = 500.0)
+        now += 60_000
+        publish(socPercent = 80.0, dischargedKwh = 1_006.0, chargedKwh = 501.0)
+
+        assertEquals(
+            Pack.ORIGINAL_CAPACITY_KWH,
+            GeneralData.state.value.curve.totalKwh,
+            0.001,
+        )
+    }
 
     @After
     fun tearDown() {
@@ -532,3 +571,5 @@ class EnergyCurveTest {
         assertEquals(1, store.cleared)
     }
 }
+
+private const val VIN = "KNDJX3AE5F7001234"

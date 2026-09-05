@@ -19,7 +19,9 @@ class SettingsBlock(private val store: SettingsStore) {
 
     fun start(scope: CoroutineScope) {
         scope.launch {
-            GeneralData.updateSettings(store.load() ?: Settings())
+            // Позначка «прочитано» ставиться тут і лише тут: за нею інші блоки
+            // розуміють, що типові значення вже змінилися на справжні.
+            GeneralData.updateSettings((store.load() ?: Settings()).copy(loaded = true))
 
             GeneralData.state
                 .map { it.settings }

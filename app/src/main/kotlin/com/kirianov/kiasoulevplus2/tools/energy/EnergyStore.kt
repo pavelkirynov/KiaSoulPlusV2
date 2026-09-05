@@ -10,16 +10,61 @@
 package com.kirianov.kiasoulevplus2.tools.energy
 
 import com.kirianov.kiasoulevplus2.tools.json.MiniJson
+import com.kirianov.kiasoulevplus2.tools.paths.CarPaths
 import java.io.File
 import java.io.IOException
 
 interface EnergyStore {
+    /**
+     * Перевести сховище на дані конкретного авто.
+     *
+     * Порожня реалізація навмисно: у пам'яті, де сховище живе одним об'єктом на
+     * тест, переселяти нічого. Значення має лише файлова реалізація.
+     */
+    fun useCar(vin: String) {}
+
     fun load(): LevelsSnapshot?
     fun save(snapshot: LevelsSnapshot)
     fun clear()
 }
 
-class FileEnergyStore(private val directory: File) : EnergyStore {
+class FileEnergyStore(private val root: File) : EnergyStore {
+
+    /** Тека поточного авто. Порожня — корінь: так лежала спадщина до гаража. */
+    @Volatile
+    private var carDirectory: File = root
+
+    private val directory: File get() = carDirectory
+
+    /**
+     * Перевести сховище на дані конкретного авто.
+     *
+     * Дані кожного авто живуть у власній підтеці, і перемкнути її можна на ходу:
+     * VIN стає відомим лише після підключення, тобто пізніше, ніж застосунок
+     * піднявся.
+     *
+     * ПЕРЕЇЗД СПАДЩИНИ РОБИТЬСЯ ТУТ, і це навмисно. До появи гаража всі дані
+     * лежали просто в корені теки застосунку — у того, хто оновився, там
+     * і лежить уся його історія. Хто саме має її переселити? Той, хто знає імена
+     * своїх файлів, тобто це сховище; будь-хто інший мусив би знати чужі імена.
+     * Переїзд відбувається рівно один раз: далі файл на новому місці вже є.
+     */
+    override fun useCar(vin: String) {
+        val target = CarPaths.directoryFor(root, vin)
+        adoptLegacy(target)
+        carDirectory = target
+    }
+
+    private fun adoptLegacy(target: File) {
+        runCatching {
+            target.mkdirs()
+            for (name in OWN_FILES) {
+                val legacy = File(root, name)
+                val moved = File(target, name)
+                if (legacy.isFile && !moved.exists()) legacy.renameTo(moved)
+            }
+        }
+    }
 
     private val file get() = File(directory, FILE_NAME)
 
@@ -115,6 +160,9 @@ class FileEnergyStore(private val directory: File) : EnergyStore {
     }
 
     private companion object {
+        /** Свої файли: їх і переселяємо, коли з'являється авто. */
+        val OWN_FILES get() = listOf(FILE_NAME)
+
         const val FILE_NAME = "battery_curve.json"
     }
 }

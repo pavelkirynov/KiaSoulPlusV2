@@ -20,6 +20,8 @@ import com.kirianov.kiasoulevplus2.Data.BmsCommands
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.PairedDevice
+import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
+import com.kirianov.kiasoulevplus2.tools.frames.VinDecoder
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -203,6 +205,10 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
      */
     private fun startDataPolling(scope: CoroutineScope) {
         pollingJob?.cancel()
+        // Нове підключення — новий привід спитати VIN: могли пересісти в іншу
+        // машину, а могли просто перепідключитися до тієї самої, і в обох випадках
+        // питання коштує один запит.
+        vinAsked = false
         pollingJob = scope.launch(Dispatchers.IO) {
             var consecutiveFailures = 0
 
@@ -240,9 +246,20 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
     /** Номер вікна монітора: за ним обирається наступний фільтр із черги. */
     private var monitorWindow = 0L
 
+    /** Чи питали вже VIN у цьому підключенні. Скидається на кожному з'єднанні. */
+    private var vinAsked = false
+
     private suspend fun pollOnce() {
         val inputBms = GeneralData.state.value.inputBms
         val header = inputBms.customHeader.ifEmpty { BmsCommands.HEADER_BMS }
+
+        // VIN — один раз на підключення, першим ділом. Поки він невідомий, блоки
+        // рахують за минуле авто, а якщо машина інша, це вже зіпсовані дані. Тому
+        // питаємо до всього іншого, а не між справами.
+        if (!vinAsked) {
+            vinAsked = true
+            readVin()
+        }
 
         if (!inputBms.scanCellsRequested) {
             val command = BmsCommands.REQUEST_BATTERY_MAIN
@@ -263,6 +280,23 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
             // залишалася б заблокованою назавжди після першої ж помилки.
             GeneralData.updateInputBms { it.copy(scanCellsRequested = false) }
         }
+    }
+
+    /**
+     * VIN із шини.
+     *
+     * Мовчання тут — звичайна річ, а не аварія: частина клонів ELM327 сервіс 09 не
+     * підтримує взагалі, а деякі авто віддають VIN лише при увімкненому запалюванні.
+     * Тоді застосунок працює як раніше, з авто «без імені»; питаємо ще раз при
+     * наступному підключенні.
+     */
+    private suspend fun readVin() {
+        val response = runCatching {
+            canBridge.sendCANCommand(BmsCommands.HEADER_OBD, BmsCommands.REQUEST_VIN)
+        }.getOrNull() ?: return
+
+        val vin = VinDecoder.decode(FrameParser.parse(response)) ?: return
+        GeneralData.noteDetectedVin(vin)
     }
 
     /**

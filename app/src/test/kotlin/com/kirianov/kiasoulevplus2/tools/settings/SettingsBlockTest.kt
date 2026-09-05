@@ -56,7 +56,9 @@ class SettingsBlockTest {
 
         GeneralData.setAutoConnect(false)
 
-        assertEquals(Settings(autoConnect = false), store.saved)
+        // loaded не зберігається — це познака «прочитано з диска», яка живе лише в
+        // пам'яті. Порівнюємо з нею, бо блок ставить її при завантаженні.
+        assertEquals(Settings(autoConnect = false, loaded = true), store.saved)
     }
 
     /** Щойно завантажене писати назад немає сенсу. */

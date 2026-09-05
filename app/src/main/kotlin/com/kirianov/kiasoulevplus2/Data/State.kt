@@ -44,6 +44,9 @@ data class State(
     /** Налаштування користувача: їх веде блок tools/settings. */
     val settings: Settings = Settings(),
 
+    /** Які авто відомі й за яке рахуємо: веде блок tools/garage. */
+    val garage: Garage = Garage(),
+
     /** Спаровані Bluetooth-пристрої: їх публікує блок services/bluetooth. */
     val pairedDevices: List<PairedDevice> = emptyList(),
 

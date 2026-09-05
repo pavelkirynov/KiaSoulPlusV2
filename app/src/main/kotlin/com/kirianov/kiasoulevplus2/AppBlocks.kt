@@ -19,6 +19,8 @@ import com.kirianov.kiasoulevplus2.tools.charging.FileChargeStore
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
 import com.kirianov.kiasoulevplus2.tools.energy.EnergyBlock
 import com.kirianov.kiasoulevplus2.tools.energy.FileEnergyStore
+import com.kirianov.kiasoulevplus2.tools.garage.FileGarageStore
+import com.kirianov.kiasoulevplus2.tools.garage.GarageBlock
 import com.kirianov.kiasoulevplus2.tools.journal.FileJournalStore
 import com.kirianov.kiasoulevplus2.tools.journal.JournalBlock
 import com.kirianov.kiasoulevplus2.tools.ml.FileMlStore
@@ -39,6 +41,8 @@ class AppBlocks(context: Context) {
     private val probe = ProbeBlock()
     private val vehicle = VehicleBlock()
     private val settings = SettingsBlock(FileSettingsStore(context.applicationContext.filesDir))
+    // Хто це авто. Від нього залежить, у якій теці лежать дані решти блоків.
+    private val garage = GarageBlock(FileGarageStore(context.applicationContext.filesDir))
     private val autoConnect = AutoConnectBlock()
     private val charging = ChargingBlock(FileChargeStore(context.applicationContext.filesDir))
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
@@ -62,6 +66,7 @@ class AppBlocks(context: Context) {
         vehicle.start(scope)
         charging.start(scope)
         settings.start(scope)
+        garage.start(scope)
         autoConnect.start(scope)
         storage.start(scope)
         prediction.start(scope)

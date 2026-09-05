@@ -30,10 +30,12 @@ import com.kirianov.kiasoulevplus2.Data.BatteryCurve
 import com.kirianov.kiasoulevplus2.Data.CurveRequest
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.State
-import com.kirianov.kiasoulevplus2.Data.Pack
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -85,6 +87,23 @@ class EnergyBlock(
                 }
             }
             publish()
+
+            // Змінилося авто — крива іншої батареї нам не підходить: у кожної свій
+            // пакет і своя шкала. Беремо з теки нового авто те, що там є.
+            launch {
+                GeneralData.state
+                    .map { it.garage.activeVin }
+                    .filter { it.isNotEmpty() }
+                    .distinctUntilChanged()
+                    .collect { vin ->
+                        withContext(ioDispatcher) { store.useCar(vin) }
+                        levels.reset()
+                        anchor = null
+                        chargeStart = null
+                        withContext(ioDispatcher) { store.load() }?.let { levels.restore(it) }
+                        publish()
+                    }
+            }
 
             GeneralData.state.collect { state ->
                 if (state.curve.request == CurveRequest.Reset) {
@@ -233,7 +252,10 @@ class EnergyBlock(
         // шкали відсоток найдешевший, і розтягнути його на всю шкалу означало б
         // занизити ємність у рази.
         val measuredTotal = levels.measuredTotalKwh
-        val total = measuredTotal ?: Pack.USABLE_CAPACITY_KWH
+        // Аксіому задає власник авто на екрані налаштувань: константа тут значила
+        // б, що всі машини однакові, а вони ні — рідний пакет удвічі менший за
+        // перепакований, і сплутати їх означає обіцяти вдвічі більший запас.
+        val total = measuredTotal ?: GeneralData.state.value.garage.active.effectivePackKwh
         val curve = levels.curve(total)
 
         GeneralData.updateCurve { current ->

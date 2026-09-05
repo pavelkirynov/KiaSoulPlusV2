@@ -14,6 +14,7 @@ import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -27,6 +28,21 @@ class ChargingBlock(
         scope.launch {
             var log = store.load() ?: ChargeLog()
             GeneralData.updateChargeLog(log)
+
+            // Змінилося авто — перечитати облік із його теки. Лічильники в різних
+            // машин свої, і продовжувати чужий означало б записати різницю між
+            // двома батареями як зарядку.
+            launch {
+                GeneralData.state
+                    .map { it.garage.activeVin }
+                    .filter { it.isNotEmpty() }
+                    .distinctUntilChanged()
+                    .collect { vin ->
+                        store.useCar(vin)
+                        log = store.load() ?: ChargeLog()
+                        GeneralData.updateChargeLog(log)
+                    }
+            }
 
             GeneralData.state
                 .map {
