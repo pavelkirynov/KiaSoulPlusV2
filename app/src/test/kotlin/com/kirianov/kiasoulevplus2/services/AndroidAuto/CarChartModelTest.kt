@@ -109,8 +109,12 @@ class CarChartModelTest {
             curveOf(0.0 to 0.0, 100.0 to 50.0).copy(totalMeasured = true),
         )
 
-        assertTrue(axiom.subtitle.contains("прийнято"))
-        assertTrue(measured.subtitle.contains("виміряно"))
+        // «Прийнято» звідси прибрано навмисно: у застосунку про зарядки це слово
+        // означає «отримано в батарею», і рядок «51.9 кВт·год прийнято» на машинному
+        // екрані читався саме так — ніби стільки щойно зарядили.
+        assertTrue(axiom.subtitle.contains("за паспортом"))
+        assertFalse("це слово плутає з отриманою енергією", axiom.subtitle.contains("прийнято"))
+        assertTrue(measured.subtitle.contains("виміряна зарядкою"))
     }
 
     /** Заряд великим: береться реальний відсоток, коли прогноз його вже знає. */

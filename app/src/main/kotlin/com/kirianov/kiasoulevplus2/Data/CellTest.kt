@@ -139,6 +139,32 @@ data class CellTestResult(
  */
 enum class CellColorMode { Resistance, Minimum }
 
+/**
+ * ЩО САМЕ ПОКАЗУВАТИ В КОЖНІЙ КОМІРЦІ СІТКИ.
+ *
+ * Тест міряє чотири різні речі, і кожна відповідає на своє питання. Показати їх
+ * одночасно в клітинці розміром із ніготь неможливо, а звести до однієї — означає
+ * вирішити за людину, яка з них важлива. Тому вони перемикаються.
+ *
+ * [Entry] — те, що було завжди: поле для введення напруг руками, коли машини під
+ * рукою немає. Лишається першим, бо це єдиний режим, у якому можна щось увести.
+ */
+enum class CellValueMode {
+    Entry,
+
+    /** Напруга спокою: до чого крива приходить при нульовому струмі. */
+    Rest,
+
+    /** Найнижча напруга за весь тест. Просте число, зрозуміле без пояснень. */
+    UnderLoad,
+
+    /** Найглибше відхилення від середнього по пакету, мВ. Струм тут скорочується. */
+    Deviation,
+
+    /** Надлишковий опір відносно середньої комірки, мОм. */
+    Resistance,
+}
+
 /** Що екран просить зробити з тестом комірок. */
 enum class CellTestRequest { None, Start, Stop, Clear }
 
@@ -152,6 +178,7 @@ enum class CellTestRequest { None, Start, Stop, Clear }
 data class CellTestState(
     val request: CellTestRequest = CellTestRequest.None,
     val colorMode: CellColorMode = CellColorMode.Resistance,
+    val valueMode: CellValueMode = CellValueMode.Entry,
     val running: Boolean = false,
     val sweeps: List<CellSweep> = emptyList(),
 

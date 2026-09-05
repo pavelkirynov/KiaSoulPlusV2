@@ -43,6 +43,12 @@ class DecoderBlock(private val cellDecoder: CellDecoder = CellDecoder()) {
                 val cells = cellDecoder.decodeResponses(frames.cellCommands, frames.cellResponses)
                 if (cells.cellVoltages.isEmpty()) return@onEach
 
+                // Таблиця комірок оновлюється й від проходу теж, а не лише від
+                // кнопки «Зчитати комірки». Без цього під час тесту, який читає
+                // комірки частіше за будь-що інше, сітка на екрані стояла порожня —
+                // рівно там, куди людина й дивиться, поки тест іде.
+                GeneralData.updateCells(cells)
+
                 GeneralData.publishDecodedSweep(
                     CellSweep(
                         voltages = cells.cellVoltages,

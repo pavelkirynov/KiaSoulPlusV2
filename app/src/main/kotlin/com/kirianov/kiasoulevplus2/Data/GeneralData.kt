@@ -116,6 +116,9 @@ object GeneralData {
     /** Яким із двох висновків фарбувати комірки. Вибір людини, не блока. */
     fun setCellColorMode(mode: CellColorMode) = updateCellTest { it.copy(colorMode = mode) }
 
+    /** Що показувати в клітинках сітки. Вибір людини, не блока. */
+    fun setCellValueMode(mode: CellValueMode) = updateCellTest { it.copy(valueMode = mode) }
+
     fun updateVehicle(vehicle: VehicleData) = _state.update { it.copy(vehicle = vehicle) }
 
     /** Облік зарядок за пожиттєвим лічильником: пише блок tools/charging. */

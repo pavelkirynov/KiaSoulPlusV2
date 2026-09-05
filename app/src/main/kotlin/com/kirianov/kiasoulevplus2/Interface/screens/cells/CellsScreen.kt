@@ -10,6 +10,7 @@ package com.kirianov.kiasoulevplus2.Interface.screens.cells
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import com.kirianov.kiasoulevplus2.Data.CellData
 import com.kirianov.kiasoulevplus2.Data.CellColorMode
 import com.kirianov.kiasoulevplus2.Data.CellHealth
+import com.kirianov.kiasoulevplus2.Data.CellValueMode
 import com.kirianov.kiasoulevplus2.Data.CellVerdict
 import com.kirianov.kiasoulevplus2.Data.CellTestState
 import com.kirianov.kiasoulevplus2.Data.ManualCells
@@ -147,6 +149,17 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
             )
         }
 
+        // Що показувати в клітинках. З'являється лише коли тест уже щось намірив:
+        // до того перемикати нема між чим, а порожні чипи вчать не читати підказки.
+        if (appState.cellTest.result.hasCells) {
+            Spacer(modifier = Modifier.height(6.dp))
+            ValueModeChips(
+                selected = appState.cellTest.valueMode,
+                resistanceKnown = appState.cellTest.result.resistanceKnown,
+                onSelect = cellsViewModel::onValueModeChange,
+            )
+        }
+
         Spacer(modifier = Modifier.height(6.dp))
 
         when (viewMode) {
@@ -208,6 +221,7 @@ private fun CompactCellCell(
     manualCells: ManualCells,
     modifier: Modifier,
     loadColor: Color? = null,
+    test: CellTestState? = null,
 ) {
     val canVoltage = cellData.cellVoltages.getOrElse(index) { 0.0 }
     val activeVoltage = if (canVoltage > 0.0) canVoltage else manualCells.voltageAt(index)
@@ -215,6 +229,7 @@ private fun CompactCellCell(
     var textValue by remember(activeVoltage) {
         mutableStateOf(if (activeVoltage > 0.0) formatDecimal(activeVoltage, 2) else "")
     }
+    val reading = if (test == null || test.valueMode == CellValueMode.Entry) null else cellTextOf(index, test)
 
     Box(
         modifier = modifier
@@ -234,19 +249,32 @@ private fun CompactCellCell(
                 .align(Alignment.TopStart)
                 .padding(1.dp),
         )
-        BasicTextField(
-            value = textValue,
-            onValueChange = { newValue ->
-                textValue = newValue
-                cellsViewModel.onManualVoltageEntered(index, newValue)
-            },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            textStyle = TextStyle(fontSize = 8.sp, textAlign = TextAlign.Center),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 2.dp),
-        )
+        if (reading != null) {
+            // Готове число з тесту: правити його руками немає сенсу, тож і поля
+            // введення тут немає — просто текст.
+            Text(
+                text = reading,
+                fontSize = 8.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 1.dp),
+            )
+        } else {
+            BasicTextField(
+                value = textValue,
+                onValueChange = { newValue ->
+                    textValue = newValue
+                    cellsViewModel.onManualVoltageEntered(index, newValue)
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 8.sp, textAlign = TextAlign.Center),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+            )
+        }
     }
 }
 
@@ -273,6 +301,7 @@ private fun CompactGridView(
                 manualCells = manualCells,
                 modifier = Modifier.size(34.dp),
                 loadColor = loadColorOf(index, test),
+                test = test,
             )
         }
     }
@@ -462,3 +491,61 @@ private fun worstLine(cells: List<CellVerdict>, value: (CellVerdict) -> String):
 }
 
 private const val WORST_SHOWN = 3
+
+
+/**
+ * Перемикач того, що стоїть у клітинках сітки.
+ *
+ * Чотири різні числа з одного тесту, і кожне відповідає на своє питання. «Опір»
+ * доступний лише тоді, коли струм за тест справді мінявся: показати шкалу, за якою
+ * нічого не порахували, гірше, ніж не показати її взагалі.
+ */
+@Composable
+private fun ValueModeChips(
+    selected: CellValueMode,
+    resistanceKnown: Boolean,
+    onSelect: (CellValueMode) -> Unit,
+) {
+    val modes = listOf(
+        CellValueMode.Entry to "Ввід",
+        CellValueMode.Rest to "ХХ",
+        CellValueMode.UnderLoad to "Під навант.",
+        CellValueMode.Deviation to "Відхилення",
+        CellValueMode.Resistance to "Опір",
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        modes.forEach { (mode, title) ->
+            FilterChip(
+                selected = selected == mode,
+                onClick = { onSelect(mode) },
+                enabled = mode != CellValueMode.Resistance || resistanceKnown,
+                label = { Text(title) },
+            )
+        }
+    }
+}
+
+/**
+ * Що написати в клітинці комірки.
+ *
+ * Порожньо означає «цього числа немає», і це чесніше за нуль: нуль вольт і
+ * «не міряли» на екрані виглядали б однаково, а означають протилежне.
+ */
+private fun cellTextOf(index: Int, test: CellTestState): String {
+    val verdict = test.result.cells.getOrNull(index) ?: return ""
+    return when (test.valueMode) {
+        CellValueMode.Entry -> ""
+        CellValueMode.Rest -> if (verdict.restVolts > 0.0) formatDecimal(verdict.restVolts, 2) else ""
+        CellValueMode.UnderLoad -> if (verdict.minVolts > 0.0) formatDecimal(verdict.minVolts, 2) else ""
+        // Мілівольти, а не вольти: відхилення живуть у сотих частках вольта, і в
+        // клітинці «-0.03» читається гірше за «-30».
+        CellValueMode.Deviation -> formatDecimal(verdict.worstDeviationVolts * 1000.0, 0)
+        CellValueMode.Resistance -> verdict.excessMilliOhm?.let { formatDecimal(it, 2) } ?: ""
+    }
+}

@@ -84,8 +84,14 @@ object CarChartModel {
     const val MIN_VOLTS = 300.0
     const val MAX_VOLTS = 420.0
 
-    /** Скільки поділок на кожній осі. Більше на екрані авто не прочитати. */
-    const val TICKS = 4
+    /**
+     * Скільки поділок на кожній осі.
+     *
+     * Три, а не чотири: обкладинка на машинному екрані виявилася маленькою, і
+     * підписи, які не прочитати, гірші за їхню відсутність — вони ще й з'їдають
+     * місце в самого графіка.
+     */
+    const val TICKS = 3
 
     fun chartFor(id: String, state: State): CarChart = when (id) {
         GAUGE_ID -> gauge(state)
@@ -189,9 +195,17 @@ object CarChartModel {
             ChartTick(at = share, text = formatDecimal(from + share * (to - from), decimals))
         }
 
+    /**
+     * Підпис під назвою.
+     *
+     * «Прийнято» звідси прибрано навмисно: у застосунку про зарядки це слово означає
+     * «отримано в батарею», і рядок «51.9 кВт·год прийнято» на машинному екрані
+     * читався саме так — ніби стільки щойно зарядили. Тут же йшлося про ємність, яку
+     * ще не міряли.
+     */
     private fun subtitleOf(curve: BatteryCurve): String {
         val total = formatDecimal(curve.totalKwh, 1)
-        val proven = if (curve.totalMeasured) "виміряно" else "прийнято"
-        return "$total кВт·год $proven, шкали пройдено ${curve.coveredPercent.toInt()} %"
+        val proven = if (curve.totalMeasured) "виміряна зарядкою" else "поки за паспортом"
+        return "$total кВт·год, $proven; шкали пройдено ${curve.coveredPercent.toInt()} %"
     }
 }

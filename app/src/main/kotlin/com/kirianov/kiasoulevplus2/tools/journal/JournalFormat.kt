@@ -24,6 +24,7 @@
 package com.kirianov.kiasoulevplus2.tools.journal
 
 import com.kirianov.kiasoulevplus2.Data.State
+import com.kirianov.kiasoulevplus2.tools.frames.FrameDiff
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -114,6 +115,9 @@ object JournalFormat {
             out += "$at charge? «${chargeAfter.lastDecision}»"
         }
 
+        out += busSnapshots(before, after, at)
+        out += cellTest(before, after, at)
+
         val modelBefore = before.ml.model
         val modelAfter = after.ml.model
         if (modelBefore.segments != modelAfter.segments) {
@@ -186,4 +190,79 @@ object JournalFormat {
     private val STAMP = object : ThreadLocal<SimpleDateFormat>() {
         override fun initialValue() = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
     }
+
+    /**
+     * ЗНІМКИ ШИНИ — У ЖУРНАЛ, І ЦЕ НЕ ДРІБНИЦЯ.
+     *
+     * Знімок живе в пам'яті процесу: закрив застосунок — і полювання на біт
+     * запалювання починається спочатку. Дивитися на нього можна лише на тому самому
+     * екрані, а надіслати не можна взагалі. Журнал же й зберігається, і надсилається
+     * однією кнопкою, — тож знімок пишеться сюди цілком, кадр за кадром.
+     *
+     * Разом зі знімком пишеться й різниця, якщо є з чим порівнювати: саме вона й
+     * потрібна, а рахувати її вдруге по рядках журналу — марна робота.
+     */
+    private fun busSnapshots(before: State, after: State, at: String): List<String> {
+        val out = mutableListOf<String>()
+
+        listOf(
+            "А" to (before.probe.snapshotA to after.probe.snapshotA),
+            "Б" to (before.probe.snapshotB to after.probe.snapshotB),
+        ).forEach { (name, pair) ->
+            val (was, now) = pair
+            if (now == null || now == was) return@forEach
+            out += "$at bus $name «${now.label}» кадрів=${now.frames.size}"
+            now.frames.toSortedMap().forEach { (id, bytes) ->
+                out += "$at bus $name $id " + bytes.joinToString(" ") { "%02X".format(it) }
+            }
+        }
+
+        val hadBoth = before.probe.snapshotA != null && before.probe.snapshotB != null
+        val hasBoth = after.probe.snapshotA != null && after.probe.snapshotB != null
+        val changed = before.probe.snapshotA != after.probe.snapshotA ||
+            before.probe.snapshotB != after.probe.snapshotB
+        if (hasBoth && (changed || !hadBoth)) {
+            FrameDiff.compare(after.probe.snapshotA!!.frames, after.probe.snapshotB!!.frames)
+                .filterNot { it.onlyInOne }
+                .forEach { frame ->
+                    frame.changes.forEach { out += "$at bus? ${frame.id} ${it.describe()}" }
+                }
+        }
+        return out
+    }
+
+    /**
+     * Підсумок тесту комірок — теж у журнал.
+     *
+     * Тест триває хвилини, а його результат живе до наступного натискання. Без рядка
+     * в журналі порівняти сьогоднішній тест із учорашнім неможливо, а саме порівняння
+     * і покаже, чи комірка справді слабшає, чи це був один невдалий прохід.
+     */
+    private fun cellTest(before: State, after: State, at: String): List<String> {
+        val was = before.cellTest.result
+        val now = after.cellTest.result
+        if (now == was || !now.hasCells) return emptyList()
+        // Пишемо не кожен прохід, а зміну підсумку на завершеному тесті: рядок на
+        // кожен прохід утопив би журнал у собі.
+        if (after.cellTest.running) return emptyList()
+
+        val out = mutableListOf(
+            "$at cells проходів=${now.sweeps}/${now.steadySweeps} " +
+                "розмах=${num(now.currentSpreadA)}А потужність=${num(now.averagePowerKw)}кВт " +
+                "опір=${flag(now.resistanceKnown)}",
+        )
+        now.worstByResistance.take(WORST_CELLS).forEach { verdict ->
+            out += "$at cells R №${verdict.index + 1} +${num(verdict.excessMilliOhm)} мОм"
+        }
+        now.worstByMinimum.take(WORST_CELLS).forEach { verdict ->
+            out += "$at cells U №${verdict.index + 1} ${num(verdict.minVolts)} В " +
+                "(-${num(verdict.minBelowMedianVolts * 1000.0)} мВ)"
+        }
+        if (now.note.isNotEmpty()) out += "$at cells? «${now.note}»"
+        return out
+    }
+
+    /** Скільки найгірших комірок писати. Більше в журналі однаково не читають. */
+    private const val WORST_CELLS = 5
+
 }

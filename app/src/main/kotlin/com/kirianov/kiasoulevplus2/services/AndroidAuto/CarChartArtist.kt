@@ -49,8 +49,6 @@ object CarChartArtist {
         val canvas = Canvas(bitmap)
         canvas.drawColor(COLOR_BACKGROUND)
 
-        drawHeader(canvas, chart)
-
         if (!chart.hasCurves) {
             drawMessage(canvas, chart)
             return bitmap
@@ -63,18 +61,13 @@ object CarChartArtist {
         return bitmap
     }
 
-    private fun drawHeader(canvas: Canvas, chart: CarChart) {
-        canvas.drawText(chart.title, PAD, SIZE * 0.10f, textPaint(SIZE * 0.075f, COLOR_TEXT, bold = true))
-        canvas.drawText(chart.subtitle, PAD, SIZE * 0.155f, textPaint(SIZE * 0.042f, COLOR_CAPTION))
-    }
-
     /**
      * Порожнє полотно з поясненням. Картинка без жодного слова читалася б як
      * несправність, а не як «замірів ще немає».
      */
     private fun drawMessage(canvas: Canvas, chart: CarChart) {
-        val paint = textPaint(SIZE * 0.048f, COLOR_CAPTION)
-        var y = SIZE * 0.45f
+        val paint = textPaint(SIZE * 0.060f, COLOR_CAPTION)
+        var y = SIZE * 0.40f
         wrap(chart.message, paint, SIZE - 2 * PAD).forEach { line ->
             canvas.drawText(line, PAD, y, paint)
             y += paint.textSize * 1.4f
@@ -84,7 +77,7 @@ object CarChartArtist {
     private fun drawGrid(canvas: Canvas, chart: CarChart, right: Float) {
         val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = COLOR_GRID
-            strokeWidth = SIZE * 0.003f
+            strokeWidth = SIZE * 0.004f
         }
         chart.leftTicks.forEach { tick ->
             val y = yPixel(tick.at)
@@ -101,7 +94,7 @@ object CarChartArtist {
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = if (series.axis == ChartSeries.Axis.Left) COLOR_ENERGY else COLOR_VOLTS
-            strokeWidth = SIZE * 0.008f
+            strokeWidth = SIZE * 0.014f
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
@@ -120,12 +113,12 @@ object CarChartArtist {
     }
 
     private fun drawTickLabels(canvas: Canvas, chart: CarChart, right: Float) {
-        val left = textPaint(SIZE * 0.036f, COLOR_ENERGY).apply { textAlign = Paint.Align.RIGHT }
+        val left = textPaint(SIZE * 0.055f, COLOR_ENERGY).apply { textAlign = Paint.Align.RIGHT }
         chart.leftTicks.forEach { tick ->
             canvas.drawText(tick.text, plotLeft() - SIZE * 0.012f, yPixel(tick.at) + left.textSize / 3f, left)
         }
 
-        val voltLabel = textPaint(SIZE * 0.036f, COLOR_VOLTS)
+        val voltLabel = textPaint(SIZE * 0.055f, COLOR_VOLTS)
         chart.rightTicks.forEach { tick ->
             canvas.drawText(
                 tick.text,
@@ -135,30 +128,38 @@ object CarChartArtist {
             )
         }
 
-        val bottom = textPaint(SIZE * 0.036f, COLOR_CAPTION).apply { textAlign = Paint.Align.CENTER }
+        val bottom = textPaint(SIZE * 0.055f, COLOR_CAPTION).apply { textAlign = Paint.Align.CENTER }
         chart.bottomTicks.forEach { tick ->
             canvas.drawText(tick.text, xPixel(tick.at, right), plotBottom() + SIZE * 0.055f, bottom)
         }
 
-        val units = textPaint(SIZE * 0.034f, COLOR_CAPTION)
+        val units = textPaint(SIZE * 0.050f, COLOR_CAPTION)
         canvas.drawText(chart.leftUnit, PAD, plotTop() - SIZE * 0.015f, units)
         if (chart.rightUnit.isNotEmpty()) {
             units.textAlign = Paint.Align.RIGHT
             canvas.drawText(chart.rightUnit, SIZE - PAD, plotTop() - SIZE * 0.015f, units)
         }
         units.textAlign = Paint.Align.CENTER
-        canvas.drawText("% шкали, зліва повна", SIZE / 2f, SIZE - SIZE * 0.02f, units)
+        canvas.drawText("% шкали", SIZE / 2f, SIZE - SIZE * 0.015f, units)
     }
 
     // --- Геометрія полотна ------------------------------------------------------
 
-    private fun plotLeft() = SIZE * 0.13f
-    private fun plotTop() = SIZE * 0.24f
+    /**
+     * Полотно займає майже весь квадрат, і заголовка на ньому немає.
+     *
+     * ЧОМУ. Хост і так друкує назву та підпис поруч із обкладинкою — це заголовок
+     * «треку» й «виконавця». Малювати їх ще раз усередині картинки означало
+     * витрачати чверть висоти на другий примірник того самого тексту. А обкладинка
+     * на машинному екрані виявилася маленькою: там кожен піксель на рахунку.
+     */
+    private fun plotLeft() = SIZE * 0.15f
+    private fun plotTop() = SIZE * 0.10f
     private fun plotBottom() = SIZE * 0.86f
 
     /** Праворуч лишаємо місце під підписи напруги, лише коли вони є. */
     private fun plotRight(chart: CarChart) =
-        if (chart.rightTicks.isEmpty()) SIZE * 0.96f else SIZE * 0.88f
+        if (chart.rightTicks.isEmpty()) SIZE * 0.95f else SIZE * 0.85f
 
     private fun xPixel(share: Double, right: Float): Float =
         plotLeft() + (right - plotLeft()) * share.toFloat().coerceIn(0f, 1f)
