@@ -26,6 +26,14 @@ class SettingsViewModel : ViewModel() {
     /** Обрати авто вручну. Має сенс лише без зв'язку: на шині VIN сам себе назве. */
     fun onCarSelected(vin: String) = GeneralData.selectCar(vin)
 
+    // --- Обмін даними авто --------------------------------------------------------
+
+    fun onExport() = GeneralData.requestCarExport()
+
+    fun onExportHandled() = GeneralData.clearExportedPath()
+
+    fun onImport(path: String) = GeneralData.requestCarImport(path)
+
     /**
      * Ємність пакета, кВт·год.
      *

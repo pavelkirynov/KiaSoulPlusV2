@@ -24,6 +24,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -42,6 +44,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,10 +56,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.kirianov.kiasoulevplus2.Data.Garage
 import com.kirianov.kiasoulevplus2.Data.Pack
 import com.kirianov.kiasoulevplus2.Data.PairedDevice
 import com.kirianov.kiasoulevplus2.Data.Settings
+import com.kirianov.kiasoulevplus2.Data.ShareState
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 
 @Composable
@@ -76,6 +81,14 @@ fun SettingsScreen(settingsViewModel: SettingsViewModel) {
             onName = settingsViewModel::onCarNameChange,
             onPack = settingsViewModel::onPackKwhChange,
             onSelect = settingsViewModel::onCarSelected,
+        )
+
+        ShareCard(
+            share = state.garage.share,
+            carKnown = state.garage.active.known,
+            onExport = settingsViewModel::onExport,
+            onExportHandled = settingsViewModel::onExportHandled,
+            onImport = settingsViewModel::onImport,
         )
 
         ConnectionCard(
@@ -406,3 +419,116 @@ private fun askToRunUnrestricted(context: Context) {
     if (runCatching { context.startActivity(direct) }.isSuccess) return
     runCatching { context.startActivity(Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
 }
+
+
+/**
+ * ОБМІН ДАНИМИ АВТО МІЖ ТЕЛЕФОНАМИ.
+ *
+ * Одна машина, два водії, два телефони: кожен бачить свою половину поїздок, і жодна
+ * з половин сама по собі не дає повної картини. Сервера в застосунку немає — а от
+ * файл переслати вміє будь-хто.
+ *
+ * ЗЛИТИ, А НЕ ЗАМІНИТИ, і саме тому кнопка називається «Прийняти», а не
+ * «Відновити». Журнал поїздок об'єднується без повторів, суми кривої додаються,
+ * облік зарядок береться свіжіший. Обидва телефони після обміну знають те саме.
+ *
+ * Один і той самий файл двічі не приймається: суми кривої додаються, і повторне
+ * прийняття тихо порахувало б ті самі проходи двічі.
+ */
+@Composable
+private fun ShareCard(
+    share: ShareState,
+    carKnown: Boolean,
+    onExport: () -> Unit,
+    onExportHandled: () -> Unit,
+    onImport: (String) -> Unit,
+) {
+    val context = LocalContext.current
+
+    // Готовий пакунок віддається системі одразу, щойно блок його зібрав. Тримати
+    // на екрані ще одну кнопку «а тепер надіслати» немає сенсу: людина вже
+    // натиснула «Поділитися».
+    LaunchedEffect(share.exportedPath) {
+        if (share.exportedPath.isNotEmpty()) {
+            shareBundle(context, share.exportedPath)
+            onExportHandled()
+        }
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        // Копіюємо до себе: обраний документ живе за чужим дозволом, який діє лише
+        // поки триває ця дія, а прийняти файл треба вже у фоновому блоці.
+        copyToCache(context, uri)?.let(onImport)
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Обмін даними авто", fontSize = 18.sp)
+
+            Text(
+                text = "Якщо цією машиною їздять із двох телефонів, кожен бачить лише " +
+                    "свою половину поїздок. Файл нижче переносить накопичене з одного " +
+                    "телефона на інший — і не замінює тамтешнє, а зливається з ним.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onExport,
+                    enabled = carKnown,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Поділитися") }
+                Button(
+                    onClick = { picker.launch(arrayOf("*/*")) },
+                    enabled = carKnown,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Прийняти") }
+            }
+
+            if (!carKnown) {
+                Text(
+                    text = "Спершу під'єднайтеся до авто: обмін прив'язаний до VIN, " +
+                        "щоб дані однієї машини не потрапили в іншу.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            if (share.note.isNotEmpty()) {
+                Text(text = share.note, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+/**
+ * Віддає пакунок системі. Через FileProvider: тека застосунку іншим застосункам
+ * напряму недоступна, і «Поділитися» без content:// просто нічого не відкриє.
+ */
+private fun shareBundle(context: Context, path: String) {
+    runCatching {
+        val file = java.io.File(path)
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, file.name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(
+            Intent.createChooser(intent, "Дані авто").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+}
+
+/** @return шлях до копії обраного файлу, або null, якщо прочитати його не вдалося. */
+private fun copyToCache(context: Context, uri: Uri): String? = runCatching {
+    val target = java.io.File(context.cacheDir, "incoming.kiasoul")
+    context.contentResolver.openInputStream(uri)!!.use { input ->
+        target.outputStream().use { input.copyTo(it) }
+    }
+    target.absolutePath
+}.getOrNull()

@@ -59,6 +59,9 @@ data class Garage(
     val activeVin: String = "",
     val detectedVin: String = "",
 
+    /** Обмін даними авто між телефонами. Не зберігається: живе одну дію. */
+    val share: ShareState = ShareState(),
+
     /** Чи прочитано список із диска. До того типові значення — не вибір користувача. */
     val loaded: Boolean = false,
 ) {
@@ -69,3 +72,26 @@ data class Garage(
     val mismatched: Boolean
         get() = detectedVin.isNotEmpty() && activeVin.isNotEmpty() && detectedVin != activeVin
 }
+
+/** Що екран просить зробити з обміном. */
+enum class ShareRequest { None, Export, Import }
+
+/**
+ * Обмін даними одного авто між телефонами.
+ *
+ * Одна машина, два водії, два телефони: кожен бачить свою половину поїздок, і жодна
+ * з половин сама по собі не дає повної картини. Сервера в застосунку немає, а от
+ * файл переслати вміє будь-хто.
+ *
+ * [exportedPath] — готовий файл, який екран має віддати системі «поділитися»;
+ * [importPath] — файл, який людина обрала, і його треба прийняти. Обидва
+ * порожніють одразу після того, як їх обробили: це доручення, а не стан.
+ */
+data class ShareState(
+    val request: ShareRequest = ShareRequest.None,
+    val exportedPath: String = "",
+    val importPath: String = "",
+
+    /** Що вийшло, людською мовою. Показується на екрані налаштувань. */
+    val note: String = "",
+)

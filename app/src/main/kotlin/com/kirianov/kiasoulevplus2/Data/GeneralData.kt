@@ -152,6 +152,19 @@ object GeneralData {
     fun noteDetectedVin(vin: String) =
         _state.update { it.copy(garage = it.garage.copy(detectedVin = vin)) }
 
+    fun updateShare(transform: (ShareState) -> ShareState) =
+        updateGarage { it.copy(share = transform(it.share)) }
+
+    /** Зібрати файл із даними активного авто. */
+    fun requestCarExport() = updateShare { it.copy(request = ShareRequest.Export, note = "") }
+
+    /** Прийняти файл із даними: злити його з нашими. */
+    fun requestCarImport(path: String) =
+        updateShare { it.copy(request = ShareRequest.Import, importPath = path, note = "") }
+
+    /** Екран віддав файл системі «поділитися» — доручення виконано. */
+    fun clearExportedPath() = updateShare { it.copy(exportedPath = "") }
+
     /** Обране авто. Вручну — лише коли зв'язку немає: на шині VIN сам себе назве. */
     fun selectCar(vin: String) =
         _state.update { it.copy(garage = it.garage.copy(activeVin = vin)) }

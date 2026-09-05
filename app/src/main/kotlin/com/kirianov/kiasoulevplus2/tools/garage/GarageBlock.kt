@@ -82,7 +82,7 @@ class GarageBlock(
             .map { it.garage }
             // Знімок «прочитано з диска» писати назад немає сенсу. Порівнюємо без
             // detectedVin: він живе одне підключення й на диск не належить.
-            .map { it.copy(detectedVin = "") }
+            .map { it.copy(detectedVin = "", share = com.kirianov.kiasoulevplus2.Data.ShareState()) }
             .distinctUntilChanged()
             .drop(1)
             .onEach(store::save)

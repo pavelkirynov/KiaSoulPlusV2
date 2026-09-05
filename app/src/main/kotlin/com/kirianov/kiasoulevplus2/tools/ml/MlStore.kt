@@ -16,6 +16,7 @@
 package com.kirianov.kiasoulevplus2.tools.ml
 
 import com.kirianov.kiasoulevplus2.Data.MlSegment
+import com.kirianov.kiasoulevplus2.tools.paths.CarDataStore
 import com.kirianov.kiasoulevplus2.tools.paths.CarPaths
 import java.io.File
 import java.io.IOException
@@ -36,7 +37,7 @@ interface MlStore {
     fun clear()
 }
 
-class FileMlStore(private val root: File) : MlStore {
+class FileMlStore(private val root: File) : MlStore, CarDataStore {
 
     /** Тека поточного авто. Порожня — корінь: так лежала спадщина до гаража. */
     @Volatile
@@ -76,6 +77,64 @@ class FileMlStore(private val root: File) : MlStore {
 
     private val modelFile get() = File(directory, MODEL_FILE)
     private val logFile get() = File(directory, LOG_FILE)
+
+    /**
+     * Назовні йде ЛИШЕ журнал відрізків, без знімка моделі.
+     *
+     * Журнал — це сирі дані: що, коли й на чому проїхали. Знімок — накопичені
+     * статистики, зібрані з цього журналу на конкретній машині з конкретною
+     * ємністю. Віддавати знімок означало б віддати чужу впевненість разом із чужим
+     * апріорі, а зібрати те саме з журналу приймальна сторона вміє сама — і зробить
+     * це вже зі СВОЄЮ ємністю.
+     */
+    override fun exportTo(directory: File) {
+        runCatching {
+            directory.mkdirs()
+            if (logFile.isFile) logFile.copyTo(File(directory, LOG_FILE), overwrite = true)
+        }
+    }
+
+    /**
+     * ГОЛОВНЕ ЗЛИТТЯ З УСІХ. Тут лежить уся наука про поїздки, і саме заради нього
+     * «поділитися» й затівалося.
+     *
+     * Об'єднання без повторів за часом початку відрізка. Час тут придатний за ключ
+     * тому, що відрізок починається від тику лічильника пробігу — дві поїздки не
+     * можуть початися в ту саму мілісекунду, а той самий відрізок, що приїхав двома
+     * різними шляхами, має однаковий час і зливається в один.
+     *
+     * Знімок моделі після злиття видаляється навмисно: він зібраний зі старого
+     * журналу й новим відрізкам уже не відповідає. Модель побачить, що знімка немає,
+     * і чесно збереться з журналу наново — з усього, і свого, і прийнятого.
+     */
+    override fun mergeFrom(directory: File): String {
+        val incoming = runCatching {
+            File(directory, LOG_FILE).takeIf { it.isFile }?.readLines().orEmpty()
+        }.getOrDefault(emptyList())
+        if (incoming.isEmpty()) return ""
+
+        val mine = runCatching { logFile.takeIf { it.isFile }?.readLines().orEmpty() }
+            .getOrDefault(emptyList())
+
+        val byTime = linkedMapOf<Long, String>()
+        (mine + incoming).forEach { line ->
+            val segment = MlCodec.decodeSegment(line) ?: return@forEach
+            byTime.putIfAbsent(segment.startedAtMs, line)
+        }
+        val added = byTime.size - mine.count { MlCodec.decodeSegment(it) != null }
+        if (added <= 0) return ""
+
+        return runCatching {
+            this.directory.mkdirs()
+            val merged = byTime.entries.sortedBy { it.key }.joinToString("\n") { it.value }
+            val temporary = File(this.directory, "$LOG_FILE.tmp")
+            temporary.writeText(merged + "\n")
+            temporary.renameTo(logFile)
+            // Знімок зібрано зі старого журналу — новим відрізкам він не відповідає.
+            modelFile.delete()
+            "у журнал поїздок додано $added відрізків"
+        }.getOrDefault("")
+    }
 
     init {
         // Прибрати покоління з перевернутим знаком. Мовчки: файлів може й не

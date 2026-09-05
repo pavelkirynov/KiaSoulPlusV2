@@ -10,6 +10,7 @@
 package com.kirianov.kiasoulevplus2.tools.energy
 
 import com.kirianov.kiasoulevplus2.tools.json.MiniJson
+import com.kirianov.kiasoulevplus2.tools.paths.CarDataStore
 import com.kirianov.kiasoulevplus2.tools.paths.CarPaths
 import java.io.File
 import java.io.IOException
@@ -28,7 +29,7 @@ interface EnergyStore {
     fun clear()
 }
 
-class FileEnergyStore(private val root: File) : EnergyStore {
+class FileEnergyStore(private val root: File) : EnergyStore, CarDataStore {
 
     /** Тека поточного авто. Порожня — корінь: так лежала спадщина до гаража. */
     @Volatile
@@ -68,12 +69,70 @@ class FileEnergyStore(private val root: File) : EnergyStore {
 
     private val file get() = File(directory, FILE_NAME)
 
+    override fun exportTo(directory: File) {
+        runCatching {
+            directory.mkdirs()
+            if (file.isFile) file.copyTo(File(directory, FILE_NAME), overwrite = true)
+        }
+    }
+
+    /**
+     * Крива зливається ДОДАВАННЯМ, і це не хитрість, а те, чим вона є.
+     *
+     * У кожній корзині шкали лежать дві суми — скільки кіловат-годин і скільки
+     * відсотків там набралося за всі проходи. Середнє з них і дає нахил кривої.
+     * Два телефони їздили тією самою машиною в різний час, тобто бачили РІЗНІ
+     * проходи; сума сум — це рівно те саме, що вийшло б, якби всі ці проходи бачив
+     * один телефон.
+     *
+     * Двічі один і той самий пакунок додати не можна — і саме тому пакунки мають
+     * позначку, а вже прийняті записані. Стежить за цим блок, який пакунки й
+     * приймає: сховищу знати про них не треба.
+     */
+    override fun mergeFrom(directory: File): String {
+        val incoming = runCatching { decode(File(directory, FILE_NAME).readText()) }.getOrNull()
+            ?: return ""
+        val current = load()
+        if (current == null) {
+            save(incoming)
+            return "криву ємності взято цілком (${incoming.samples} замірів)"
+        }
+        save(plus(current, incoming))
+        return "до кривої додано ${incoming.samples} замірів"
+    }
+
+    /**
+     * Сума двох знімків кривої.
+     *
+     * Закладку на незавершену зарядку не зливаємо взагалі: вона про те, що
+     * відбувається просто зараз на ОДНОМУ телефоні, і чужа тут означала б зарядку,
+     * якої на цьому телефоні не було.
+     */
+    private fun plus(a: LevelsSnapshot, b: LevelsSnapshot): LevelsSnapshot {
+        val size = maxOf(a.sumKwh.size, b.sumKwh.size)
+        fun add(x: DoubleArray, y: DoubleArray) =
+            DoubleArray(size) { (x.getOrNull(it) ?: 0.0) + (y.getOrNull(it) ?: 0.0) }
+
+        return a.copy(
+            sumKwh = add(a.sumKwh, b.sumKwh),
+            sumPercent = add(a.sumPercent, b.sumPercent),
+            samples = a.samples + b.samples,
+            totalSumKwh = a.totalSumKwh + b.totalSumKwh,
+            fullChargeSamples = a.fullChargeSamples + b.fullChargeSamples,
+        )
+    }
+
     override fun load(): LevelsSnapshot? = try {
         val source = file
-        if (!source.isFile) {
-            null
-        } else {
-            val values = MiniJson.decode(source.readText().trim())
+        if (!source.isFile) null else decode(source.readText())
+    } catch (_: IOException) {
+        null
+    }
+
+    /** Розбір знімка з тексту. Окремо від [load] — щоб читати й чужий файл. */
+    private fun decode(text: String): LevelsSnapshot? = try {
+        run {
+            val values = MiniJson.decode(text.trim())
             val energy = doubles(values["sumKwh"])
             val percent = doubles(values["sumPercent"])
             val samples = (values["samples"] as? Double)?.toInt()
@@ -94,8 +153,6 @@ class FileEnergyStore(private val root: File) : EnergyStore {
                 )
             }
         }
-    } catch (_: IOException) {
-        null
     } catch (_: IndexOutOfBoundsException) {
         null
     }

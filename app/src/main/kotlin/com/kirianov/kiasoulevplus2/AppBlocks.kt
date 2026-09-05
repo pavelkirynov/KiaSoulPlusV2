@@ -22,6 +22,7 @@ import com.kirianov.kiasoulevplus2.tools.energy.EnergyBlock
 import com.kirianov.kiasoulevplus2.tools.energy.FileEnergyStore
 import com.kirianov.kiasoulevplus2.tools.garage.FileGarageStore
 import com.kirianov.kiasoulevplus2.tools.garage.GarageBlock
+import com.kirianov.kiasoulevplus2.tools.garage.ShareBlock
 import com.kirianov.kiasoulevplus2.tools.journal.FileJournalStore
 import com.kirianov.kiasoulevplus2.tools.journal.JournalBlock
 import com.kirianov.kiasoulevplus2.tools.ml.FileMlStore
@@ -45,16 +46,31 @@ class AppBlocks(context: Context) {
     // Хто це авто. Від нього залежить, у якій теці лежать дані решти блоків.
     private val garage = GarageBlock(FileGarageStore(context.applicationContext.filesDir))
     private val autoConnect = AutoConnectBlock()
-    private val charging = ChargingBlock(FileChargeStore(context.applicationContext.filesDir))
+    private val chargeStore = FileChargeStore(context.applicationContext.filesDir)
+    private val charging = ChargingBlock(chargeStore)
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
     // Тест комірок під навантаженням: накопичує проходи й рахує підсумок.
     private val cellTest = CellTestBlock()
     // Каталог, а не Context: так сховище моделей лишається чистим Kotlin і
     // перевіряється тестами без емулятора, як і решта логіки проєкту.
-    private val prediction = MlBlock(FileMlStore(context.applicationContext.filesDir))
+    private val mlStore = FileMlStore(context.applicationContext.filesDir)
+    private val prediction = MlBlock(mlStore)
     // Міряє криву ємності різницею пожиттєвих лічильників.
-    private val energy = EnergyBlock(FileEnergyStore(context.applicationContext.filesDir))
+    private val energyStore = FileEnergyStore(context.applicationContext.filesDir)
+    private val energy = EnergyBlock(energyStore)
     private val foreground = ForegroundBlock(context.applicationContext)
+
+    /**
+     * Обмін даними авто між телефонами.
+     *
+     * Сховища перелічені тут, а не всередині блока: точка збірки має право знати
+     * всіх, а блок обміну бачить у них лише вміння віддати й прийняти.
+     */
+    private val share = ShareBlock(
+        root = context.applicationContext.filesDir,
+        cache = context.applicationContext.cacheDir,
+        stores = listOf(mlStore, energyStore, chargeStore),
+    )
 
     // Свідок усього, що відбувається: пише в файл те саме, що бачить екран.
     private val journal = JournalBlock(
@@ -70,6 +86,7 @@ class AppBlocks(context: Context) {
         charging.start(scope)
         settings.start(scope)
         garage.start(scope)
+        share.start(scope)
         autoConnect.start(scope)
         storage.start(scope)
         cellTest.start(scope)

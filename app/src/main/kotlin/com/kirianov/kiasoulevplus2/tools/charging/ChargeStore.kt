@@ -17,6 +17,7 @@ package com.kirianov.kiasoulevplus2.tools.charging
 
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.tools.json.MiniJson
+import com.kirianov.kiasoulevplus2.tools.paths.CarDataStore
 import com.kirianov.kiasoulevplus2.tools.paths.CarPaths
 import java.io.File
 import java.io.IOException
@@ -34,7 +35,7 @@ interface ChargeStore {
     fun save(log: ChargeLog)
 }
 
-class FileChargeStore(private val root: File) : ChargeStore {
+class FileChargeStore(private val root: File) : ChargeStore, CarDataStore {
 
     /** Тека поточного авто. Порожня — корінь: так лежала спадщина до гаража. */
     @Volatile
@@ -73,6 +74,32 @@ class FileChargeStore(private val root: File) : ChargeStore {
     }
 
     private val file get() = File(directory, FILE_NAME)
+
+    override fun exportTo(directory: File) {
+        runCatching {
+            directory.mkdirs()
+            if (file.isFile) file.copyTo(File(directory, FILE_NAME), overwrite = true)
+        }
+    }
+
+    /**
+     * Облік зарядок не додається, а ЗАМІНЮЄТЬСЯ свіжішим — і це єдине можливе
+     * правило.
+     *
+     * Тут немає чого об'єднувати: базовий показ пожиттєвого лічильника — це не сума
+     * подій, а знімок «де ми стояли, коли дивилися востаннє». Додати два знімки
+     * означало б записати різницю між ними як зарядку; узяти старіший — почати
+     * рахувати від давно минулого числа й приписати собі все, що набігло відтоді.
+     * Лишається взяти той, що бачив лічильник пізніше.
+     */
+    override fun mergeFrom(directory: File): String {
+        val incoming = runCatching { decode(File(directory, FILE_NAME).readText()) }.getOrNull()
+            ?: return ""
+        val current = load()
+        if (current != null && current.lastSeenAtMs >= incoming.lastSeenAtMs) return ""
+        save(incoming)
+        return "облік зарядок узято свіжіший"
+    }
 
     override fun load(): ChargeLog? = try {
         val source = file
