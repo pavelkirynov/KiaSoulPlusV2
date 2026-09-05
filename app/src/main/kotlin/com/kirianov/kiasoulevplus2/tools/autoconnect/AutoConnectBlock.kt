@@ -80,8 +80,39 @@ class AutoConnectBlock {
 
                 attempt++
                 GeneralData.requestConnect()
-                delay(AutoConnectPolicy.delayAfter(attempt))
+                if (waitOrArrival(AutoConnectPolicy.delayAfter(attempt))) attempt = 0
             }
         }
+    }
+
+    /**
+     * Чекати паузу між спробами — але прокинутись раніше, якщо водій сів в авто.
+     *
+     * Без цього відступ грав проти нас саме там, де мав допомогти. За ніч біля
+     * спального адаптера пауза доростає до межі у дві хвилини; вранці людина сідає
+     * за кермо — і чекає ці дві хвилини даремно, бо черговий сон почався за секунду
+     * до того. У журналі так і було: півтори години марних спроб, поки авто спало,
+     * а потім ще пауза вже після того, як воно прокинулось.
+     *
+     * Звістку про приїзд приносить будильник по магнітолі. Пильнуємо її дрібними
+     * кроками, а не окремим потоком: цикл і так живе весь час роботи застосунку.
+     *
+     * @return чи перервала паузу саме звістка про приїзд.
+     */
+    private suspend fun waitOrArrival(delayMs: Long): Boolean {
+        val arrivalsAtStart = GeneralData.state.value.arrivals
+        var waited = 0L
+        while (waited < delayMs) {
+            val step = minOf(ARRIVAL_CHECK_MS, delayMs - waited)
+            delay(step)
+            waited += step
+            if (GeneralData.state.value.arrivals != arrivalsAtStart) return true
+        }
+        return false
+    }
+
+    private companion object {
+        /** Крок очікування: секунда затримки на приїзді непомітна. */
+        const val ARRIVAL_CHECK_MS = 1_000L
     }
 }

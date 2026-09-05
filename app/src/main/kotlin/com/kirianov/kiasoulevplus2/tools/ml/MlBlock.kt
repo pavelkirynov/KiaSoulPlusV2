@@ -269,8 +269,20 @@ class MlBlock(
         rebuild(history)
     }
 
-    /** Довчити один відрізок так само, як це робить перебудова з журналу. */
+    /**
+     * Довчити один відрізок так само, як це робить перебудова з журналу.
+     *
+     * ЧОМУ ЛІЧИЛЬНИК РОСТЕ НАВІТЬ ДЛЯ ВІДКИНУТОГО. Він тут не про заслуги, а про
+     * місце в журналі: знімок запам'ятовує його значення, і саме за ним перезапуск
+     * знаходить хвіст, який до знімка не встиг. Якби відкинуті відрізки лічильник
+     * пропускав, хвіст щоразу відраховувався б не звідти й частина науки то
+     * губилася б, то вчилася двічі. Кілометри — навпаки, тільки вивчені: вони
+     * показують, скільки реального досвіду стоїть за прогнозом.
+     */
     private fun relearn(segment: MlSegment) {
+        learnedSegments++
+        if (!SegmentBuilder.isLearnable(segment)) return
+
         val predicted = consumption.learn(segment)
         if (predicted != null) quality.observe(segment, predicted)
         capacity.learnBuffer(segment.displaySocStartPercent, segment.socStartPercent, segment.startedAtMs)
@@ -278,7 +290,6 @@ class MlBlock(
         session.add(segment)?.let {
             capacity.learn(it.socStartPercent, it.socEndPercent, it.energyKwh, it.atMs)
         }
-        learnedSegments++
         learnedKm += segment.distanceKm
     }
 

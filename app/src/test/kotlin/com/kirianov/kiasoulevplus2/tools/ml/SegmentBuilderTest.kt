@@ -74,13 +74,34 @@ class SegmentBuilderTest {
     fun `regeneration comes back off the total`() {
         val builder = SegmentBuilder()
         val drive = Drive(speedKmh = 60.0, powerKw = -10.0, builder = builder)
-        drive.advance(seconds = 150)
+        drive.advance(seconds = 250)
+        // Гальмування в кінці: рекуперації менше, ніж тяги, тож відрізок лишається
+        // звичайною поїздкою — саме на такій і перевіряється знак.
         drive.powerKw = 10.0
-        val segment = drive.runUntilSegment(seconds = 400)
+        val segment = drive.runUntilSegment(seconds = 150)
 
         assertNotNull(segment)
         assertTrue("рекуперація мала бути порахована", segment!!.regenKwh > 0.0)
         assertTrue("чиста енергія менша за тягу", segment.energyKwh < segment.tractionKwh)
+        assertTrue("і все ж додатна", segment.energyKwh > 0.0)
+    }
+
+    /**
+     * Довгий спуск: авто їхало, а батарея поповнилась. Такий відрізок у науку не
+     * йде — не тому, що дані брехливі, а тому, що модель не має ознаки висоти й
+     * прочитає його як «на цій швидкості авто віддає мінус кіловат».
+     *
+     * Число, заради якого це зроблено: у журналі за три дні набралося 93 км, і один
+     * такий відрізок опускав середню витрату з 15.6 до 13.5 кВт·год/100 км — запас
+     * ходу з 320 до 370 км. Одна точка з сімнадцяти рухала відповідь на 15 %.
+     */
+    @Test
+    fun `a long descent does not become a lesson`() {
+        val builder = SegmentBuilder()
+        val drive = Drive(speedKmh = 60.0, powerKw = 8.0, builder = builder)
+
+        assertNull("спуск не мав стати відрізком", drive.runUntilSegment(seconds = 400))
+        assertTrue("і причина мала бути названа", builder.lastAbortReason.startsWith("спуск"))
     }
 
     /** Перехід «їдемо → заряджаємось» розриває відрізок: змішувати їх не можна. */

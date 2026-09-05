@@ -66,6 +66,10 @@ object CarGaugeArtist {
         when (gauge.kind) {
             CarGauge.Kind.Arc -> drawArc(canvas, gauge)
             CarGauge.Kind.Bar -> drawBar(canvas, gauge)
+            // Без шкали малювати нічого: саме число й підпис. Порожня плитка тут
+            // краща за трикутник із знаком оклику, який хост підставляє замість
+            // відсутньої іконки, — той читається як несправність авто.
+            CarGauge.Kind.Plain -> Unit
         }
         drawText(canvas, gauge)
         return bitmap
@@ -134,8 +138,33 @@ object CarGaugeArtist {
             textSize = SIZE * 0.11f
         }
 
-        canvas.drawText(gauge.label, SIZE / 2f, SIZE * 0.60f, value)
-        canvas.drawText(gauge.caption, SIZE / 2f, SIZE * 0.76f, caption)
+        // Без шкали число живе саме по собі, тож ставимо його по центру плитки й
+        // даємо крупніше: місця, яке займали дуга чи смуга, тут ніхто не займає.
+        val plain = gauge.kind == CarGauge.Kind.Plain
+        if (plain) value.textSize = SIZE * 0.30f
+
+        fitWidth(value, gauge.label)
+        fitWidth(caption, gauge.caption)
+
+        canvas.drawText(gauge.label, SIZE / 2f, if (plain) SIZE * 0.52f else SIZE * 0.60f, value)
+        canvas.drawText(gauge.caption, SIZE / 2f, if (plain) SIZE * 0.70f else SIZE * 0.76f, caption)
+    }
+
+    /**
+     * Зменшити шрифт, поки рядок не влізе в плитку.
+     *
+     * Обрізаний підпис гірший за дрібний: «остання заря» на машинному екрані читач
+     * дочитає як завгодно. А довжина рядка тут не під нашим контролем — вона
+     * залежить від значення й від мови.
+     */
+    private fun fitWidth(paint: Paint, text: String) {
+        if (text.isEmpty()) return
+        val limit = SIZE * (1f - 2f * TEXT_MARGIN)
+        var width = paint.measureText(text)
+        while (width > limit && paint.textSize > MIN_TEXT_SIZE) {
+            paint.textSize *= limit / width
+            width = paint.measureText(text)
+        }
     }
 
     private fun paint(argb: Int, stroke: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -156,6 +185,12 @@ object CarGaugeArtist {
     private const val SWEEP_ANGLE = 270f
 
     private const val MAX_CACHED = 24
+
+    /** Поля з обох боків плитки, частка сторони. */
+    private const val TEXT_MARGIN = 0.06f
+
+    /** Дрібніше не зменшуємо: такий підпис однаково не прочитати в русі. */
+    private const val MIN_TEXT_SIZE = 12f
 
     private val COLOR_TRACK = Color.argb(70, 255, 255, 255)
     private val COLOR_TEXT = Color.WHITE

@@ -8,6 +8,7 @@
 package com.kirianov.kiasoulevplus2.Interface.screens.experiments
 
 import androidx.lifecycle.ViewModel
+import com.kirianov.kiasoulevplus2.Data.BusSlot
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.State
 import com.kirianov.kiasoulevplus2.tools.frames.CanCommand
@@ -24,6 +25,15 @@ class ProbeViewModel : ViewModel() {
     /** Відоме число зі щитка, яке шукаємо у відповідях. Порожній рядок знімає пошук. */
     fun onTargetChanged(text: String) =
         GeneralData.setProbeTarget(text.trim().toLongOrNull()?.takeIf { it > 0 })
+
+    // --- Пошук невідомої ознаки на шині -----------------------------------------
+
+    fun onSweep() = GeneralData.requestBusSweep()
+
+    fun onCapture(slot: BusSlot, label: String) =
+        GeneralData.captureBusSnapshot(slot, label.trim(), System.currentTimeMillis())
+
+    fun onForgetFrames() = GeneralData.forgetBusFrames()
 
     /** Повертає текст помилки або null, якщо запит поставлено. */
     fun onSend(header: String, command: String): String? {

@@ -78,6 +78,43 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
                 runProbe(request)
             }
             .launchIn(scope)
+
+        GeneralData.state
+            .map { it.probe.sweep }
+            .distinctUntilChanged()
+            .onEach { request ->
+                if (request == null) return@onEach
+                GeneralData.clearSweepRequest()
+                runSweep()
+            }
+            .launchIn(scope)
+    }
+
+    /**
+     * Послухати шину без фільтра з екрана «Експерименти».
+     *
+     * Вікно навмисно коротке. Без фільтра адаптер захлинається за пів секунди, і
+     * довше чекати немає сенсу — після «BUFFER FULL» він однаково зупиняється сам.
+     * Зате за ці півсекунди в буфер потрапляє зріз усього, що на шині є, і саме він
+     * потрібен, щоб знайти кадр, якого ми ще не знаємо.
+     */
+    private fun runSweep() {
+        val scope = scope ?: return
+        if (!GeneralData.state.value.isConnected) {
+            GeneralData.updateDebugInfo("Немає з'єднання з адаптером")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            val lines = try {
+                canBridge.monitorBroadcast(SWEEP_WINDOW_MS, filterId = "")
+            } catch (e: IOException) {
+                GeneralData.updateDebugInfo(
+                    "Не вдалося послухати шину: ${e.localizedMessage ?: "немає відповіді"}",
+                )
+                return@launch
+            }
+            GeneralData.publishMonitorLines(lines, filterId = "")
+        }
     }
 
     /**
@@ -315,6 +352,13 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
 
         /** Одне вікно монітора на кожні стільки циклів опитування. */
         const val MONITOR_EVERY_N_POLLS = 4L
+
+        /**
+         * Вікно вільного прослуховування, без фільтра. Коротке навмисно: адаптер
+         * захлинається за пів секунди й зупиняє монітор сам, тож довше чекати
+         * немає чого.
+         */
+        const val SWEEP_WINDOW_MS = 500L
 
         /** Скільки слухати шину за одне вікно: з фільтром кадр приходить кілька разів. */
         const val MONITOR_WINDOW_MS = 700L

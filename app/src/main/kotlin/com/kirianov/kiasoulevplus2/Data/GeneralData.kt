@@ -30,6 +30,14 @@ object GeneralData {
     /** Викликає блок Bluetooth, коли прийняв запит до виконання. */
     fun clearRequest() = _state.update { it.copy(request = AppRequest.None) }
 
+    /**
+     * «Водій сів в авто»: магнітола щойно з'єдналася з телефоном.
+     *
+     * Наміру користувача це не міняє — якщо він сам натиснув «Відключити», так і
+     * лишиться. Це лише привід спробувати зараз, а не через дві хвилини.
+     */
+    fun noteArrival() = _state.update { it.copy(arrivals = it.arrivals + 1) }
+
     fun updateInputBms(transform: (InputBmsData) -> InputBmsData) =
         _state.update { it.copy(inputBms = transform(it.inputBms)) }
 
@@ -170,6 +178,41 @@ object GeneralData {
     /** Переписує вже збережені відповіді: потрібно, коли змінилося шукане значення. */
     fun updateProbeResults(results: List<ProbeResult>) =
         _state.update { it.copy(probe = it.probe.copy(results = results)) }
+
+    // --- Пошук невідомої ознаки на шині -----------------------------------------
+
+    /** Послухати шину без фільтра: побачити, які кадри на ній узагалі є. */
+    fun requestBusSweep() =
+        _state.update { it.copy(probe = it.probe.copy(sweep = SweepRequest(++sequence))) }
+
+    fun clearSweepRequest() = _state.update { it.copy(probe = it.probe.copy(sweep = null)) }
+
+    /** Домішує щойно побачені кадри до пам'яті шини. Пише блок ручних запитів. */
+    fun rememberBusFrames(frames: Map<String, List<Int>>) {
+        if (frames.isEmpty()) return
+        _state.update { it.copy(probe = it.probe.copy(liveFrames = it.probe.liveFrames + frames)) }
+    }
+
+    /**
+     * Зберегти поточну пам'ять шини як знімок [slot] («A» або «B»).
+     *
+     * Знімок береться з пам'яті, а не з останнього вікна: одне вікно бачить рівно
+     * один ID, і знімком із нього порівнювати було б нічого.
+     */
+    fun captureBusSnapshot(slot: BusSlot, label: String, nowMs: Long) =
+        _state.update {
+            val snapshot = BusSnapshot(label = label, atMs = nowMs, frames = it.probe.liveFrames)
+            it.copy(
+                probe = when (slot) {
+                    BusSlot.A -> it.probe.copy(snapshotA = snapshot)
+                    BusSlot.B -> it.probe.copy(snapshotB = snapshot)
+                },
+            )
+        }
+
+    /** Забути пам'ять шини: перед новим виміром старі кадри лише заважають. */
+    fun forgetBusFrames() =
+        _state.update { it.copy(probe = it.probe.copy(liveFrames = emptyMap())) }
 
     // --- Ручні напруги: пише блок сховища та інтерфейс -------------------------
 

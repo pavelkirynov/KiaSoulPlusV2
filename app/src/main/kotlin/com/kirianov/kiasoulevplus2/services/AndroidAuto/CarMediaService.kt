@@ -102,15 +102,30 @@ class CarMediaService : MediaBrowserServiceCompat() {
      * оновлень і на надто балакучий сервіс просто перестає реагувати. Тому спершу
      * порівнюються вже готові рядки, а потім пауза в кінці збірки проріджує потік:
      * conflate дає доїхати лише останньому стану, який стався за час паузи.
+     *
+     * СПОВІЩАЄМО ЛИШЕ ТЕ, ЩО СПРАВДІ ЗМІНИЛОСЯ, і це не оптимізація, а лікування.
+     * Раніше на будь-яку зміну переспоряджався ВЕСЬ дерев'яний список — і корінь, і
+     * усі розділи. Для хоста це означає «перечитай вузол», а вузол, який водій саме
+     * зараз читає, перечитується разом із поверненням до нього; на машинному екрані
+     * це виглядало як заголовок від одного розділу поверх плиток іншого. А оскільки
+     * заряд ворушиться щосекунди, вузол «Батарея» переспоряджався постійно, і зайти
+     * в нього надовго було неможливо.
+     *
+     * Тепер кожен вузол порівнюється сам із собою: змінилися саме його рядки —
+     * сповіщаємо саме його. Розділ, у який водій зайшов почитати, здебільшого стоїть.
      */
     private fun watchState() {
+        var previous = emptyMap<String, List<CarMediaItem>>()
+
         GeneralData.state
-            .map { state -> SECTION_IDS.associateWith { CarMediaModel.childrenOf(it, state) } }
+            .map { state -> NODE_IDS.associateWith { CarMediaModel.childrenOf(it, state) } }
             .distinctUntilChanged()
             .conflate()
-            .onEach { sections ->
-                notifyChildrenChanged(CarMediaModel.ROOT_ID)
-                sections.keys.forEach(::notifyChildrenChanged)
+            .onEach { nodes ->
+                nodes.forEach { (id, children) ->
+                    if (previous[id] != children) notifyChildrenChanged(id)
+                }
+                previous = nodes
                 delay(REFRESH_INTERVAL_MS)
             }
             .launchIn(scope)
@@ -153,10 +168,19 @@ class CarMediaService : MediaBrowserServiceCompat() {
     private companion object {
         const val SESSION_TAG = "KiaSoulEvPlusV2"
 
-        /** Частіше за це хост усе одно не перемальовує список. */
-        const val REFRESH_INTERVAL_MS = 2_000L
+        /**
+         * Частіше за це хост усе одно не перемальовує список.
+         *
+         * Три секунди, а не дві: кожне сповіщення для хоста — привід перечитати
+         * вузол, а тепер, коли перечитується лише те, що змінилося, зайва частота
+         * нічого не додає. Числа на плитках однаково заокруглені й ворушаться
+         * повільніше.
+         */
+        const val REFRESH_INTERVAL_MS = 3_000L
 
-        val SECTION_IDS = listOf(
+        /** Усі вузли дерева, включно з коренем: кожен порівнюється сам із собою. */
+        val NODE_IDS = listOf(
+            CarMediaModel.ROOT_ID,
             CarMediaModel.BATTERY_ID,
             CarMediaModel.PERFORMANCE_ID,
             CarMediaModel.ENERGY_ID,

@@ -41,6 +41,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.services.foreground.ConnectionService
 import com.kirianov.kiasoulevplus2.tools.journal.FileJournalStore
 import com.kirianov.kiasoulevplus2.tools.journal.JournalFormat
@@ -77,6 +78,13 @@ class WakeOnCarReceiver : BroadcastReceiver() {
                 context.startService(service)
             }
         }
+        // Процес міг уже працювати — тоді служба просто лишається на місці, а
+        // блок автопідключення сидить у довгій паузі відступу. Звістка про приїзд
+        // скидає її: чекати дві хвилини після того, як людина сіла за кермо, немає
+        // за чим. Якщо ж процес щойно піднявся, звістку ніхто не почує — і не
+        // треба: блоки й так стартують із нульовим відступом.
+        runCatching { GeneralData.noteArrival() }
+
         val failure = started.exceptionOrNull()
         if (failure == null) {
             note(context, "спрацював від $address, службу піднято")

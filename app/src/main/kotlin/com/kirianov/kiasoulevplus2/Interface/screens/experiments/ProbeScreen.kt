@@ -46,9 +46,13 @@ import androidx.compose.ui.unit.sp
 import android.content.Intent
 import androidx.core.content.FileProvider
 import com.kirianov.kiasoulevplus2.Data.Journal
+import com.kirianov.kiasoulevplus2.Data.BusSlot
+import com.kirianov.kiasoulevplus2.Data.BusSnapshot
 import com.kirianov.kiasoulevplus2.Data.MonitorCapture
+import com.kirianov.kiasoulevplus2.Data.ProbeState
 import com.kirianov.kiasoulevplus2.Data.ProbeResult
 import com.kirianov.kiasoulevplus2.Data.VehicleData
+import com.kirianov.kiasoulevplus2.tools.frames.FrameDiff
 import com.kirianov.kiasoulevplus2.tools.frames.MonitorLineParser
 
 /** Команди, з яких варто почати пошук. Усі — лише читання. */
@@ -166,6 +170,14 @@ fun ProbeScreen(probeViewModel: ProbeViewModel) {
         state.probe.results.forEach { ResultCard(it) }
 
         BroadcastCard(monitor = state.can.monitor, vehicle = state.vehicle)
+
+        HuntCard(
+            probe = state.probe,
+            connected = state.isConnected,
+            onSweep = probeViewModel::onSweep,
+            onCapture = probeViewModel::onCapture,
+            onForget = probeViewModel::onForgetFrames,
+        )
     }
 }
 
@@ -224,6 +236,145 @@ private fun BroadcastCard(monitor: MonitorCapture?, vehicle: VehicleData) {
         }
     }
 }
+
+
+/**
+ * ПОШУК НЕВІДОМОЇ ОЗНАКИ НА ШИНІ.
+ *
+ * Зроблено заради одного конкретного питання — де лежить ознака «авто готове до
+ * руху», та сама зелена стрілка на щитку. У наших нотатках по CAN її немає, а
+ * вгадувати біти вже виходило дорого: на неправильно прочитаному знаку струму
+ * модель одного разу вчилася навиворіт цілий тиждень.
+ *
+ * Тому не здогад, а вимір, у три кроки:
+ *
+ *   1. «Забути кадри», потім «Послухати шину» кілька разів при ВИМКНЕНОМУ авто —
+ *      і зберегти як знімок А з підписом «вимкнено».
+ *   2. Увімкнути авто так, щоб горіла зелена стрілка, і СТОЯТИ на місці. Знову
+ *      послухати кілька разів — і зберегти як знімок Б.
+ *   3. Прочитати різницю. Стояти на місці на другому кроці важливо: інакше все
+ *      перекриють кадри швидкості й пробігу, які міняються від самого руху.
+ *
+ * Вільне прослуховування коротке — адаптер захлинається за пів секунди, — тож одне
+ * натискання дає зріз, а не повну картину. Кілька натискань поспіль накопичують
+ * пам'ять шини: кожен ID запам'ятовується таким, яким його застали востаннє.
+ */
+@Composable
+private fun HuntCard(
+    probe: ProbeState,
+    connected: Boolean,
+    onSweep: () -> Unit,
+    onCapture: (BusSlot, String) -> Unit,
+    onForget: () -> Unit,
+) {
+    var label by remember { mutableStateOf("") }
+
+    Text(text = "Пошук ознаки на шині", style = MaterialTheme.typography.titleSmall)
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Послухайте шину при вимкненому авто, збережіть як А. " +
+                    "Потім увімкніть запалювання, СТОЯЧИ на місці, послухайте ще раз " +
+                    "і збережіть як Б. Різниця нижче й покаже потрібний біт.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onSweep,
+                    enabled = connected,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Послухати шину") }
+                OutlinedButton(onClick = onForget, modifier = Modifier.weight(1f)) {
+                    Text("Забути кадри")
+                }
+            }
+
+            Text(
+                text = "У пам'яті кадрів: ${probe.liveFrames.size}",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            OutlinedTextField(
+                value = label,
+                onValueChange = { label = it },
+                label = { Text("Підпис знімка") },
+                placeholder = { Text("вимкнено / готове до руху") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { onCapture(BusSlot.A, label) },
+                    enabled = probe.liveFrames.isNotEmpty(),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Зберегти як А") }
+                OutlinedButton(
+                    onClick = { onCapture(BusSlot.B, label) },
+                    enabled = probe.liveFrames.isNotEmpty(),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Зберегти як Б") }
+            }
+
+            SnapshotLine("А", probe.snapshotA)
+            SnapshotLine("Б", probe.snapshotB)
+
+            DiffBlock(probe.snapshotA, probe.snapshotB)
+        }
+    }
+}
+
+@Composable
+private fun SnapshotLine(name: String, snapshot: BusSnapshot?) {
+    Text(
+        text = if (snapshot == null) {
+            "Знімок $name: ще немає"
+        } else {
+            "Знімок $name: ${snapshot.frames.size} кадрів" +
+                if (snapshot.label.isEmpty()) "" else ", «${snapshot.label}»"
+        },
+        style = MaterialTheme.typography.bodyMedium,
+    )
+}
+
+/**
+ * Різниця двох знімків.
+ *
+ * Кадри, яких немає в одному зі знімків, зібрані окремим рядком і без розбору:
+ * вікно коротке, і «не застали» тут трапляється часто-густо — плутати це зі
+ * «змінилося» означало б потонути в хибних слідах.
+ */
+@Composable
+private fun DiffBlock(before: BusSnapshot?, after: BusSnapshot?) {
+    if (before == null || after == null) return
+
+    val changes = FrameDiff.compare(before.frames, after.frames)
+    val changed = changes.filter { !it.onlyInOne }
+    val missing = changes.filter { it.onlyInOne }.map { it.id }
+
+    MonoBlock(
+        title = "Різниця: ${changed.size} кадрів змінилося",
+        text = changed.take(DIFF_FRAMES_SHOWN).joinToString("\n") { frame ->
+            frame.id + "\n" + frame.changes.joinToString("\n") { "   " + it.describe() }
+        }.ifEmpty { "жоден спільний кадр не змінився" },
+    )
+
+    if (missing.isNotEmpty()) {
+        Text(
+            text = "Тільки в одному знімку (вікно коротке, могли не застати): " +
+                missing.take(DIFF_FRAMES_SHOWN).joinToString(", "),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+/** Більше кадрів різниці на екрані не прочитати. */
+private const val DIFF_FRAMES_SHOWN = 12
 
 /** Більше рядків на екрані все одно не прочитати, а гальмує помітно. */
 private const val RAW_LINES_SHOWN = 20

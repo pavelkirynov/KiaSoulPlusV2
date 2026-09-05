@@ -63,7 +63,20 @@ data class CarGauge(
     val label: String,
     val caption: String,
 ) {
-    enum class Kind { Arc, Bar }
+    enum class Kind {
+        Arc,
+        Bar,
+
+        /**
+         * Без шкали — саме число великим шрифтом.
+         *
+         * З'явився через сітку. У списку розділ без іконки виглядав звичайно, а в
+         * плитках хост підставляє власну заглушку — трикутник зі знаком оклику. На
+         * машинному екрані це читається як несправність, якої немає. Тож картинка
+         * тепер є в кожного розділу: де шкала осмислена — шкала, де ні — число.
+         */
+        Plain,
+    }
 }
 
 object CarMediaModel {
@@ -132,11 +145,53 @@ object CarMediaModel {
      * немає «повного бака», а в лічильниках за весь час — краю шкали. Там хай хост
      * малює свою піктограму.
      */
-    internal fun gaugeFor(id: String, state: State): CarGauge? = when (id) {
-        BATTERY_ID -> chargeGauge(state)
-        PERFORMANCE_ID -> powerGauge(state)
-        else -> null
+    internal fun gaugeFor(id: String, state: State): CarGauge = when (id) {
+        BATTERY_ID -> chargeGauge(state) ?: blank("заряд")
+        PERFORMANCE_ID -> powerGauge(state) ?: blank("потужність")
+        ENERGY_ID -> chargedGauge(state)
+        TRIP_ID -> consumptionGauge(state)
+        else -> blank("")
     }
+
+    /**
+     * Скільки прийнято останньою зарядкою. Шкали тут немає навмисно: «повної»
+     * зарядки в кВт·год не існує — вона залежить від того, з якого відсотка
+     * почалася, — а число саме по собі водієві зрозуміле.
+     */
+    private fun chargedGauge(state: State): CarGauge {
+        val charge = state.charge
+        val kwh = when {
+            charge.charging && charge.sessionKwh > 0.0 -> charge.sessionKwh to "приймає"
+            charge.hasLastSession -> charge.lastSessionKwh to "остання"
+            charge.hasToday -> charge.todayKwh to "за добу"
+            else -> null
+        } ?: return blank("зарядки")
+        return CarGauge(
+            kind = CarGauge.Kind.Plain,
+            fill = 0.0,
+            label = formatDecimal(kwh.first, 1),
+            caption = kwh.second,
+        )
+    }
+
+    /** Витрата за поточну поїздку. Теж числом: шкали витрати не існує. */
+    private fun consumptionGauge(state: State): CarGauge {
+        val perHundred = state.calculated.trip.kwhPer100Km ?: return blank("витрати")
+        return CarGauge(
+            kind = CarGauge.Kind.Plain,
+            fill = 0.0,
+            label = formatDecimal(perHundred, 1),
+            caption = "кВт·год/100",
+        )
+    }
+
+    /** Порожня плитка: «даних ще немає» сказане нами, а не заглушкою хоста. */
+    private fun blank(what: String) = CarGauge(
+        kind = CarGauge.Kind.Plain,
+        fill = 0.0,
+        label = NO_DATA_TEXT,
+        caption = if (what.isEmpty()) "" else "немає $what",
+    )
 
     /**
      * Дуга заряду. Береться РЕАЛЬНИЙ відсоток, якщо прогноз його вже знає, і

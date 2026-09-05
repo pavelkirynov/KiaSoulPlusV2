@@ -50,12 +50,51 @@ data class ProbeResult(
     val hasBytes: Boolean get() = bytes.isNotEmpty()
 }
 
+/**
+ * Знімок шини: що який кадр показував у певний момент.
+ *
+ * Потрібен для пошуку невідомих ознак. Прямої ознаки увімкненого запалювання в
+ * наших нотатках немає, і вгадувати біти вже виходило дорого. Тому — вимір: зняти
+ * шину при вимкненому авто, потім при готовому до руху, і порівняти.
+ *
+ * [label] — чим цей знімок був: «двигун вимкнено», «готове до руху». Пише сам
+ * користувач, бо через тиждень «А» і «Б» уже нічого не означають.
+ */
+data class BusSnapshot(
+    val label: String,
+    val atMs: Long,
+    val frames: Map<String, List<Int>> = emptyMap(),
+) {
+    val hasFrames: Boolean get() = frames.isNotEmpty()
+}
+
+/** Прохання послухати шину без фільтра, щоб побачити, які кадри на ній узагалі є. */
+data class SweepRequest(val sequence: Long)
+
+/** Куди класти знімок. Двох досить: шукаємо різницю між двома станами авто. */
+enum class BusSlot { A, B }
+
 data class ProbeState(
     val pending: ProbeRequest? = null,
     val results: List<ProbeResult> = emptyList(),
 
     /** Відоме значення, яке шукаємо у відповідях: наприклад, пробіг зі щитка. */
     val targetValue: Long? = null,
+
+    /**
+     * Останнє, що показував кожен кадр. Накопичується вікно за вікном.
+     *
+     * Одне вікно монітора слухає рівно один ID — інакше адаптер захлинається, — тож
+     * побачити всю шину відразу неможливо в принципі. Зате можна пам'ятати, чим
+     * скінчився кожен ID, і знімок збирати вже з цієї пам'яті.
+     */
+    val liveFrames: Map<String, List<Int>> = emptyMap(),
+
+    /** Два знімки для порівняння. Третій не потрібен: шукаємо різницю між двома станами. */
+    val snapshotA: BusSnapshot? = null,
+    val snapshotB: BusSnapshot? = null,
+
+    val sweep: SweepRequest? = null,
 ) {
     fun plus(result: ProbeResult) = copy(results = (listOf(result) + results).take(MAX_RESULTS))
 

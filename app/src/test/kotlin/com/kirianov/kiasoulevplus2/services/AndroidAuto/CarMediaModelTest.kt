@@ -189,7 +189,7 @@ class CarMediaModelTest {
             )
         }
 
-        val gauge = CarMediaModel.gaugeFor(CarMediaModel.BATTERY_ID, state)!!
+        val gauge = CarMediaModel.gaugeFor(CarMediaModel.BATTERY_ID, state)
 
         assertEquals(CarGauge.Kind.Arc, gauge.kind)
         assertEquals(0.62, gauge.fill, 0.001)
@@ -200,7 +200,7 @@ class CarMediaModelTest {
     /** Поки прогнозу немає, беремо панельний — але кажемо, що він панельний. */
     @Test
     fun `without a prediction the gauge falls back to the panel`() {
-        val gauge = CarMediaModel.gaugeFor(CarMediaModel.BATTERY_ID, connected())!!
+        val gauge = CarMediaModel.gaugeFor(CarMediaModel.BATTERY_ID, connected())
 
         assertEquals("за панеллю", gauge.caption)
     }
@@ -215,8 +215,8 @@ class CarMediaModelTest {
         val spending = base.copy(calculated = base.calculated.copy(powerKw = -40.0))
         val regen = base.copy(calculated = base.calculated.copy(powerKw = 20.0))
 
-        val out = CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, spending)!!
-        val back = CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, regen)!!
+        val out = CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, spending)
+        val back = CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, regen)
 
         assertTrue("Розряд мусить бути праворуч: ${out.fill}", out.fill > 0.0)
         assertEquals(0.5, out.fill, 0.001)
@@ -231,23 +231,39 @@ class CarMediaModelTest {
         val base = connected()
         val huge = base.copy(calculated = base.calculated.copy(powerKw = -300.0))
 
-        assertEquals(1.0, CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, huge)!!.fill, 0.001)
+        assertEquals(1.0, CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, huge).fill, 0.001)
     }
 
     /**
-     * Приладів немає там, де вони нічого не означають: у пробігу немає «повного
-     * бака», у лічильниках за весь час — краю шкали.
+     * Шкали немає там, де вона нічого не означає: у пробігу немає «повного бака»,
+     * у зарядці в кВт·год — краю. Але КАРТИНКА є всюди, і це не примха.
+     *
+     * У сітці хост підставляє замість відсутньої іконки власну заглушку —
+     * трикутник зі знаком оклику. На машинному екрані водій читає його як
+     * несправність авто, якої немає. Тому там, де шкала безглузда, малюємо просто
+     * число.
      */
     @Test
-    fun `sections without a natural scale get no gauge`() {
-        assertNull(CarMediaModel.gaugeFor(CarMediaModel.ENERGY_ID, connected()))
-        assertNull(CarMediaModel.gaugeFor(CarMediaModel.TRIP_ID, connected()))
+    fun `sections without a natural scale still get a picture`() {
+        val energy = CarMediaModel.gaugeFor(CarMediaModel.ENERGY_ID, connected())
+        val trip = CarMediaModel.gaugeFor(CarMediaModel.TRIP_ID, connected())
+
+        assertEquals(CarGauge.Kind.Plain, energy.kind)
+        assertEquals(CarGauge.Kind.Plain, trip.kind)
     }
 
-    /** Без даних із шини малювати нічого. */
+    /**
+     * Без даних із шини теж малюємо своє: прочерк, сказаний нами, кращий за
+     * трикутник, сказаний хостом.
+     */
     @Test
-    fun `no data means no gauge`() {
-        assertNull(CarMediaModel.gaugeFor(CarMediaModel.BATTERY_ID, State()))
-        assertNull(CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, State()))
+    fun `no data still means our own picture, not the host placeholder`() {
+        val battery = CarMediaModel.gaugeFor(CarMediaModel.BATTERY_ID, State())
+        val power = CarMediaModel.gaugeFor(CarMediaModel.PERFORMANCE_ID, State())
+
+        assertEquals(CarGauge.Kind.Plain, battery.kind)
+        assertEquals(CarMediaModel.NO_DATA_TEXT, battery.label)
+        assertEquals(CarGauge.Kind.Plain, power.kind)
+        assertEquals(CarMediaModel.NO_DATA_TEXT, power.label)
     }
 }

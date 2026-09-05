@@ -109,6 +109,13 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
      * усім трафіком шини й віддає «BUFFER FULL», а до того — кадри навперемішки,
      * обрізані посередині. Тому за одне вікно слухаємо рівно один [filterId].
      *
+     * ПОРОЖНІЙ [filterId] — свідомий виняток, і потрібен рівно для одного: побачити,
+     * які кадри на шині взагалі є. Відомі шість ID знайшлися колись саме так, а
+     * ознаки, яких ми ще не знаємо — увімкнене запалювання насамперед, — лежать
+     * десь поза ними. Захлинання тут не аварія, а очікуваний кінець вікна: буфер
+     * повний означає «більше не влізло», і зібране до того лишається придатним.
+     * Вікно для такого прослуховування береться коротке.
+     *
      * ЧОМУ H1 І CAF0. З типовими для запит-відповіді налаштуваннями монітор віддає
      * кадри БЕЗ CAN ID (H0) і дописує до них службові індекси «0:», «1:» ISO-TP
      * (CAF1). Саме так і виглядали перші зняті вікна: суцільні дані без ID.
@@ -125,7 +132,8 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
         val buffer = StringBuilder()
         try {
             adapter.flushInput()
-            adapter.sendCommand("AT CRA $filterId")
+            // «AT CRA» без аргументу знімає фільтр: чуємо всю шину.
+            adapter.sendCommand(if (filterId.isEmpty()) "AT CRA" else "AT CRA $filterId")
             adapter.sendCommand("AT H1")
             adapter.sendCommand("AT CAF0")
             adapter.writeRaw("AT MA\r")

@@ -23,7 +23,7 @@ internal object MlCodec {
      * збирається наново з журналу. Саме заради цього журнал і зберігає сирі моменти,
      * а не готові ознаки.
      */
-    const val FEATURE_SET = "consumption-v2-climate"
+    const val FEATURE_SET = "consumption-v3-no-downhill"
 
     // --- Відрізок ---------------------------------------------------------------
 

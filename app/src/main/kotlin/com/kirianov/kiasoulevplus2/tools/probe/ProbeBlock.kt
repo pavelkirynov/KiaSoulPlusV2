@@ -12,6 +12,7 @@ import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.ProbeResult
 import com.kirianov.kiasoulevplus2.tools.frames.ByteCandidates
 import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
+import com.kirianov.kiasoulevplus2.tools.frames.MonitorLineParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
@@ -24,6 +25,33 @@ class ProbeBlock {
     fun start(scope: CoroutineScope) {
         recordReplies(scope)
         rematchOnTargetChange(scope)
+        rememberBus(scope)
+    }
+
+    /**
+     * Пам'ятати, чим скінчився кожен кадр шини.
+     *
+     * Одне вікно монітора слухає рівно один ID: без фільтра адаптер захлинається.
+     * Тому «побачити всю шину» можна лише накопиченням — вікно за вікном, кожне
+     * додає свій ID до пам'яті. З цієї пам'яті потім і береться знімок для
+     * порівняння двох станів авто.
+     */
+    private fun rememberBus(scope: CoroutineScope) {
+        GeneralData.state
+            .map { it.can.monitor }
+            .filterNotNull()
+            .distinctUntilChanged()
+            .onEach { capture ->
+                // Фільтр підказує ID безголовим рядкам. Порожній фільтр — вільне
+                // прослуховування: там ID мусить бути в самому рядку, і рядок без
+                // нього чесніше відкинути, ніж приписати навмання.
+                val expected = capture.filterId.ifEmpty { null }
+                val frames = capture.lines
+                    .mapNotNull { MonitorLineParser.parse(it, expected) }
+                    .associate { it.id to it.bytes }
+                GeneralData.rememberBusFrames(frames)
+            }
+            .launchIn(scope)
     }
 
     /**
