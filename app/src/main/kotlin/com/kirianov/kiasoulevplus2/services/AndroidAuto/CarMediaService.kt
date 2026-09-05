@@ -14,6 +14,7 @@ package com.kirianov.kiasoulevplus2.services.AndroidAuto
 import android.os.Bundle
 import android.support.v4.media.MediaBrowserCompat.MediaItem
 import android.support.v4.media.MediaDescriptionCompat
+import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
@@ -39,19 +40,97 @@ class CarMediaService : MediaBrowserServiceCompat() {
         super.onCreate()
 
         session = MediaSessionCompat(this, SESSION_TAG).apply {
-            // Порожній стан: без нього хост вважає сесію непридатною й ховає застосунок.
-            setPlaybackState(
-                PlaybackStateCompat.Builder()
-                    .setState(PlaybackStateCompat.STATE_STOPPED, 0L, 0f)
-                    .setActions(0L)
-                    .build(),
-            )
+            setCallback(callback)
+            setPlaybackState(stateOf(PlaybackStateCompat.STATE_STOPPED))
             isActive = true
         }
         sessionToken = session.sessionToken
 
         watchState()
     }
+
+    /**
+     * Керування «відтворенням» картинки.
+     *
+     * Нічого не грає й не звучить: аудіофокус ми не просимо взагалі. «Відтворення»
+     * тут — лише спосіб попросити хост показати екран плеера, бо обкладинка на
+     * ньому єдина поверхня, де наш графік читається в машині.
+     *
+     * Кнопки перемотування зайняті ділом: вони гортають картинки. Хост намалює їх
+     * однаково, тож хай краще щось роблять, ніж стоять бутафорією.
+     */
+    private val callback = object : MediaSessionCompat.Callback() {
+        override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+            val index = CarChartModel.PICTURES.indexOfFirst { it.first == mediaId }
+            show(if (index >= 0) index else 0)
+        }
+
+        override fun onPlay() = show(pictureIndex)
+
+        override fun onSkipToNext() = show(pictureIndex + 1)
+
+        override fun onSkipToPrevious() = show(pictureIndex - 1)
+
+        override fun onStop() {
+            showing = false
+            session.setPlaybackState(stateOf(PlaybackStateCompat.STATE_STOPPED))
+        }
+
+        override fun onPause() = onStop()
+    }
+
+    /** Яку картинку показуємо і чи показуємо взагалі. */
+    private var pictureIndex = 0
+    private var showing = false
+
+    private fun show(index: Int) {
+        val size = CarChartModel.PICTURES.size
+        pictureIndex = ((index % size) + size) % size
+        showing = true
+        session.setPlaybackState(stateOf(PlaybackStateCompat.STATE_PLAYING))
+        publishArt()
+    }
+
+    /**
+     * Кладе поточну картинку в метадані сесії.
+     *
+     * Обкладинка — саме Bitmap, а не посилання на файл. Посилання довелося б
+     * віддавати через провайдера з окремим дозволом для чужого процесу, і мовчазна
+     * відмова там виглядала б як порожній екран без жодної підказки. Bitmap
+     * доїжджає завжди — за це й платимо розміром, тому картинка в RGB_565.
+     */
+    private fun publishArt() {
+        if (!showing) return
+        val (id, title) = CarChartModel.PICTURES[pictureIndex]
+        val chart = CarChartModel.chartFor(id, GeneralData.state.value)
+
+        session.setMetadata(
+            MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, id)
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, chart.subtitle)
+                .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, CarChartArtist.bitmapOf(chart))
+                .build(),
+        )
+    }
+
+    /**
+     * Стан «відтворення».
+     *
+     * Дозволені дії названі поіменно, і перемотування серед них навмисно: саме воно
+     * гортає картинки. Позиція завжди нуль — тривалості в картинки немає.
+     */
+    private fun stateOf(state: Int) = PlaybackStateCompat.Builder()
+        .setState(state, 0L, 0f)
+        .setActions(
+            PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+                PlaybackStateCompat.ACTION_PLAY or
+                PlaybackStateCompat.ACTION_STOP or
+                PlaybackStateCompat.ACTION_PAUSE or
+                PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS,
+        )
+        .build()
 
     override fun onDestroy() {
         scope.cancel()
@@ -126,6 +205,9 @@ class CarMediaService : MediaBrowserServiceCompat() {
                     if (previous[id] != children) notifyChildrenChanged(id)
                 }
                 previous = nodes
+                // Картинка на весь екран оновлюється тим самим тактом: вона живе в
+                // метаданих сесії, а не в дереві, тож про неї треба сказати окремо.
+                publishArt()
                 delay(REFRESH_INTERVAL_MS)
             }
             .launchIn(scope)
@@ -185,6 +267,7 @@ class CarMediaService : MediaBrowserServiceCompat() {
             CarMediaModel.PERFORMANCE_ID,
             CarMediaModel.ENERGY_ID,
             CarMediaModel.TRIP_ID,
+            CarMediaModel.SCREEN_ID,
         )
     }
 }

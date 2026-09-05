@@ -88,6 +88,14 @@ object CarMediaModel {
     const val ENERGY_ID = "energy"
     const val TRIP_ID = "trip"
 
+    /**
+     * Розділ «на весь екран». Його елементи — не папки, а «треки»: хост, узявши
+     * такий елемент, вважає, що почалося відтворення, і показує екран плеера з
+     * нашою обкладинкою. Обкладинка займає пів екрана магнітоли — це єдине місце,
+     * де графік узагалі можна прочитати в машині.
+     */
+    const val SCREEN_ID = "screen"
+
     const val NO_DATA_TEXT = "--"
 
     /** Повна шкала смуги потужності, кВт: приблизно потужність мотора Soul EV. */
@@ -99,6 +107,7 @@ object CarMediaModel {
         PERFORMANCE_ID to "Рух і потужність",
         ENERGY_ID to "Потік енергії",
         TRIP_ID to "Поїздка",
+        SCREEN_ID to "На весь екран",
     )
 
     /**
@@ -112,6 +121,7 @@ object CarMediaModel {
         PERFORMANCE_ID -> performance(state)
         ENERGY_ID -> energy(state)
         TRIP_ID -> trip(state)
+        SCREEN_ID -> screen()
         else -> root(state)
     }
 
@@ -150,6 +160,9 @@ object CarMediaModel {
         PERFORMANCE_ID -> powerGauge(state) ?: blank("потужність")
         ENERGY_ID -> chargedGauge(state)
         TRIP_ID -> consumptionGauge(state)
+        // Літерами, а не значком: у шрифті полотна значок легко виявиться порожнім
+        // квадратом, і плитка знову виглядатиме зламаною.
+        SCREEN_ID -> CarGauge(CarGauge.Kind.Plain, 0.0, "Графік", "на весь екран")
         else -> blank("")
     }
 
@@ -236,6 +249,23 @@ object CarMediaModel {
             caption = if (rounded > 0.0) "приймає" else "віддає",
         )
     }
+
+    /**
+     * Картинки, які можна вивести на весь екран.
+     *
+     * Це єдині елементи дерева, які НЕ папки. Хост відрізняє їх за прапорцем і на
+     * дотик по такому елементу починає «відтворення» — насправді просто показує
+     * екран плеера, а на ньому нашу обкладинку.
+     */
+    private fun screen(): List<CarMediaItem> =
+        CarChartModel.PICTURES.map { (id, title) ->
+            CarMediaItem(
+                id = id,
+                title = title,
+                subtitle = "Показати на весь екран",
+                browsable = false,
+            )
+        }
 
     private fun battery(state: State): List<CarMediaItem> {
         val bms = state.bms

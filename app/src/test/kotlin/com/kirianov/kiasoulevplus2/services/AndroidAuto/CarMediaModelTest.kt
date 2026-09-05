@@ -47,8 +47,21 @@ class CarMediaModelTest {
         ),
     )
 
+    /**
+     * Розділ «на весь екран» стоїть окремо від решти: його елементи — не папки, а
+     * «треки». Дотик по такому елементу вмикає екран плеера з нашою обкладинкою, і
+     * це єдина поверхня, де графік читається в машині.
+     */
     @Test
-    fun `the root lists the four sections`() {
+    fun `the full screen section offers pictures, not folders`() {
+        val items = CarMediaModel.childrenOf(CarMediaModel.SCREEN_ID, connected())
+
+        assertEquals(CarChartModel.PICTURES.size, items.size)
+        assertTrue("це мають бути треки, а не папки", items.none { it.browsable })
+    }
+
+    @Test
+    fun `the root lists every section`() {
         val root = CarMediaModel.childrenOf(CarMediaModel.ROOT_ID, connected())
 
         assertEquals(
@@ -57,6 +70,7 @@ class CarMediaModelTest {
                 CarMediaModel.PERFORMANCE_ID,
                 CarMediaModel.ENERGY_ID,
                 CarMediaModel.TRIP_ID,
+                CarMediaModel.SCREEN_ID,
             ),
             root.map { it.id },
         )
