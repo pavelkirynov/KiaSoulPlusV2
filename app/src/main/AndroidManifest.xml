@@ -108,7 +108,16 @@
             android:name=".WakeOnCarReceiver"
             android:exported="true">
             <intent-filter>
+                <!--
+                    Три дії замість однієї навмисно. ACL_CONNECTED — найзагальніша,
+                    але магнітола з'єднується профілями, і на частині прошивок до
+                    приймача доходить саме профільна подія, а не ACL. Дублювання тут
+                    нешкідливе: приймач однаково перевіряє адресу й піднімає службу,
+                    яка вже працює, — повторний startService нічого не ламає.
+                -->
                 <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
+                <action android:name="android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 

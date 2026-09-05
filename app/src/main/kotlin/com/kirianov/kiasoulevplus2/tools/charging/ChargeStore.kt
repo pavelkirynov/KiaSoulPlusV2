@@ -5,6 +5,11 @@
 // наступне читання. Без нього після перезапуску застосунок або нарахував би всю
 // історію батареї як одну зарядку, або втратив би все, що сталося без телефона.
 //
+// І базовий показ — це НЕ ОДНЕ ЧИСЛО. Разом із лічильником прийнятої енергії
+// зберігаємо лічильник відданої, заряд і час: тільки вчотирьох вони дозволяють
+// сказати, чим була пауза — зарядкою чи поїздкою. Коли трьох із них тут не було,
+// зникала кожна нічна зарядка поспіль, і найдорожче було те, що зникала мовчки.
+//
 // Каталог, а не Context: сховище лишається чистим Kotlin і перевіряється тестами.
 // ====================================================================================
 
@@ -50,6 +55,15 @@ class FileChargeStore(private val directory: File) : ChargeStore {
             "todayKwh" to log.todayKwh,
             "dayKey" to log.dayKey,
             "counterBaselineKwh" to log.counterBaselineKwh,
+            // Ці три — не прикраса, а те, з чим базовий показ порівнюється. Одного
+            // разу їх тут забули, і кожна зарядка без телефона зникала: після
+            // перезапуску lastSeenAtMs дорівнював нулю, перевірка «чи була пауза»
+            // мовчки не спрацьовувала, а базовий показ усе одно переїжджав на
+            // новий — разом із 23 кВт·год, які нікуди було записати.
+            "dischargedBaselineKwh" to log.dischargedBaselineKwh,
+            "socBaselinePercent" to log.socBaselinePercent,
+            "lastSeenAtMs" to log.lastSeenAtMs.toDouble(),
+            "lastDecision" to log.lastDecision,
             "hasBaseline" to log.hasBaseline,
         ),
     )
@@ -66,6 +80,10 @@ class FileChargeStore(private val directory: File) : ChargeStore {
             todayKwh = values["todayKwh"] as? Double ?: 0.0,
             dayKey = values["dayKey"] as? String ?: "",
             counterBaselineKwh = baseline,
+            dischargedBaselineKwh = values["dischargedBaselineKwh"] as? Double ?: 0.0,
+            socBaselinePercent = values["socBaselinePercent"] as? Double ?: 0.0,
+            lastSeenAtMs = (values["lastSeenAtMs"] as? Double ?: 0.0).toLong(),
+            lastDecision = values["lastDecision"] as? String ?: "",
             hasBaseline = values["hasBaseline"] as? Boolean ?: false,
         )
     }

@@ -38,6 +38,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CalculatedData
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
+import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
 import com.kirianov.kiasoulevplus2.Data.PairedDevice
@@ -91,7 +92,7 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
 
         LifetimeCountersCard(bms)
 
-        ChargeCard(state.charge)
+        ChargeCard(state.charge, onFinish = GeneralData::requestChargeFinish)
 
         VehicleCard(state.vehicle)
 
@@ -250,8 +251,8 @@ private fun CellsCard(calculated: CalculatedData) {
  * і головне — лічильник враховує те, що сталося без телефона.
  */
 @Composable
-private fun ChargeCard(charge: ChargeLog) {
-    if (!charge.charging && !charge.hasLastSession && !charge.hasToday) return
+private fun ChargeCard(charge: ChargeLog, onFinish: () -> Unit) {
+    if (!charge.hasBaseline && !charge.hasLastSession && !charge.hasToday) return
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -284,10 +285,26 @@ private fun ChargeCard(charge: ChargeLog) {
 
             MetricRow("За добу", formatMeasurement(charge.todayKwh, 1, "кВт·год"))
 
+            if (charge.lastDecision.isNotEmpty()) {
+                MetricRow("Рішення", charge.lastDecision)
+            }
+
             Text(
                 text = "Рахується за лічильником BMS, тому враховує й ті зарядки, " +
                     "що пройшли без телефона: якщо лічильник виріс, заряд піднявся, " +
                     "а віддано нічого не було — це зарядка.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            // Остання лінія оборони. Кінець зарядки автоматика бачить не завжди —
+            // телефона в авто в ту мить може просто не бути. Кнопка бере різницю
+            // пожиттєвого лічильника від початку зарядки й закриває сесію нею.
+            Button(onClick = onFinish, modifier = Modifier.fillMaxWidth()) {
+                Text("Кінець зарядки")
+            }
+            Text(
+                text = "Натисніть, якщо зарядка скінчилась, а застосунок цього не " +
+                    "помітив: різниця пожиттєвого лічильника від її початку піде в облік.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

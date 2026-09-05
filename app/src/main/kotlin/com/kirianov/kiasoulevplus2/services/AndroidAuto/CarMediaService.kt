@@ -17,6 +17,7 @@ import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
+import androidx.media.utils.MediaConstants
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,11 +60,35 @@ class CarMediaService : MediaBrowserServiceCompat() {
         super.onDestroy()
     }
 
+    /**
+     * Корінь медіатеки — і підказка хосту, як її малювати.
+     *
+     * Саме тут прилади стають видимими. Без підказки хост малює розділи списком, а
+     * в рядку списку іконці відведено кілька міліметрів — прилад у ній видно, але
+     * читати його на ходу неможливо. Сітка натомість дає кожному розділу велику
+     * квадратну плитку, і картинка в ній — уже прилад, а не значок.
+     *
+     * Підказки дві, і вони різні навмисно: сіткою малюємо лише розділи (browsable),
+     * а числа всередині розділу лишаються списком (playable) — там важливий підпис,
+     * а не картинка, і в сітці підписи не помістилися б.
+     */
     override fun onGetRoot(
         clientPackageName: String,
         clientUid: Int,
         rootHints: Bundle?,
-    ): BrowserRoot = BrowserRoot(CarMediaModel.ROOT_ID, null)
+    ): BrowserRoot = BrowserRoot(
+        CarMediaModel.ROOT_ID,
+        Bundle().apply {
+            putInt(
+                MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
+                MediaConstants.DESCRIPTION_EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+            )
+            putInt(
+                MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
+                MediaConstants.DESCRIPTION_EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+            )
+        },
+    )
 
     override fun onLoadChildren(parentId: String, result: Result<MutableList<MediaItem>>) {
         val items = CarMediaModel.childrenOf(parentId, GeneralData.state.value)
@@ -99,7 +124,22 @@ class CarMediaService : MediaBrowserServiceCompat() {
             // Іконка — єдина щілина, крізь яку медіа-браузер дає показати своє:
             // хост бере її як картинку й малює як є. Там, де приладу немає,
             // іконки теж немає: хай хост малює свою піктограму.
-            .apply { item.gauge?.let { setIconBitmap(CarGaugeArtist.bitmapOf(it)) } }
+            .apply {
+                item.gauge?.let {
+                    setIconBitmap(CarGaugeArtist.bitmapOf(it))
+                    // Ще раз, уже поштучно: частина хостів читає стиль не з кореня,
+                    // а з самого елемента. Дублювання дешеве, а різниця між плиткою
+                    // й значком у рядку — це різниця між «видно на ходу» і «ні».
+                    setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+                                MediaConstants.DESCRIPTION_EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+                            )
+                        },
+                    )
+                }
+            }
             .build()
 
         val flags = if (item.browsable) {

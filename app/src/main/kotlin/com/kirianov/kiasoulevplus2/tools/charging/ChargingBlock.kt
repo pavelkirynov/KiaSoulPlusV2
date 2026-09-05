@@ -9,11 +9,14 @@
 package com.kirianov.kiasoulevplus2.tools.charging
 
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
+import com.kirianov.kiasoulevplus2.Data.ChargeRequest
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.Data.VehicleData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 class ChargingBlock(
     private val store: ChargeStore,
@@ -37,18 +40,44 @@ class ChargingBlock(
                         dischargedKwh = it.bms.cumulativeEnergyDischargedKwh,
                         socPercent = it.bms.displaySoc,
                         isCharging = it.vehicle.charging.isCharging,
+                        ignitionOn = ignitionOn(it.bms.batteryCurrent, it.vehicle),
+                        request = it.charge.request,
                     )
                 }
                 .distinctUntilChanged()
                 .collect { reading ->
+                    val now = nowMs()
+                    val day = dayKey()
+
+                    // Прохання з екрана виконуємо першим і окремо: у нього свої
+                    // правила — жодних порогів, бо зарядку бачила людина.
+                    if (reading.request == ChargeRequest.FinishSession) {
+                        GeneralData.clearChargeRequest()
+                        val finished = ChargeTracker.finishManually(
+                            log = log,
+                            counterKwh = reading.counterKwh,
+                            dischargedKwh = reading.dischargedKwh,
+                            socPercent = reading.socPercent,
+                            nowMs = now,
+                            dayKey = day,
+                        )
+                        if (finished != log) {
+                            log = finished
+                            GeneralData.updateChargeLog(finished)
+                            store.save(finished)
+                        }
+                        return@collect
+                    }
+
                     val updated = ChargeTracker.observe(
                         log = log,
                         counterKwh = reading.counterKwh,
                         dischargedKwh = reading.dischargedKwh,
                         socPercent = reading.socPercent,
                         isCharging = reading.isCharging,
-                        nowMs = nowMs(),
-                        dayKey = dayKey(),
+                        nowMs = now,
+                        dayKey = day,
+                        ignitionOn = reading.ignitionOn,
                     )
                     if (updated == log) return@collect
 
@@ -64,7 +93,25 @@ class ChargingBlock(
         val dischargedKwh: Double,
         val socPercent: Double,
         val isCharging: Boolean,
+        val ignitionOn: Boolean,
+        val request: ChargeRequest,
     )
+
+    /**
+     * Чи авто ввімкнене.
+     *
+     * Прямої ознаки запалювання шина не передає, тож збираємо її з двох свідчень.
+     * Рух — свідчення беззаперечне. Тяговий струм — майже таке саме: коли авто
+     * стоїть вимкненим, він у журналі не виходить за ±3 А, а щойно його вмикають,
+     * DC-DC і клімат дають десятки ампер.
+     *
+     * Помилитися в бік «увімкнене» тут не страшно: цей висновок закриває зарядку,
+     * а зарядка, закрита на кілька хвилин раніше, все одно порахована повністю —
+     * різниця лічильника береться від її початку.
+     */
+    private fun ignitionOn(currentA: Double, vehicle: VehicleData): Boolean =
+        (vehicle.hasSpeed && vehicle.speedKmh > 0.0) ||
+            abs(currentA) >= ChargeTracker.IGNITION_CURRENT_A
 }
 
 /**

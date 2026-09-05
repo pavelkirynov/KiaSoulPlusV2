@@ -60,7 +60,20 @@ data class ChargeLog(
      * перше ж читання дало б «зарядку на 73437 кВт·год»: різницю з нулем.
      */
     val hasBaseline: Boolean = false,
+
+    /** Прохання від екрана. Не зберігається: живе рівно до наступного читання. */
+    val request: ChargeRequest = ChargeRequest.None,
 ) {
     val hasLastSession: Boolean get() = lastSessionKwh > 0.0
     val hasToday: Boolean get() = todayKwh > 0.0
 }
+
+/**
+ * Що екран просить зробити з обліком зарядок.
+ *
+ * [FinishSession] — «кінець зарядки» вручну: порахувати різницю пожиттєвого
+ * лічильника від початку зарядки й закрити сесію. Потрібне тому, що автоматичне
+ * визначення кінця тримається на тому, чи опинився телефон в авто вчасно, а
+ * зарядка тривала й реальна незалежно від цього.
+ */
+enum class ChargeRequest { None, FinishSession }

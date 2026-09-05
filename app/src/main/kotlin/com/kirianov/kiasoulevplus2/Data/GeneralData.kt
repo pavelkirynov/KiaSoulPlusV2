@@ -74,6 +74,13 @@ object GeneralData {
     /** Облік зарядок за пожиттєвим лічильником: пише блок tools/charging. */
     fun updateChargeLog(charge: ChargeLog) = _state.update { it.copy(charge = charge) }
 
+    /** «Кінець зарядки» вручну: закрити сесію різницею пожиттєвого лічильника. */
+    fun requestChargeFinish() =
+        _state.update { it.copy(charge = it.charge.copy(request = ChargeRequest.FinishSession)) }
+
+    fun clearChargeRequest() =
+        _state.update { it.copy(charge = it.charge.copy(request = ChargeRequest.None)) }
+
     // --- Похідні величини: пише блок обчислень ---------------------------------
 
     fun updateCalculated(calculated: CalculatedData) =

@@ -39,6 +39,15 @@
 // різних кадрів після паузи мають різний вік, і різниця між ними означає не те,
 // що здається.
 //
+// КІНЕЦЬ ЗАРЯДКИ — ЦЕ СТАН, А НЕ МИТЬ. Момент, коли авто зняли з зарядки, ніхто
+// не спостерігає: телефон у цей час у кишені господаря. Зате наступного разу авто
+// вмикають — і ось цей СТАН ми бачимо напевно. Для відкритої сесії ввімкнене авто
+// й означає «зарядка скінчилась», а вся різниця лічильника від її початку
+// належить їй: поки авто стояло, лічильник прийнятої міг рости лише від зарядки.
+//
+// І остання лінія оборони — кнопка «кінець зарядки». Автоматика колись та й
+// проґавить, а людина зарядку бачила.
+//
 // Чистий об'єкт без стану: увесь стан приходить аргументом і повертається назад.
 // ====================================================================================
 
@@ -104,6 +113,35 @@ object ChargeTracker {
     const val MIN_DISCHARGE_ALLOWANCE_KWH = 0.3
 
     /**
+     * Скільки дозволяємо віддати за паузу НЕВІДОМОЇ довжини, кВт·год.
+     *
+     * Невідома вона рівно в одному випадку: файл обліку старий і часу останнього
+     * погляду в ньому немає. Пропорційний до часу поріг тут порахувати нема з
+     * чого, а відмовитись від виміру — означає втратити зарядку. Три кВт·год —
+     * це більше за будь-який нічний простій і менше за найкоротшу поїздку
+     * (51 км у журналі коштували 12 кВт·год), тож поїздку воно все одно відсіє.
+     */
+    const val UNKNOWN_GAP_ALLOWANCE_KWH = 3.0
+
+    /**
+     * Струм, вище якого авто вважається УВІМКНЕНИМ, А.
+     *
+     * Прямої ознаки запалювання на шині немає, тож беремо єдину, яка є в тому
+     * самому кадрі. Коли авто просто стоїть, тяговий струм у журналі не виходить
+     * за ±3 А; щойно його вмикають — DC-DC, клімат і привід дають десятки. Шість
+     * ампер лежить із запасом між цими двома світами.
+     */
+    const val IGNITION_CURRENT_A = 6.0
+
+    /**
+     * На скільки заряд може просісти за час, поки авто стояло після зарядки, %.
+     *
+     * Потрібно, щоб відрізнити «зарядка скінчилась, авто ночувало» від «авто
+     * поїхало». Простій з'їдає частки відсотка на годину, поїздка — десятки.
+     */
+    const val MAX_STANDBY_SOC_DROP = 3.0
+
+    /**
      * @param counterKwh пожиттєвий лічильник прийнятої енергії, кВт·год.
      * @param dischargedKwh пожиттєвий лічильник ВІДДАНОЇ енергії з того самого кадру.
      * @param socPercent заряд із того самого кадру, %.
@@ -118,6 +156,8 @@ object ChargeTracker {
         isCharging: Boolean,
         nowMs: Long,
         dayKey: String,
+        /** Чи авто зараз увімкнене. Для сесії, що триває, це і є кінець зарядки. */
+        ignitionOn: Boolean = false,
     ): ChargeLog {
         if (counterKwh <= 0.0) return log
 
@@ -138,7 +178,11 @@ object ChargeTracker {
         val step = counterKwh - rolled.counterBaselineKwh
 
         if (!isCharging) {
-            val verdict = missedCharge(rolled, step, dischargedKwh, socPercent, nowMs)
+            val verdict = if (rolled.charging && ignitionOn) {
+                ignitionEnded(rolled, step, dischargedKwh, socPercent)
+            } else {
+                missedCharge(rolled, step, dischargedKwh, socPercent, nowMs)
+            }
             return notCharging(
                 log = if (verdict.reason.isEmpty()) rolled else rolled.copy(lastDecision = verdict.reason),
                 counterKwh = counterKwh,
@@ -204,9 +248,16 @@ object ChargeTracker {
         socPercent: Double,
         nowMs: Long,
     ): Verdict {
-        // Ні паузи, ні приросту — це звичайний хід опитування, а не рішення.
-        // Писати про нього причину немає сенсу: вона б затерла справжню.
-        if (!gapPassed(log, nowMs) || step < MIN_MISSED_KWH) return Verdict(null, "")
+        // Звичайний хід опитування, а не рішення: писати про нього причину немає
+        // сенсу — вона б затерла справжню.
+        if (step < MIN_MISSED_KWH) return Verdict(null, "")
+
+        // А ось відмова через надто свіжий останній погляд — уже рішення, і
+        // мовчати про неї не можна. Саме вона з'їла нічні 23 кВт·год і не лишила
+        // в журналі ані рядка, бо вважалась «не рішенням».
+        if (!gapPassed(log, nowMs)) {
+            return Verdict(null, "приріст ${round(step)} кВт·год без паузи в спостереженні")
+        }
 
         if (step > MAX_PLAUSIBLE_STEP_KWH) {
             return Verdict(null, "приріст ${round(step)} кВт·год неправдоподібний")
@@ -226,6 +277,78 @@ object ChargeTracker {
         return Verdict(step, "зараховано ${round(step)} кВт·год за паузу")
     }
 
+    /**
+     * Зарядку завершило ввімкнення авто.
+     *
+     * Це той самий випадок, який просив користувач: ловити треба не мить пуску, а
+     * СТАН — авто ввімкнене, отже, воно вже не заряджається. І тут ми знаємо
+     * більше, ніж у будь-якій іншій паузі: базовий показ узято на початку
+     * зарядки, авто відтоді стояло, і зрости лічильник прийнятої міг лише від
+     * зарядки — рекуперації без руху не буває.
+     *
+     * Тому вимоги до зросту заряду тут немає: зарядка могла скінчитись увечері, а
+     * авто простояти до ранку й трохи просісти. Лишається одна перевірка — та, що
+     * відрізняє простій від поїздки.
+     */
+    private fun ignitionEnded(
+        log: ChargeLog,
+        step: Double,
+        dischargedKwh: Double,
+        socPercent: Double,
+    ): Verdict {
+        if (step <= 0.0) return Verdict(null, "")
+        if (step > MAX_PLAUSIBLE_STEP_KWH) {
+            return Verdict(null, "приріст ${round(step)} кВт·год неправдоподібний")
+        }
+
+        val drop = log.socBaselinePercent - socPercent
+        if (drop > MAX_STANDBY_SOC_DROP) {
+            return Verdict(null, "заряд просів на ${round(drop)} % — це поїздка, не зарядка")
+        }
+
+        return Verdict(step, "зарядку закрито запалюванням: ${round(step)} кВт·год")
+    }
+
+    /**
+     * Ручне «кінець зарядки»: користувач сам каже, що зарядка скінчилася.
+     *
+     * Автоматика все одно інколи проґавить кінець — телефон може не опинитися в
+     * авто ні на початку, ні в кінці. Тоді різницю пожиттєвого лічильника з
+     * початком зарядки рахуємо без жодних порогів: людина бачила зарядку на
+     * власні очі, і це надійніше за будь-яку нашу перевірку.
+     */
+    fun finishManually(
+        log: ChargeLog,
+        counterKwh: Double,
+        dischargedKwh: Double,
+        socPercent: Double,
+        nowMs: Long,
+        dayKey: String,
+    ): ChargeLog {
+        if (counterKwh <= 0.0 || !log.hasBaseline) return log
+        val rolled = rollDay(log, dayKey)
+        val step = (counterKwh - rolled.counterBaselineKwh).coerceAtLeast(0.0)
+        val taken = if (step > MAX_PLAUSIBLE_STEP_KWH) 0.0 else step
+        val total = rolled.sessionKwh + taken
+        if (total <= 0.0) {
+            return rolled.copy(lastDecision = "вручну: рахувати нема чого")
+        }
+        return rolled.copy(
+            charging = false,
+            lastSessionKwh = total,
+            lastSessionEndedAtMs = nowMs,
+            todayKwh = rolled.todayKwh + taken,
+            dayKey = dayKey,
+            sessionKwh = 0.0,
+            sessionStartedAtMs = 0L,
+            counterBaselineKwh = counterKwh,
+            dischargedBaselineKwh = dischargedKwh,
+            socBaselinePercent = socPercent,
+            lastSeenAtMs = nowMs,
+            lastDecision = "вручну зараховано ${round(total)} кВт·год",
+        )
+    }
+
     /** Рішення про паузу: скільки зарахувати і чому саме так. */
     private data class Verdict(val kwh: Double?, val reason: String)
 
@@ -237,14 +360,25 @@ object ChargeTracker {
      * за ніч — кілька.
      */
     private fun allowedDischarge(log: ChargeLog, nowMs: Long): Double {
+        if (log.lastSeenAtMs <= 0L) return UNKNOWN_GAP_ALLOWANCE_KWH
         val hours = (nowMs - log.lastSeenAtMs).coerceAtLeast(0L) / MS_PER_HOUR
         return maxOf(MIN_DISCHARGE_ALLOWANCE_KWH, PARASITIC_DRAW_KW * hours)
     }
 
     private const val MS_PER_HOUR = 3_600_000.0
 
+    /**
+     * Чи була пауза, за яку могла пройти зарядка.
+     *
+     * Нуль у часі останнього погляду означає не «щойно дивилися», а «не знаємо».
+     * Раніше він читався саме як перше, і відмова була мовчазною: у файлі обліку
+     * цього поля просто не зберігали, тож після кожного перезапуску воно було
+     * нулем — і зарядка, яка пройшла без телефона, гарантовано не зараховувалась.
+     * Не знати, коли ми дивилися востаннє, можна лише тоді, коли відтоді
+     * застосунок перезапускався: це вже пауза.
+     */
     private fun gapPassed(log: ChargeLog, nowMs: Long): Boolean =
-        log.lastSeenAtMs > 0L && nowMs - log.lastSeenAtMs >= MISSED_GAP_MS
+        if (log.lastSeenAtMs <= 0L) log.hasBaseline else nowMs - log.lastSeenAtMs >= MISSED_GAP_MS
 
     /**
      * Зарядка почалася. Базовий показ переїжджає на поточний: усе, що набігло до

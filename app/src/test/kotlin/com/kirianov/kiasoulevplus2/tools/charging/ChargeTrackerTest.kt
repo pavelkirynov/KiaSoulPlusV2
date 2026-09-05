@@ -511,6 +511,160 @@ class ChargeTrackerTest {
         assertFalse(after.hasLastSession)
     }
 
+    /**
+     * ЖУРНАЛ ВІД 4 ВЕРЕСНЯ, РЯДОК У РЯДОК.
+     *
+     * Увечері авто поставили на зарядку при телефоні: застосунок побачив початок і
+     * встиг записати 0.3 кВт·год, після чого адаптер відвалився. Уранці застосунок
+     * запустили заново — і в сесію лягли ті самі 0.3, хоча пожиттєвий лічильник за
+     * ніч виріс на 4.5 кВт·год.
+     *
+     * Причина була не в порогах, а в тому, що перезапуск обнуляв час останнього
+     * погляду: сховище його не зберігало. Тому тут перезапуск відтворений чесно —
+     * через файл, а не через передачу об'єкта з рук у руки.
+     */
+    @Test
+    fun `a charge that ran overnight is counted after a restart`() {
+        val dir = java.io.File(
+            System.getProperty("java.io.tmpdir"),
+            "charge-night-${System.nanoTime()}",
+        )
+        val store = FileChargeStore(dir)
+        val evening = 1_788_000_000_000L
+
+        // Ввечері: зарядка почалася на наших очах і встигла дати 0.3 кВт·год.
+        var log = observe(ChargeLog(), counter = 27_089.2, charging = true, nowMs = evening,
+            dischargedKwh = 26_041.4, socPercent = 80.0)
+        log = observe(log, counter = 27_089.5, charging = true, nowMs = evening + MINUTE,
+            dischargedKwh = 26_041.4, socPercent = 80.5)
+        assertEquals(0.3, log.sessionKwh, 0.001)
+        store.save(log)
+
+        // Уранці застосунок запустили заново: усе, що він знає, — з файлу.
+        val restored = store.load()!!
+        val morning = evening + 12 * HOUR
+        val after = observe(
+            restored,
+            counter = 27_094.0,
+            charging = false,
+            nowMs = morning,
+            dischargedKwh = 26_041.9,
+            socPercent = 95.0,
+        )
+
+        assertEquals("Ніч мала лягти в сесію разом із побаченим живцем",
+            4.8, after.lastSessionKwh, 0.001)
+        assertTrue(after.lastDecision.isNotEmpty())
+    }
+
+    /**
+     * Відмова мусить лишати слід. Найдорожча помилка тут була мовчазною: зарядку
+     * не рахувало, а в журналі не було ані рядка про те, який поріг спрацював.
+     */
+    @Test
+    fun `a refused gain says why it was refused`() {
+        val before = observe(ChargeLog(), counter = 27_000.0, charging = false, nowMs = HOUR)
+
+        // Поїздка: лічильник виріс від рекуперації, але заряд упав, а віддано багато.
+        val after = observe(
+            before,
+            counter = 27_006.7,
+            charging = false,
+            nowMs = HOUR + 11 * HOUR,
+            dischargedKwh = 20_012.0,
+            socPercent = 23.0,
+        )
+
+        assertFalse(after.hasLastSession)
+        assertTrue("Причина відмови має бути записана", after.lastDecision.isNotEmpty())
+    }
+
+    /**
+     * Кінець зарядки — це стан «авто ввімкнене», а не мить, коли його ввімкнули.
+     * Тут заряд навіть трохи просів за ніч простою, і це не привід не рахувати.
+     */
+    @Test
+    fun `switching the car on closes an open charge`() {
+        var log = observe(ChargeLog(), counter = 27_089.2, charging = true, nowMs = HOUR,
+            dischargedKwh = 26_041.4, socPercent = 80.0)
+        log = observe(log, counter = 27_089.5, charging = true, nowMs = HOUR + MINUTE,
+            dischargedKwh = 26_041.4, socPercent = 80.0)
+
+        val after = ChargeTracker.observe(
+            log = log,
+            counterKwh = 27_094.0,
+            dischargedKwh = 26_042.6,
+            socPercent = 79.0,
+            isCharging = false,
+            nowMs = HOUR + 12 * HOUR,
+            dayKey = day,
+            ignitionOn = true,
+        )
+
+        assertFalse(after.charging)
+        assertEquals(4.8, after.lastSessionKwh, 0.001)
+    }
+
+    /** А ось поїздку ввімкнене запалювання зарядкою не робить: заряд обвалився. */
+    @Test
+    fun `switching the car on does not turn a trip into a charge`() {
+        var log = observe(ChargeLog(), counter = 27_000.0, charging = true, nowMs = HOUR,
+            dischargedKwh = 26_000.0, socPercent = 80.0)
+        log = observe(log, counter = 27_000.3, charging = true, nowMs = HOUR + MINUTE,
+            dischargedKwh = 26_000.0, socPercent = 80.0)
+
+        val after = ChargeTracker.observe(
+            log = log,
+            counterKwh = 27_006.7,
+            dischargedKwh = 26_012.0,
+            socPercent = 43.0,
+            isCharging = false,
+            nowMs = HOUR + 2 * HOUR,
+            dayKey = day,
+            ignitionOn = true,
+        )
+
+        assertEquals("Побачене живцем лишається, рекуперація за поїздку — ні",
+            0.3, after.lastSessionKwh, 0.001)
+    }
+
+    /**
+     * Ручне «кінець зарядки»: жодних порогів. Людина бачила зарядку на власні очі,
+     * і це надійніше за будь-яку нашу перевірку.
+     */
+    @Test
+    fun `the manual finish counts the whole counter difference`() {
+        var log = observe(ChargeLog(), counter = 27_089.2, charging = true, nowMs = HOUR,
+            dischargedKwh = 26_041.4, socPercent = 80.0)
+        log = observe(log, counter = 27_089.5, charging = true, nowMs = HOUR + MINUTE,
+            dischargedKwh = 26_041.4, socPercent = 80.5)
+
+        val after = ChargeTracker.finishManually(
+            log = log,
+            counterKwh = 27_094.0,
+            dischargedKwh = 26_041.9,
+            socPercent = 95.0,
+            nowMs = HOUR + 12 * HOUR,
+            dayKey = day,
+        )
+
+        assertFalse(after.charging)
+        assertEquals(4.8, after.lastSessionKwh, 0.001)
+        assertEquals(0.0, after.sessionKwh, 0.001)
+        assertEquals("Базовий показ мусить переїхати, інакше наступне натискання порахує те саме",
+            27_094.0, after.counterBaselineKwh, 0.001)
+    }
+
+    /** Без базового показу рахувати нема з чим — і натискання нічого не псує. */
+    @Test
+    fun `the manual finish does nothing without a baseline`() {
+        val log = ChargeLog()
+
+        val after = ChargeTracker.finishManually(log, 27_094.0, 26_041.9, 95.0, HOUR, day)
+
+        assertEquals(log, after)
+    }
+
     private companion object {
         const val MINUTE = 60 * 1000L
         const val HOUR = 60 * MINUTE
