@@ -4,6 +4,9 @@
 package com.kirianov.kiasoulevplus2.Interface
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
@@ -21,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -30,6 +35,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.car.screens.CarFaultsScreen
+import com.kirianov.kiasoulevplus2.car.screens.CarOverviewScreen
 import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsScreen
 import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsViewModel
 import com.kirianov.kiasoulevplus2.Interface.screens.experiments.ProbeScreen
@@ -44,7 +51,13 @@ import com.kirianov.kiasoulevplus2.Interface.screens.settings.SettingsViewModel
 fun AppNavigation() {
     RequestBluetoothPermissions()
 
-    var currentScreen by remember { mutableStateOf(AppScreen.MAIN) }
+    var section by remember { mutableStateOf(AppSection.BATTERY) }
+
+    // РОЗДІЛ ПАМ'ЯТАЄ СВОЮ СТОРІНКУ. Пішов із «Комірок» у налаштування, повернувся
+    // в «Батарею» — і ти знову на «Комірках», а не на «Головній». Без цього кожен
+    // похід у сусідній розділ коштує ще двох дотиків, щоб повернутися туди, де був.
+    val opened = remember { mutableStateMapOf<AppSection, AppPage>() }
+    val page = opened[section] ?: section.pages.first()
 
     // Обрив зв'язку видно за кольором, не вчитуючись у рядок статусу: за кермом
     // читати нема коли. Фарбуємо тут, а не на головному екрані, бо втрата
@@ -68,11 +81,11 @@ fun AppNavigation() {
             modifier = Modifier.fillMaxSize(),
             bottomBar = {
                 NavigationBar {
-                    AppScreen.entries.forEach { screen ->
+                    AppSection.entries.forEach { item ->
                         NavigationBarItem(
-                            selected = currentScreen == screen,
-                            onClick = { currentScreen = screen },
-                            label = { Text(screen.title) },
+                            selected = section == item,
+                            onClick = { section = item },
+                            label = { Text(item.title) },
                             icon = { },
                         )
                     }
@@ -98,18 +111,56 @@ fun AppNavigation() {
                                 onBus = state.garage.detectedVin,
                             )
                         }
-                        when (currentScreen) {
-                            AppScreen.MAIN -> MainScreen()
-                            AppScreen.PREDICTION ->
+                        // Верхній ряд з'являється лише там, де є з чого вибирати:
+                        // ряд з однієї вкладки нічого не каже, а місце з'їдає.
+                        if (section.pages.size > 1) {
+                            PageTabs(
+                                pages = section.pages,
+                                current = page,
+                                onSelect = { opened[section] = it },
+                            )
+                        }
+
+                        when (page) {
+                            AppPage.MAIN -> MainScreen()
+                            AppPage.PREDICTION ->
                                 PredictionScreen(predictionViewModel = viewModel<PredictionViewModel>())
-                            AppScreen.CELLS -> CellsScreen(cellsViewModel = viewModel<CellsViewModel>())
-                            AppScreen.EXPERIMENTS -> ProbeScreen(probeViewModel = viewModel<ProbeViewModel>())
-                            AppScreen.SETTINGS ->
+                            AppPage.CELLS -> CellsScreen(cellsViewModel = viewModel<CellsViewModel>())
+                            AppPage.CAR_OVERVIEW -> CarOverviewScreen()
+                            AppPage.CAR_FAULTS -> CarFaultsScreen()
+                            AppPage.PROBE -> ProbeScreen(probeViewModel = viewModel<ProbeViewModel>())
+                            AppPage.SETTINGS ->
                                 SettingsScreen(settingsViewModel = viewModel<SettingsViewModel>())
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Верхній ряд сторінок розділу.
+ *
+ * Прокручується вбік навмисно: розділів із трьома вкладками вистачає зараз, а
+ * «Авто» дійде до десятка, і ряд, який стискає підписи до нечитабельних, гірший за
+ * ряд, який їде вбік.
+ */
+@Composable
+private fun PageTabs(pages: List<AppPage>, current: AppPage, onSelect: (AppPage) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        pages.forEach { item ->
+            FilterChip(
+                selected = item == current,
+                onClick = { onSelect(item) },
+                label = { Text(item.title) },
+            )
         }
     }
 }

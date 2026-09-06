@@ -416,7 +416,9 @@ class MlBlock(
                 preciseSocPercent = soc,
                 recent = conditions,
                 basis = basis,
-                curveEnergyKwh = if (curve.hasMeasurements) curve.usableAt(soc) else null,
+                // Лише крива за струмом: див. BatteryCurve.trustedForRange. Поки її
+                // немає, залишок бере модель — як і до появи другої кривої.
+                curveEnergyKwh = if (curve.trustedForRange) curve.usableAt(soc) else null,
                 curveTotalMeasured = curve.totalMeasured,
             )
         }

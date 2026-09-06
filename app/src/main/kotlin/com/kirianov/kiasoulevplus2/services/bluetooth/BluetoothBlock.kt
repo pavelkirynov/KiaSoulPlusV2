@@ -18,6 +18,8 @@ package com.kirianov.kiasoulevplus2.services.bluetooth
 import com.kirianov.kiasoulevplus2.Data.AppRequest
 import com.kirianov.kiasoulevplus2.Data.BmsCommands
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
+import com.kirianov.kiasoulevplus2.Data.Ecus
+import com.kirianov.kiasoulevplus2.Data.FaultScanRequest
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.PairedDevice
 import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
@@ -90,6 +92,47 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
                 runSweep()
             }
             .launchIn(scope)
+
+        GeneralData.state
+            .map { it.faults.request }
+            .distinctUntilChanged()
+            .onEach { request ->
+                if (request == FaultScanRequest.None) return@onEach
+                GeneralData.clearFaultRequest()
+                runFaultScan()
+            }
+            .launchIn(scope)
+    }
+
+    /**
+     * Опитування блоків про помилки.
+     *
+     * Іде послідовно, блок за блоком, і навмисно не паралельно: шина одна, а
+     * адаптер уміє тримати рівно один запит. Кожна відповідь публікується одразу, а
+     * не в кінці, — з дев'яти блоків половина мовчить по таймауту, і чекати всіх,
+     * дивлячись у порожній екран, довше за саме опитування.
+     *
+     * Помилка тут не рве з'єднання: блока може просто не бути в цій машині, і
+     * мовчання — теж відповідь.
+     */
+    private fun runFaultScan() {
+        val scope = scope ?: return
+        if (!GeneralData.state.value.isConnected) {
+            GeneralData.startFaultScan(total = 0)
+            GeneralData.finishFaultScan(System.currentTimeMillis())
+            return
+        }
+
+        scope.launch(Dispatchers.IO) {
+            GeneralData.startFaultScan(Ecus.ALL.size)
+            for (ecu in Ecus.ALL) {
+                val response = runCatching {
+                    canBridge.sendCANCommand(ecu.header, Ecus.REQUEST)
+                }.getOrDefault("")
+                GeneralData.publishFaultAnswer(ecu.header, response)
+            }
+            GeneralData.finishFaultScan(System.currentTimeMillis())
+        }
     }
 
     /**

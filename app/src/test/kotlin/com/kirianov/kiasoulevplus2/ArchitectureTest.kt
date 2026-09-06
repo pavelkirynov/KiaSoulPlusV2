@@ -37,6 +37,8 @@ class ArchitectureTest {
         "tools.cells",
         "tools.garage",
         "tools.paths",
+        "car.dtc",
+        "car.screens",
     )
 
     /** Хаб: сюди дозволено звертатися будь-кому, це і є канал обміну. */
@@ -48,6 +50,16 @@ class ArchitectureTest {
      * а не канал обміну даними.
      */
     private val sharedUtilities = listOf("tools.format", "tools.frames", "tools.json", "tools.paths")
+
+    /**
+     * Екрани. Їм дозволено читати хаб і одне одного — вони і є один шар.
+     *
+     * Розділ «Авто» живе окремою текою [car], бо систем авто попереду багато, і
+     * вантажити ними tools/ означало б перетворити його на звалище. Але правило для
+     * його екранів те саме, що й для решти: до чужих блоків не лізти, брати все з
+     * GeneralData.
+     */
+    private val screenLayer = listOf("Interface", "car.screens")
 
     /**
      * Файли в корені пакета: App (піднімає блоки на весь час життя процесу),
@@ -75,7 +87,10 @@ class ArchitectureTest {
                 val target = blocks.firstOrNull { imported == it || imported.startsWith("$it.") }
                     ?: return@forEach
 
-                val allowed = target == owner || target == hub || target in sharedUtilities
+                val allowed = target == owner ||
+                    target == hub ||
+                    target in sharedUtilities ||
+                    (owner in screenLayer && target in screenLayer)
                 if (!allowed) {
                     violations += "${file.name} (блок $owner) імпортує $target"
                 }

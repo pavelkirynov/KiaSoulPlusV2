@@ -9,6 +9,7 @@
 package com.kirianov.kiasoulevplus2
 
 import android.content.Context
+import com.kirianov.kiasoulevplus2.car.dtc.FaultBlock
 import com.kirianov.kiasoulevplus2.services.bluetooth.BluetoothBlock
 import com.kirianov.kiasoulevplus2.services.bluetooth.ElmBluetoothManager
 import com.kirianov.kiasoulevplus2.services.foreground.ForegroundBlock
@@ -69,6 +70,8 @@ class AppBlocks(context: Context) {
     // створений раніше за своє сховище, отримав би null.
     private val calculations = CalculationBlock(rangeStore)
     private val autoConnect = AutoConnectBlock()
+    // Помилки блоків авто: розбирає сирі відповіді, які зняв блок Bluetooth.
+    private val faults = FaultBlock()
     private val charging = ChargingBlock(chargeStore)
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
     // Тест комірок під навантаженням: накопичує проходи й рахує підсумок.
@@ -108,6 +111,7 @@ class AppBlocks(context: Context) {
         garage.start(scope)
         share.start(scope)
         autoConnect.start(scope)
+        faults.start(scope)
         storage.start(scope)
         cellTest.start(scope)
         prediction.start(scope)

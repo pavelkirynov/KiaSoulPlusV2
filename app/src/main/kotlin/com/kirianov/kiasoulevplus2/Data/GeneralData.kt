@@ -137,6 +137,28 @@ object GeneralData {
 
     fun updateVehicle(vehicle: VehicleData) = _state.update { it.copy(vehicle = vehicle) }
 
+    // --- Помилки блоків авто -----------------------------------------------------
+
+    fun updateFaults(transform: (FaultState) -> FaultState) =
+        _state.update { it.copy(faults = transform(it.faults)) }
+
+    /** Опитати всі блоки. Виконує блок Bluetooth: шина в нього. */
+    fun requestFaultScan() = updateFaults { it.copy(request = FaultScanRequest.Scan) }
+
+    fun clearFaultRequest() = updateFaults { it.copy(request = FaultScanRequest.None) }
+
+    /** Опитування почалося: скільки блоків попереду. Пише блок Bluetooth. */
+    fun startFaultScan(total: Int) = updateFaults {
+        it.copy(running = true, results = emptyList(), done = 0, total = total, answer = null)
+    }
+
+    /** Сира відповідь одного блока. Розбирає її блок car/dtc. */
+    fun publishFaultAnswer(header: String, raw: String) = updateFaults {
+        it.copy(answer = FaultAnswer(header, raw, ++sequence))
+    }
+
+    fun finishFaultScan(atMs: Long) = updateFaults { it.copy(running = false, scannedAtMs = atMs) }
+
     /** Облік зарядок за пожиттєвим лічильником: пише блок tools/charging. */
     fun updateChargeLog(charge: ChargeLog) = _state.update { it.copy(charge = charge) }
 

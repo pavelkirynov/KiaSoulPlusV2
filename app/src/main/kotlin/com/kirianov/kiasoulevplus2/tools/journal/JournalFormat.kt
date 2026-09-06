@@ -133,6 +133,19 @@ object JournalFormat {
                 "пакет=${num(after.garage.active.packKwh.takeIf { it > 0.0 })}"
         }
 
+        // ПОМИЛКИ БЛОКІВ. Рядок пишеться раз на опитування, коли воно скінчилося:
+        // саме тоді відомо, хто озвався, а хто промовчав. Коди йдуть повністю —
+        // їх одиниці, а без них рядок не варт нічого.
+        if (before.faults.scannedAtMs != after.faults.scannedAtMs && after.faults.scannedAtMs > 0L) {
+            val scan = after.faults
+            val codes = scan.results.flatMap { result ->
+                result.faults.map { "${result.ecu.header}:${it.code}/${it.status}" }
+            }
+            out += "$at dtc блоків=${scan.results.size} озвалося=${scan.answered.size} " +
+                "кодів=${scan.faults} активних=${scan.active}" +
+                if (codes.isEmpty()) "" else " «${codes.joinToString(" ")}»"
+        }
+
         out += busSnapshots(before, after, at)
         out += cellTest(before, after, at)
 

@@ -14,6 +14,9 @@ data class State(
 
     /** Розібрані показники: сюди пише блок декодерів. */
     val bms: BmsData = BmsData(),
+
+    /** Помилки блоків авто: веде блок car/dtc. */
+    val faults: FaultState = FaultState(),
     val cells: CellData = CellData(),
 
     /** Тест комірок під навантаженням: веде блок tools/cells. */
