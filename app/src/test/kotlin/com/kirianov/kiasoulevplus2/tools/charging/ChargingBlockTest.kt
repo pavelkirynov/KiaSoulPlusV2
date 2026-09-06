@@ -278,6 +278,37 @@ class ChargingBlockTest {
         assertEquals(4.0, GeneralData.state.value.charge.sessionKwh, 0.001)
     }
 
+    /**
+     * ОЗНАКА ЗАРЯДЖАННЯ БЛИМАЄ — СЕСІЯ МУСИТЬ ВИЖИТИ.
+     *
+     * Уночі кадр 581 то приходить, то ні, а адаптер устигає перепідключитися по
+     * кілька разів. Кожне таке блимання закриває сесію й одразу відкриває нову, і
+     * поки продовження бралося з обнуленої sessionKwh, за ніч набігало двадцять
+     * три кіловат-години дрібними шматками, а на екрані стояло «остання зарядка
+     * 0.6».
+     */
+    @Test
+    fun `a blinking charging flag does not restart the session from zero`() {
+        start()
+        publish(100.0, charging = false)
+        now = 30_000
+        publish(100.0, charging = true)
+        now = 60_000
+        publish(105.0, charging = true)
+
+        // Ознака зникла на дві хвилини й повернулася — зарядка та сама.
+        now = 120_000
+        publish(105.0, charging = false)
+        now = 240_000
+        publish(105.0, charging = true)
+        now = 300_000
+        publish(108.0, charging = true)
+
+        val charge = GeneralData.state.value.charge
+        assertEquals("Сесія мала продовжитись, а не початися з нуля", 8.0, charge.sessionKwh, 0.001)
+        assertEquals(8.0, charge.todayKwh, 0.001)
+    }
+
     private fun twoCarsInGarage() = GeneralData.updateGarage {
         it.copy(
             cars = listOf(CarProfile(vin = "MINE"), CarProfile(vin = "OTHER")),

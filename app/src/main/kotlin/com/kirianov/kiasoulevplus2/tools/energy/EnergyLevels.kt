@@ -4,46 +4,46 @@
 // Тримає, скільки кВт·год виявилося в кожному відсотку шкали, і складає з цього
 // криву. Нічого не читає й нікуди не пише — чистий стан, тож перевіряється тестами.
 //
-// ЯК ЦЕ МІРЯЄТЬСЯ. Один замір — це «шкала пройшла від A % до B %, і за цей час
-// пожиттєвий лічильник відданої енергії виріс на стільки, а прийнятої на стільки».
-// Різниця й є енергія, яку містила ця ділянка шкали. Ніякого інтегрування, ніяких
-// вимог до неперервності даних: лічильники веде сама батарея, тому ні обрив
-// Bluetooth, ні пауза в опитуванні заміру не псують.
+// КРИВИХ ТУТ ДВІ, І ЦЕ НЕ ПРИМХА. Обидві міряють те саме — енергію на відсоток
+// шкали, — але різними приладами, і розходження між ними саме по собі є
+// вимірюванням.
 //
-// ЧОМУ КОШИКИ ПО 1 %. Замір майже ніколи не вкладається рівно в один відсоток, тож
-// його енергія розкладається по кошиках пропорційно пройденій у кожному частині.
-// Кошик пам'ятає СУМИ — енергію і пройдені відсотки, — а не готове середнє. Тоді
-// повторний прохід тим самим місцем шкали автоматично усереднюється з вагою: довший
-// прохід важить більше, ніж короткий, і крива уточнюється з кожною поїздкою.
+//   A «за лічильниками»: ΔkWhOut − ΔkWhIn з пожиттєвих лічильників BMS. Приладу
+//     байдуже, чи дивився телефон: обрив зв'язку заміру не псує.
 //
-// ГОЛОВНЕ ПРАВИЛО ЦЬОГО ФАЙЛУ: МІСЦЕВИЙ НАХИЛ НЕ РОЗТЯГУЄТЬСЯ НА ВСЮ ШКАЛУ.
+//   B «за струмом»: ΔkWhOut з лічильника (він звірений з інтегралом струму й
+//     сходиться) мінус рекуперація, порахована інтегруванням потужності. Потребує
+//     неперервного шматка спостережень, зате не залежить від лічильника прийнятої.
 //
-// Шкала цього авто різко нерівна, і це не дефект вимірів, а фізика: BMS накладає
-// заводську таблицю «напруга → відсоток» на комірки з іншою хімією. За словами
-// водія відсоток угорі шкали коштує близько кілометра, посередині близько двох, а
-// в кінці від п'яти до десяти. Тобто нахил гуляє в рази.
+// ЧОМУ ЛІЧИЛЬНИК ПРИЙНЯТОЇ ПІД ПІДОЗРОЮ. Три незалежні заміри показали одне й те
+// саме: він рахує НЕ фізичну енергію. Нічна зарядка з розетки — 49.6 кВт·год за
+// лічильником станції, +23.0 за лічильником BMS; SOC при цьому виріс на 85 %, тобто
+// на всю шкалу вийшло б 27 кВт·год. Швидка зарядка постійним струмом — 7.44 кВт·год
+// за інтегралом струму, 5.10 за лічильником, на всю шкалу знову 27. І 74 А·год на
+// всю шкалу — рівно паспорт РІДНОГО пакета Soul EV, 75 А·год.
 //
-// Через це «зміряли 0.29 кВт·год/% на ділянці 88–95 % ⇒ у батареї 29 кВт·год» —
-// груба помилка: угорі шкали відсоток найдешевший, і саме там ми й міряли першим.
-// Повна ємність береться ОКРЕМО: спершу як аксіома (пакет відомий), а далі як
-// вимір із зарядки, що починалася з низьких відсотків. Криві ж заміри задають
-// ФОРМУ — те, як ця ємність розподілена по шкалі.
+// Лічильник відданої при цьому чесний: на поїздці інтеграл струму дав ті самі
+// 30.6 А·год, що й він. Тому крива B будується на ньому, а A лишається для
+// порівняння — на графіку видно, куди заводить лічильник прийнятої.
 //
-// НЕВИМІРЯНІ КОШИКИ. Крива має бути суцільною від 0 до 100 %, інакше її нема як
-// нарисувати. Порожнім місцям нахил ПРОТЯГУЄТЬСЯ між сусідніми виміряними: між
-// двома островами — плавно від одного до іншого, за краями — рівно як на
-// найближчому виміряному. І вже після цього все невиміряне разом множиться на
-// один коефіцієнт, щоб сума кривої дорівнювала повній ємності.
+// ГОЛОВНЕ ПРАВИЛО ПОБУДОВИ: КРИВА ЙДЕ ЗВЕРХУ ВНИЗ. Верхня точка — ємність із
+// налаштувань авто, далі вниз по виміряних нахилах. Куди крива прийде на нулі —
+// те й є відповідь: прийшла в нуль — пакет саме такий, як заявлено; сіла вище —
+// стільки насправді не набралося.
 //
-// Рівний нахил на порожніх місцях, який був тут спершу, давав видимі зломи на
-// кожній межі острова — злам, якого в батареї немає, бо він походить від способу
-// малювання, а не від комірок. Кожна точка при цьому однаково знає, вимір вона чи
-// доведення, і на графіку це видно різним кольором.
+// Раніше було навпаки: сума кривої задавалася наперед, а невиміряне тиснулося
+// коефіцієнтом, щоб зійтися з аксіомою. Така крива фізично НЕ МОГЛА суперечити
+// заявленій ємності — і саме тому нічого про неї не казала.
+//
+// НЕВИМІРЯНІ КОШИКИ доводить [RateBins.profile]: між островами нахил переходить
+// плавно, за краями продовжується найближчим виміряним. Кожна точка знає, вимір
+// вона чи доведення, і на графіку це видно пунктиром.
 // ====================================================================================
 
 package com.kirianov.kiasoulevplus2.tools.energy
 
 import com.kirianov.kiasoulevplus2.Data.CurvePoint
+import com.kirianov.kiasoulevplus2.Data.DistancePoint
 import com.kirianov.kiasoulevplus2.Data.Pack
 import com.kirianov.kiasoulevplus2.Data.VoltagePoint
 import kotlin.math.abs
@@ -52,17 +52,33 @@ import kotlin.math.min
 
 class EnergyLevels {
 
-    private val sumKwh = DoubleArray(BINS)
-    private val sumPercent = DoubleArray(BINS)
+    /** Крива A: енергія за різницею пожиттєвих лічильників. */
+    private val counter = RateBins(MIN_RATE_KWH_PER_PERCENT, MAX_RATE_KWH_PER_PERCENT)
 
-    var samples: Int = 0
-        private set
+    /** Крива B: віддане за лічильником мінус рекуперація за інтегралом струму. */
+    private val power = RateBins(MIN_RATE_KWH_PER_PERCENT, MAX_RATE_KWH_PER_PERCENT)
+
+    /**
+     * Кілометри на відсоток шкали.
+     *
+     * Це НЕ властивість батареї, а суміш того, як їздили: той самий відсоток у
+     * місті з кліматом і на трасі дає різне число. Тут він потрібен саме таким —
+     * щоб бачити, як довго тягнуться відсотки в реальній їзді.
+     */
+    private val distance = RateBins(MIN_KM_PER_PERCENT, MAX_KM_PER_PERCENT)
+
+    val samples: Int get() = counter.samples
+    val powerSamples: Int get() = power.samples
+    val distanceSamples: Int get() = distance.samples
 
     /**
      * Заміри ПОВНОЇ ємності — із зарядок, що починалися з низьких відсотків.
      *
-     * Тримаються окремо від кошиків, бо це принципово інший вимір: кошики кажуть
-     * про форму шкали, а це — про її загальну «вагу» в кіловат-годинах.
+     * Тримаються окремо від кошиків, бо це принципово інший вимір. У побудові
+     * кривої вони більше НЕ БЕРУТЬ УЧАСТІ: рахуються за лічильником прийнятої
+     * енергії, а він, як з'ясувалося, міряє шкалу рідного пакета, а не кіловат-
+     * години. Лишилися заради одного рядка на екрані — щоб цю розбіжність було
+     * видно, а не щоб на ній щось будувати.
      */
     private var totalSumKwh = 0.0
 
@@ -88,53 +104,20 @@ class EnergyLevels {
     private val volII = DoubleArray(BINS)
     private val volIU = DoubleArray(BINS)
 
-    /**
-     * Додає замір: шкала пройшла від [fromPercent] до [toPercent], і за цей час
-     * з батареї пішло [netKwh] кВт·год.
-     *
-     * @return чи прийнято замір. Відмова означає, що числа непослідовні або
-     * нефізичні: краще не мати виміру, ніж мати вигаданий.
-     */
-    fun learn(fromPercent: Double, toPercent: Double, netKwh: Double): Boolean {
-        val span = fromPercent - toPercent
-        if (span < MIN_SPAN_PERCENT || !span.isFinite()) return false
-        if (netKwh <= 0.0 || !netKwh.isFinite()) return false
+    /** Замір кривої A: шкала пройшла від A до B, лічильники дали стільки нетто. */
+    fun learn(fromPercent: Double, toPercent: Double, netKwh: Double): Boolean =
+        counter.learn(fromPercent, toPercent, netKwh)
 
-        // Скільки кВт·год на відсоток шкали. Поза цими межами це не батарея на
-        // 27 або 51 кВт·год, а помилка читання.
-        val rate = netKwh / span
-        if (rate < MIN_RATE_KWH_PER_PERCENT || rate > MAX_RATE_KWH_PER_PERCENT) return false
+    /** Замір кривої B: віддане за лічильником мінус проінтегрована рекуперація. */
+    fun learnPower(fromPercent: Double, toPercent: Double, netKwh: Double): Boolean =
+        power.learn(fromPercent, toPercent, netKwh)
 
-        val low = max(0.0, min(fromPercent, toPercent))
-        val high = min(100.0, max(fromPercent, toPercent))
-        if (high <= low) return false
-
-        var bin = binOf(low)
-        while (bin < BINS) {
-            val binLow = bin * BIN_WIDTH_PERCENT
-            val binHigh = binLow + BIN_WIDTH_PERCENT
-            if (binLow >= high) break
-
-            val part = min(high, binHigh) - max(low, binLow)
-            if (part > 0.0) {
-                sumPercent[bin] += part
-                sumKwh[bin] += rate * part
-            }
-            bin++
-        }
-
-        samples++
-        return true
-    }
+    /** Замір кілометрів: скільки проїхано за цей шматок шкали. */
+    fun learnDistance(fromPercent: Double, toPercent: Double, km: Double): Boolean =
+        distance.learn(fromPercent, toPercent, km)
 
     /**
      * Додає замір повної ємності із зарядки.
-     *
-     * ЧОМУ САМЕ ЗАРЯДКА З НИЗЬКИХ ВІДСОТКІВ. Лічильник прийнятої енергії веде сама
-     * батарея, тобто вже по той бік бортового зарядного: втрат зарядного в цьому
-     * числі немає, на відміну від показів розетки. А низький старт потрібен, щоб
-     * зарядка охопила майже всю шкалу — тоді поділити енергію на пройдені відсотки
-     * означає отримати ємність усієї шкали, а не однієї її ділянки.
      *
      * @return чи прийнято замір.
      */
@@ -152,7 +135,7 @@ class EnergyLevels {
         return true
     }
 
-    /** Виміряна повна ємність, кВт·год; null — глибоких зарядок ще не було. */
+    /** Що показала зарядка з низьких відсотків, кВт·год; null — таких не було. */
     val measuredTotalKwh: Double?
         get() = if (fullChargeSamples > 0) totalSumKwh / fullChargeSamples else null
 
@@ -208,152 +191,91 @@ class EnergyLevels {
         }
     }
 
-    /** Нахил кривої в цьому місці шкали, кВт·год на відсоток; null — не міряли. */
-    fun rateAt(socPercent: Double): Double? = rateOfBin(binOf(socPercent))
+    /** Нахил кривої A в цьому місці шкали, кВт·год на відсоток; null — не міряли. */
+    fun rateAt(socPercent: Double): Double? = counter.rateAt(socPercent)
 
-    /** Середній нахил по всьому виміряному. Ним доводиться те, чого не міряли. */
-    fun averageRate(): Double {
-        val energy = sumKwh.sum()
-        val percent = sumPercent.sum()
-        return if (percent > 0.0) energy / percent else 0.0
-    }
-
-    val measuredFromPercent: Double?
-        get() = sumPercent.indexOfFirst { it > 0.0 }.takeIf { it >= 0 }?.let { it * BIN_WIDTH_PERCENT }
-
-    val measuredToPercent: Double?
-        get() = sumPercent.indexOfLast { it > 0.0 }.takeIf { it >= 0 }?.let { (it + 1) * BIN_WIDTH_PERCENT }
-
-    /** Яку частину шкали виміряно, у відсотках. */
-    val coveredPercent: Double
-        get() = sumPercent.count { it > 0.0 } * BIN_WIDTH_PERCENT
-
-    /** Скільки кВт·год у виміряних кошиках разом. */
-    fun measuredEnergyKwh(): Double = (0 until BINS).sumOf { bin ->
-        (rateOfBin(bin) ?: 0.0) * BIN_WIDTH_PERCENT
-    }
+    val measuredFromPercent: Double? get() = counter.measuredFromPercent
+    val measuredToPercent: Double? get() = counter.measuredToPercent
+    val coveredPercent: Double get() = counter.coveredPercent
+    val powerCoveredPercent: Double get() = power.coveredPercent
+    val distanceCoveredPercent: Double get() = distance.coveredPercent
 
     /**
-     * Крива від 0 до 100 % через один відсоток, прив'язана до повної ємності
-     * [totalKwh].
+     * Крива A від 0 до 100 % через один відсоток.
      *
-     * Точка на X відсотках — це стільки кВт·год, скільки в батареї лишається на
-     * цьому відсотку.
-     *
-     * Виміряні кошики лишаються зі своїм зміряним нахилом, а невиміряній частині
-     * шкали віддається решта повної ємності, розкладена рівно. Саме тому місцевий
-     * нахил не розтягується на всю шкалу: сума кривої задана наперед, і кожен новий
-     * замір лише перерозподіляє її, а не роздуває й не зменшує.
+     * @param nominalKwh ємність із налаштувань авто: з неї крива починається на
+     * ста відсотках і йде вниз по виміряних нахилах.
      */
-    fun curve(totalKwh: Double): List<CurvePoint> {
-        if (samples == 0 || totalKwh <= 0.0) return emptyList()
+    fun curve(nominalKwh: Double): List<CurvePoint> = build(counter, nominalKwh)
 
-        val measured = smooth(DoubleArray(BINS) { rateOfBin(it) ?: Double.NaN })
-        val measuredEnergy = measuredEnergyKwh()
-        val prior = stretchOverGaps(measured)
-
-        // Виміряне вже не влазить у повну ємність. Це або надто мала аксіома, або
-        // заміри з надто грубою роздільністю; тиснемо їх пропорційно, лишаючи
-        // невиміряній частині хоч якийсь нахил, — інакше крива пішла б униз.
-        val hasGaps = measured.any { it.isNaN() }
-        val squeeze = if (hasGaps && measuredEnergy > totalKwh * MAX_MEASURED_SHARE) {
-            totalKwh * MAX_MEASURED_SHARE / measuredEnergy
-        } else {
-            1.0
-        }
-
-        // Один коефіцієнт на все невиміряне: форма там уже задана протягуванням,
-        // лишається підігнати вагу, щоб сума кривої дорівнювала повній ємності.
-        val priorTail = (0 until BINS).sumOf { if (measured[it].isNaN()) prior[it] * BIN_WIDTH_PERCENT else 0.0 }
-        val tailScale = if (priorTail > 0.0) {
-            ((totalKwh - measuredEnergy * squeeze) / priorTail).coerceAtLeast(0.0)
-        } else {
-            0.0
-        }
-
-        val points = mutableListOf(CurvePoint(0.0, 0.0, measured = !measured[0].isNaN()))
-        var energy = 0.0
-
-        for (bin in 0 until BINS) {
-            val known = measured[bin]
-            val rate = if (known.isNaN()) prior[bin] * tailScale else known * squeeze
-            energy += rate * BIN_WIDTH_PERCENT
-            points += CurvePoint(
-                socPercent = (bin + 1) * BIN_WIDTH_PERCENT,
-                energyKwh = energy,
-                measured = !known.isNaN(),
-            )
-        }
-        return points
-    }
+    /** Крива B — те саме, але за струмом. Порожня, поки замірів немає. */
+    fun powerCurve(nominalKwh: Double): List<CurvePoint> =
+        if (power.hasMeasurements) build(power, nominalKwh) else emptyList()
 
     /**
-     * Легке згладжування по сусідах: кошик важить удвічі більше за кожного з них.
+     * Кілометри на відсоток шкали. Порожньо, поки не проїхали нічого.
      *
-     * Крок лічильника лишає шум навіть у широкому кошику, а справжня крива шкали
-     * гладка — вона задана хімією, а не випадковістю. Тому сусіди трохи
-     * підтягують одне одного. Ваги навмисно скромні: сильніше згладжування вже
-     * почало б з'їдати перегин, заради якого крива й будується.
-     *
-     * Невиміряні кошики в згладжуванні не беруть участі — ні як джерело, ні як
-     * ціль: доводити порожнє місце має протягування, а не розмазування сусіда.
+     * Невиміряне тут НЕ добудовується: на відміну від енергії, доводити пробіг
+     * нема з чого — він залежить не від батареї, а від дороги.
      */
-    private fun smooth(rates: DoubleArray): DoubleArray {
-        val out = DoubleArray(BINS)
-        for (bin in 0 until BINS) {
-            if (rates[bin].isNaN()) {
-                out[bin] = Double.NaN
-                continue
-            }
-            var sum = rates[bin] * 2.0
-            var weight = 2.0
-            for (side in listOf(bin - 1, bin + 1)) {
-                if (side in 0 until BINS && !rates[side].isNaN()) {
-                    sum += rates[side]
-                    weight += 1.0
+    fun distanceCurve(): List<DistancePoint> =
+        if (!distance.hasMeasurements) {
+            emptyList()
+        } else {
+            (0 until BINS).mapNotNull { bin ->
+                distance.rateOf(bin)?.let {
+                    DistancePoint(socPercent = (bin + 0.5) * BIN_WIDTH_PERCENT, km = it)
                 }
             }
-            out[bin] = sum / weight
         }
-        return out
-    }
+
+    /** Скільки кВт·год набралося по всій шкалі за кривою A. */
+    fun capacityKwh(nominalKwh: Double): Double = total(counter, nominalKwh)
+
+    /** Те саме за кривою B; null — замірів ще немає. */
+    fun powerCapacityKwh(nominalKwh: Double): Double? =
+        if (power.hasMeasurements) total(power, nominalKwh) else null
+
+    private fun total(bins: RateBins, nominalKwh: Double): Double =
+        bins.profile(nominalKwh / 100.0).sum() * BIN_WIDTH_PERCENT
 
     /**
-     * Протягує нахил на порожні місця: між двома виміряними — плавно від одного до
-     * іншого, за краями — рівно як на найближчому виміряному.
+     * Складає криву зверху вниз.
      *
-     * Це найпростіше припущення, яке не вигадує форми: нахил шкали змінюється
-     * плавно, і між двома відомими точками пряма — чесніше, ніж стрибок на
-     * середнє по всій шкалі.
+     * Верхня точка — [nominalKwh] на ста відсотках. Далі вниз віднімається нахил
+     * кожного кошика. Де крива опиниться на нулі — там і відповідь: нуль означає
+     * «пакет саме такий», додатне — «стільки не набралося», від'ємне — «пакет
+     * більший за заявлений». Нічого не підганяємо: промах і є результат.
      */
-    private fun stretchOverGaps(measured: DoubleArray): DoubleArray {
-        val filled = DoubleArray(BINS)
-        val known = (0 until BINS).filter { !measured[it].isNaN() }
-        if (known.isEmpty()) return filled
+    private fun build(bins: RateBins, nominalKwh: Double): List<CurvePoint> {
+        if (nominalKwh <= 0.0) return emptyList()
+        val rate = bins.profile(nominalKwh / 100.0)
 
-        for (bin in 0 until BINS) {
-            if (!measured[bin].isNaN()) {
-                filled[bin] = measured[bin]
-                continue
-            }
-            val before = known.lastOrNull { it < bin }
-            val after = known.firstOrNull { it > bin }
-            filled[bin] = when {
-                before != null && after != null -> {
-                    val share = (bin - before).toDouble() / (after - before)
-                    measured[before] + share * (measured[after] - measured[before])
-                }
-                before != null -> measured[before]
-                else -> measured[after!!]
-            }
+        // Точка на межі кошиків зміряна, якщо зміряний хоч один із двох сусідніх:
+        // інакше поодинокий виміряний кошик малювався б пунктиром з обох боків.
+        fun measuredAt(edge: Int): Boolean =
+            (edge < BINS && bins.measured(edge)) || (edge > 0 && bins.measured(edge - 1))
+
+        val points = ArrayList<CurvePoint>(BINS + 1)
+        var energy = nominalKwh
+        points += CurvePoint(100.0, energy, measuredAt(BINS))
+        for (bin in BINS - 1 downTo 0) {
+            energy -= rate[bin] * BIN_WIDTH_PERCENT
+            points += CurvePoint(bin * BIN_WIDTH_PERCENT, energy, measuredAt(bin))
         }
-        return filled
+        return points.asReversed()
     }
 
     fun snapshot() = LevelsSnapshot(
-        sumKwh = sumKwh.copyOf(),
-        sumPercent = sumPercent.copyOf(),
-        samples = samples,
+        sumKwh = counter.values,
+        sumPercent = counter.percents,
+        samples = counter.samples,
+        sumPowerKwh = power.values,
+        sumPowerPercent = power.percents,
+        powerSamples = power.samples,
+        sumKm = distance.values,
+        sumKmPercent = distance.percents,
+        distanceSamples = distance.samples,
         totalSumKwh = totalSumKwh,
         fullChargeSamples = fullChargeSamples,
         voltage = VoltageSums(
@@ -366,89 +288,38 @@ class EnergyLevels {
     )
 
     fun restore(snapshot: LevelsSnapshot) {
-        val energy = foldToBins(snapshot.sumKwh) ?: return
-        val percent = foldToBins(snapshot.sumPercent) ?: return
-        energy.copyInto(sumKwh)
-        percent.copyInto(sumPercent)
-        samples = snapshot.samples
+        counter.restore(snapshot.sumKwh, snapshot.sumPercent, snapshot.samples)
+        power.restore(snapshot.sumPowerKwh, snapshot.sumPowerPercent, snapshot.powerSamples)
+        distance.restore(snapshot.sumKm, snapshot.sumKmPercent, snapshot.distanceSamples)
         totalSumKwh = snapshot.totalSumKwh
         fullChargeSamples = snapshot.fullChargeSamples
 
-        // Суми напруги теж згортаються по п'ять, як і решта: вони так само суми.
+        // Суми напруги приводяться до нової ширини кошика так само, як решта:
+        // вони теж суми, і жодного заміру при цьому не втрачено.
         snapshot.voltage?.let { v ->
-            foldToBins(v.n)?.copyInto(volN)
-            foldToBins(v.i)?.copyInto(volI)
-            foldToBins(v.u)?.copyInto(volU)
-            foldToBins(v.ii)?.copyInto(volII)
-            foldToBins(v.iu)?.copyInto(volIU)
+            RateBins.resize(v.n)?.copyInto(volN)
+            RateBins.resize(v.i)?.copyInto(volI)
+            RateBins.resize(v.u)?.copyInto(volU)
+            RateBins.resize(v.ii)?.copyInto(volII)
+            RateBins.resize(v.iu)?.copyInto(volIU)
         }
     }
 
     fun reset() {
-        sumKwh.fill(0.0)
-        sumPercent.fill(0.0)
+        counter.reset()
+        power.reset()
+        distance.reset()
         volN.fill(0.0); volI.fill(0.0); volU.fill(0.0); volII.fill(0.0); volIU.fill(0.0)
-        samples = 0
         totalSumKwh = 0.0
         fullChargeSamples = 0
     }
-
-    /**
-     * Приводить масив із файлу до поточної кількості кошиків.
-     *
-     * Старі файли зберігали сто кошиків по одному відсотку. Оскільки в них лежать
-     * СУМИ, згортання — це просто додавання п'ятірками: жодного заміру не
-     * втрачено. Масив іншої, незнайомої довжини відкидаємо: краще почати заново,
-     * ніж мовчки перекрутити чужі числа.
-     */
-    private fun foldToBins(values: DoubleArray): DoubleArray? = when (values.size) {
-        BINS -> values.copyOf()
-        BINS * LEGACY_BINS_PER_BIN -> DoubleArray(BINS) { bin ->
-            var sum = 0.0
-            for (old in 0 until LEGACY_BINS_PER_BIN) sum += values[bin * LEGACY_BINS_PER_BIN + old]
-            sum
-        }
-        else -> null
-    }
-
-    private fun rateOfBin(bin: Int): Double? =
-        if (sumPercent[bin] > MIN_BIN_PERCENT) sumKwh[bin] / sumPercent[bin] else null
 
     private fun binOf(socPercent: Double): Int =
         (socPercent / BIN_WIDTH_PERCENT).toInt().coerceIn(0, BINS - 1)
 
     companion object {
-        /**
-         * Кошики по 5 %, а не по 1 %.
-         *
-         * Один замір коштує близько кіловат-години, а крок лічильника — 0.1, тобто
-         * ±10 % на замір. Із вузькими кошиками сусіди набиралися в різних поїздках
-         * і кожен зі своїм шумом — на графіку це виглядало сходинками, яких у
-         * батареї немає. Ширший кошик збирає вп'ятеро більше замірів і гасить
-         * шум приблизно вдвічі, а форму шкали не втрачає: вона гладка, а не
-         * зубчаста.
-         *
-         * Накопичене при переході не гине. У файлі лежать СУМИ енергії та
-         * відсотків, а суми просто складаються: п'ять старих кошиків згортаються
-         * в один новий без жодного втраченого заміру.
-         */
-        const val BINS = 20
-        const val BIN_WIDTH_PERCENT = 5.0
-
-        /** Скільки старих кошиків по 1 % припадає на один новий. */
-        const val LEGACY_BINS_PER_BIN = 5
-
-        /**
-         * Коротший замір нічого не дає: крок лічильника 0.1 кВт·год, і на пів
-         * відсотка шкали це вже десятки відсотків похибки.
-         */
-        const val MIN_SPAN_PERCENT = 0.5
-
-        /**
-         * Скільки відсотка кошика має набратися, щоб вважати його виміряним.
-         * Дотик краєм замір не робить.
-         */
-        const val MIN_BIN_PERCENT = 0.1
+        const val BINS = RateBins.BINS
+        const val BIN_WIDTH_PERCENT = RateBins.BIN_WIDTH_PERCENT
 
         /** Батарея на 10 кВт·год — менше не буває навіть у гібрида. */
         const val MIN_RATE_KWH_PER_PERCENT = 0.1
@@ -461,6 +332,16 @@ class EnergyLevels {
          * вистачає.
          */
         const val MAX_RATE_KWH_PER_PERCENT = 1.5
+
+        /**
+         * Межі для кілометрів на відсоток.
+         *
+         * Знизу — сто метрів: менше означає, що одометр не встиг оновитися.
+         * Зверху — двадцять кілометрів на відсоток: це вже не їзда, а дірка в
+         * спостереженні, крізь яку проїхали більше, ніж ми бачили.
+         */
+        const val MIN_KM_PER_PERCENT = 0.1
+        const val MAX_KM_PER_PERCENT = 20.0
 
         /** Зарядка мусить починатися не вище цього відсотка, щоб міряти повну ємність. */
         const val MAX_START_PERCENT = 6.0
@@ -492,13 +373,6 @@ class EnergyLevels {
         /** Правдоподібні межі повної ємності цього пакета, кВт·год. */
         const val MIN_TOTAL_KWH = 20.0
         const val MAX_TOTAL_KWH = 120.0
-
-        /**
-         * Яку частку повної ємності дозволено зайняти виміряним кошикам, поки
-         * шкала покрита не повністю. Решта лишається невиміряній частині: нуль
-         * нахилу там означав би «на цих відсотках енергії немає взагалі».
-         */
-        const val MAX_MEASURED_SHARE = 0.95
     }
 }
 
@@ -507,6 +381,18 @@ data class LevelsSnapshot(
     val sumKwh: DoubleArray,
     val sumPercent: DoubleArray,
     val samples: Int,
+
+    /**
+     * Криві B і кілометрів. Порожні в старих файлах — почнуть набиратися заново,
+     * а крива A від цього не постраждає: вона в тих самих полях, що й була.
+     */
+    val sumPowerKwh: DoubleArray = DoubleArray(0),
+    val sumPowerPercent: DoubleArray = DoubleArray(0),
+    val powerSamples: Int = 0,
+    val sumKm: DoubleArray = DoubleArray(0),
+    val sumKmPercent: DoubleArray = DoubleArray(0),
+    val distanceSamples: Int = 0,
+
     val totalSumKwh: Double = 0.0,
     val fullChargeSamples: Int = 0,
 
@@ -535,6 +421,8 @@ data class LevelsSnapshot(
         if (this === other) return true
         if (other !is LevelsSnapshot) return false
         return samples == other.samples &&
+            powerSamples == other.powerSamples &&
+            distanceSamples == other.distanceSamples &&
             fullChargeSamples == other.fullChargeSamples &&
             totalSumKwh == other.totalSumKwh &&
             pendingSocPercent == other.pendingSocPercent &&
@@ -543,7 +431,11 @@ data class LevelsSnapshot(
             pendingAtMs == other.pendingAtMs &&
             voltage == other.voltage &&
             sumKwh.contentEquals(other.sumKwh) &&
-            sumPercent.contentEquals(other.sumPercent)
+            sumPercent.contentEquals(other.sumPercent) &&
+            sumPowerKwh.contentEquals(other.sumPowerKwh) &&
+            sumPowerPercent.contentEquals(other.sumPowerPercent) &&
+            sumKm.contentEquals(other.sumKm) &&
+            sumKmPercent.contentEquals(other.sumKmPercent)
     }
 
     override fun hashCode(): Int =

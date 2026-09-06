@@ -3,16 +3,32 @@
 // справа. Так прийнято малювати розрядні криві, і так воно читається як рух —
 // зліва повна батарея, праворуч порожня.
 //
-// Двi кривi тут не для краси. Саме напруга пояснює, ЧОМУ шкала нерівна: BMS
-// розкладає відсотки за заводською таблицею напруг, а комірки стоять інші, з
-// іншим діапазоном. Де напруга йде рівно, а кіловат-години ні — там і сидить
-// уся розбіжність. Тому в кожної кривої своя вертикаль: кВт·год ліворуч,
-// вольти праворуч.
+// КРИВИХ ЄМНОСТІ ТУТ ДВІ, І РІЗНИЦЯ МІЖ НИМИ — ГОЛОВНЕ, ЩО ПОКАЗУЄ ЦЕЙ ГРАФІК.
+// Обидві починаються з однієї верхньої точки — заявленої в налаштуваннях ємності
+// на ста відсотках — і йдуть униз по виміряних нахилах. Куди кожна сяде на нулі,
+// те й є її відповідь про справжню ємність.
 //
-// ЧОМУ ОКРЕМИЙ ГРАФІК, А НЕ ДРУГА КРИВА НА СУСІДНЬОМУ. Дві величини з різними
-// одиницями на одному полотні читаються погано: спільна вертикаль означає, що одна
-// з них намальована в чужому масштабі, і форму кривої вже не побачити. Тут
-// вертикаль своя, у кіловат-годинах, і з цифрами біля осі.
+//   A «за лічильниками» — ΔkWhOut − ΔkWhIn з пожиттєвих лічильників BMS.
+//   B «за струмом» — ΔkWhOut з лічильника мінус рекуперація за інтегралом.
+//
+// Лічильник прийнятої енергії міряє не кіловат-години, а шкалу РІДНОГО пакета:
+// нічна зарядка на 49.6 кВт·год за лічильником станції дала за ним лише 23.0.
+// Тому A сідає високо над нулем, а B — там, де насправді. Обидві на одному
+// полотні саме для того, щоб цю розбіжність було видно, а не описано словами.
+//
+// ПРЯМА ЛІНІЯ ТТХ — заявлена ємність, розкладена по шкалі рівно. Орієнтир, від
+// якого відхиляються обидві криві.
+//
+// Крива напруги пояснює, ЧОМУ шкала нерівна: BMS розкладає відсотки за
+// заводською таблицею напруг, а комірки стоять інші, з іншим діапазоном. Де
+// напруга йде рівно, а кіловат-години ні — там і сидить уся розбіжність. Тому в
+// кожної кривої своя вертикаль: кВт·год ліворуч, вольти праворуч.
+//
+// ОКРЕМИМ ПОЛОТНОМ — КІЛОМЕТРИ НА ВІДСОТОК. Вертикаль перевернута: нуль угорі,
+// десять кілометрів унизу, тож «довгі» відсотки провисають. Це НЕ властивість
+// батареї, а слід того, як їздили: той самий відсоток у місті з кліматом і на
+// трасі коштує різного пробігу. Тому доводити тут нема чого — точки є лише там,
+// де справді їхали.
 //
 // ОСІ Й СІТКА МАЛЮЮТЬСЯ ЗАВЖДИ, навіть коли замірів ще нуль. Порожнє полотно з
 // підписаними осями показує, що графік є і чого він чекає; картка, яка до першого
@@ -22,10 +38,9 @@
 // відомою висотою полотна. Тому висота задана числом, а не пропорцією: інакше
 // цифру ніяк не поставити рівно проти її лінії сітки.
 //
-// ЩО ТУТ ВИМІРЯНЕ, А ЩО ДОВЕДЕНЕ. Суцільна ділянка — та, де крива справді зміряна
-// різницею пожиттєвих лічильників. Пунктир — доведення середнім нахилом: ми ще не
-// бували на цих відсотках, і показувати їх так само, як зміряні, означало б
-// брехати про те, чого не знаємо.
+// ЩО ТУТ ВИМІРЯНЕ, А ЩО ДОВЕДЕНЕ. Суцільна ділянка — та, де крива справді зміряна.
+// Пунктир — доведення нахилом сусідів: ми ще не бували на цих відсотках, і
+// показувати їх так само, як зміряні, означало б брехати про те, чого не знаємо.
 
 package com.kirianov.kiasoulevplus2.Interface.screens.prediction
 
@@ -52,7 +67,10 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import com.kirianov.kiasoulevplus2.Data.BatteryCurve
+import com.kirianov.kiasoulevplus2.Data.CurvePoint
+import com.kirianov.kiasoulevplus2.Data.DistancePoint
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import kotlin.math.ceil
@@ -75,6 +93,15 @@ private const val MAX_VOLTS = 420.0
  */
 private const val DEFAULT_TOP_KWH = 60.0
 
+/** Висота полотна кілометрів. Нижче за головне: у нього одна крива. */
+private val DISTANCE_PLOT_HEIGHT = 120.dp
+
+/** Стеля вертикалі кілометрів на відсоток. Десять — з запасом над усім баченим. */
+private const val MAX_KM_PER_PERCENT = 10.0
+
+/** Ширша прогалина між точками — не крива, а два різні шматки шкали. */
+private const val MAX_JOIN_PERCENT = 3.0
+
 @Composable
 fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -85,6 +112,7 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
             Text(text = "Ємність по шкалі", fontSize = 18.sp)
 
             val lineColor = MaterialTheme.colorScheme.primary
+            val counterColor = MaterialTheme.colorScheme.secondary
             val voltsColor = MaterialTheme.colorScheme.tertiary
             val inferredColor = MaterialTheme.colorScheme.outline
             val gridColor = MaterialTheme.colorScheme.outlineVariant
@@ -141,18 +169,37 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
                             value += step
                         }
 
-                        // Крива по відрізках: суцільна там, де обидва кінці зміряні.
                         val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))
-                        curve.points.zipWithNext { from, to ->
-                            val measured = from.measured && to.measured
+
+                        // Пряма ТТХ: заявлена ємність, розкладена по шкалі рівно.
+                        // Орієнтир, від якого відхиляються обидві криві.
+                        if (curve.totalKwh > 0.0) {
                             drawLine(
-                                color = if (measured) lineColor else inferredColor,
-                                start = Offset(x(from.socPercent), y(from.energyKwh)),
-                                end = Offset(x(to.socPercent), y(to.energyKwh)),
-                                strokeWidth = if (measured) 4f else 2f,
-                                pathEffect = if (measured) null else dash,
+                                color = gridColor,
+                                start = Offset(x(100.0), y(curve.totalKwh)),
+                                end = Offset(x(0.0), y(0.0)),
+                                strokeWidth = 2f,
+                                pathEffect = dash,
                             )
                         }
+
+                        // Крива по відрізках: суцільна там, де обидва кінці зміряні.
+                        fun draw(points: List<CurvePoint>, color: Color, width: Float) {
+                            points.zipWithNext { from, to ->
+                                val measured = from.measured && to.measured
+                                drawLine(
+                                    color = if (measured) color else inferredColor,
+                                    start = Offset(x(from.socPercent), y(from.energyKwh)),
+                                    end = Offset(x(to.socPercent), y(to.energyKwh)),
+                                    strokeWidth = if (measured) width else 2f,
+                                    pathEffect = if (measured) null else dash,
+                                )
+                            }
+                        }
+
+                        // Спершу A, потім B: те, чому віримо, лягає зверху.
+                        draw(curve.counterPoints, counterColor, 3f)
+                        draw(curve.powerPoints, lineColor, 4f)
 
                         // Крива напруги: своя вертикаль, свій колір. Точки є лише
                         // там, де замірів вистачило прибрати просадку під струмом.
@@ -221,6 +268,25 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
                 style = MaterialTheme.typography.bodySmall,
             )
 
+            CapacityLine("Заявлено в налаштуваннях", curve.totalKwh, gridColor)
+            CapacityLine("Зміряно за струмом", curve.powerCapacityKwh, lineColor)
+            // Поки замірів немає, крива дорівнює прямій ТТХ — показувати її суму
+            // як «зміряно» означало б видати аксіому за вимір.
+            CapacityLine(
+                "Зміряно за лічильниками",
+                curve.counterCapacityKwh.takeIf { curve.samples > 0 },
+                counterColor,
+            )
+
+            Text(
+                text = "Обидві криві починаються з заявленої ємності на ста " +
+                    "відсотках і йдуть униз по зміряних нахилах. Куди крива сяде " +
+                    "на нулі — стільки насправді не набралося.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            DistanceChart(curve.distancePoints, lineColor, gridColor)
+
             if (curve.voltagePoints.isNotEmpty()) {
                 val cell = curve.voltagePoints
                 Text(
@@ -266,6 +332,116 @@ fun BatteryCurveCard(curve: BatteryCurve, vehicle: VehicleData, onReset: () -> U
     }
 }
 
+/** Один рядок підсумку: скільки кВт·год дала ця крива на всю шкалу. */
+@Composable
+private fun CapacityLine(title: String, kwh: Double?, color: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(text = title, style = MaterialTheme.typography.bodySmall, color = color)
+        Text(
+            text = if (kwh == null || kwh <= 0.0) "—" else "${formatDecimal(kwh, 1)} кВт·год",
+            style = MaterialTheme.typography.bodySmall,
+            color = color,
+        )
+    }
+}
+
+/**
+ * КІЛОМЕТРИ НА ВІДСОТОК ШКАЛИ.
+ *
+ * Вертикаль перевернута: нуль угорі, [MAX_KM_PER_PERCENT] унизу. Тому «довгі»
+ * відсотки провисають, і видно, де саме шкала тягнеться.
+ *
+ * Точки є лише там, де справді їхали, і доводити тут нема чого: це не властивість
+ * батареї, а слід поїздок. Той самий відсоток у місті з кліматом і на трасі
+ * коштує різного пробігу — і саме тому цифри поруч мають різнитися.
+ */
+@Composable
+private fun DistanceChart(points: List<DistancePoint>, lineColor: Color, gridColor: Color) {
+    Text(text = "Кілометри на відсоток", fontSize = 16.sp)
+
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .width(AXIS_WIDTH)
+                .height(DISTANCE_PLOT_HEIGHT),
+        ) {
+            var value = 0.0
+            while (value <= MAX_KM_PER_PERCENT) {
+                val share = value / MAX_KM_PER_PERCENT
+                Text(
+                    text = formatDecimal(value, 0),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(end = 4.dp)
+                        .offset(y = DISTANCE_PLOT_HEIGHT * share.toFloat() - 8.dp),
+                )
+                value += 2.0
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(DISTANCE_PLOT_HEIGHT),
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                fun x(percent: Double) = (1.0 - percent / 100.0).toFloat() * size.width
+                // Перевернуто навмисно: нуль угорі, довгі відсотки провисають униз.
+                fun y(km: Double) = (km / MAX_KM_PER_PERCENT).toFloat() * size.height
+
+                for (percent in 0..100 step 20) {
+                    drawLine(
+                        gridColor,
+                        Offset(x(percent.toDouble()), 0f),
+                        Offset(x(percent.toDouble()), size.height),
+                        1f,
+                    )
+                }
+                var value = 0.0
+                while (value <= MAX_KM_PER_PERCENT) {
+                    drawLine(gridColor, Offset(0f, y(value)), Offset(size.width, y(value)), 1f)
+                    value += 2.0
+                }
+
+                // Сусідні точки з'єднуємо лише коли вони й справді сусідні: розрив
+                // у замірах не має перетворитися на пряму через пів шкали.
+                points.zipWithNext { from, to ->
+                    if (to.socPercent - from.socPercent <= MAX_JOIN_PERCENT) {
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(x(from.socPercent), y(from.km)),
+                            end = Offset(x(to.socPercent), y(to.km)),
+                            strokeWidth = 3f,
+                        )
+                    }
+                }
+                points.forEach {
+                    drawCircle(lineColor, radius = 2.5f, center = Offset(x(it.socPercent), y(it.km)))
+                }
+            }
+        }
+
+        Box(modifier = Modifier.width(AXIS_WIDTH))
+    }
+
+    Text(
+        text = if (points.isEmpty()) {
+            "Кілометрів ще не набралося: потрібен пробіг із одометра на тому самому " +
+                "інтервалі, що й замір енергії."
+        } else {
+            "Нуль угорі, тож довгі відсотки провисають. Це не властивість батареї, " +
+                "а слід поїздок: той самий відсоток у місті з кліматом і на трасі " +
+                "коштує різного пробігу."
+        },
+        style = MaterialTheme.typography.bodySmall,
+    )
+}
+
 /** Стеля вертикальної осі: округлена вгору до десятка, з запасом над кривою. */
 private fun topOf(curve: BatteryCurve): Double {
     if (curve.totalKwh <= 0.0) return DEFAULT_TOP_KWH
@@ -280,20 +456,25 @@ private fun measuredText(curve: BatteryCurve): String {
     } else {
         "Зміряного ще немає"
     }
-    return "$range, покрито ${formatDecimal(curve.coveredPercent, 0)} % зі 100. Замірів ${curve.samples}."
+    return "$range, покрито ${formatDecimal(curve.coveredPercent, 0)} % зі 100. " +
+        "Замірів ${curve.samples} за лічильниками, ${curve.powerSamples} за струмом."
 }
 
 /**
- * Звідки взялася повна ємність. Це найважливіший рядок картки: сума кривої задана
- * НАПЕРЕД, а заміри лише перерозподіляють її по шкалі.
+ * Що показала зарядка з низьких відсотків.
+ *
+ * Рядок лишився, але вже НЕ як вимір ємності. Він рахується за лічильником
+ * прийнятої енергії, а той міряє шкалу рідного пакета: нічна зарядка на
+ * 49.6 кВт·год за лічильником станції дала за ним 23.0, тобто 27 на всю шкалу —
+ * рівно паспорт стокового Soul EV. Тому число тут — свідчення про сам лічильник,
+ * а не про батарею.
  */
 private fun fullText(curve: BatteryCurve): String = if (curve.totalMeasured) {
-    "Повна ємність ${formatDecimal(curve.totalKwh, 1)} кВт·год — зміряна " +
-        "${curve.fullChargeSamples} зарядкою з низьких відсотків. Заміри вище " +
-        "розкладають її по шкалі."
+    "Зарядка з низьких відсотків дала ${formatDecimal(curve.totalKwh, 1)} кВт·год за " +
+        "лічильником прийнятої енергії. У побудові кривої це число не бере участі: " +
+        "той лічильник міряє шкалу рідного пакета, а не кіловат-години."
 } else {
-    "Повна ємність ${formatDecimal(curve.totalKwh, 1)} кВт·год узята за аксіомою: " +
-        "16 комірок CATL по 3.18 кВт·год. Уточниться зарядкою, що почнеться з " +
-        "1–4 %. Заміри вище розкладають цю ємність по шкалі, а не додають до неї."
+    "Верхня точка ${formatDecimal(curve.totalKwh, 1)} кВт·год узята з налаштувань авто. " +
+        "Криві йдуть від неї вниз; наскільки вони не дійдуть до нуля — настільки " +
+        "заявлене й розходиться зі зміряним."
 }
-

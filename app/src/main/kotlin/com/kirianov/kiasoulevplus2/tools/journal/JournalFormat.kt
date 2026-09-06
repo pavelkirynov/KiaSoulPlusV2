@@ -166,11 +166,18 @@ object JournalFormat {
         }
 
         if (before.curve.samples != after.curve.samples ||
+            before.curve.powerSamples != after.curve.powerSamples ||
+            before.curve.distanceSamples != after.curve.distanceSamples ||
             before.curve.fullChargeSamples != after.curve.fullChargeSamples
         ) {
             val curve = after.curve
+            // Дві зміряні ємності поруч із заявленою: різниця між ними і є те, що
+            // ця крива взагалі має сказати.
             out += "$at curve n=${curve.samples} covered=${num(curve.coveredPercent)} " +
-                "total=${num(curve.totalKwh)}${if (curve.totalMeasured) "!" else "?"} " +
+                "total=${num(curve.totalKwh)} " +
+                "byCounter=${num(curve.counterCapacityKwh)} " +
+                "byCurrent=${num(curve.powerCapacityKwh)}/${curve.powerSamples} " +
+                "km=${curve.distanceSamples} " +
                 "charges=${curve.fullChargeSamples} " +
                 "from=${num(curve.measuredFromPercent)} to=${num(curve.measuredToPercent)}"
         }

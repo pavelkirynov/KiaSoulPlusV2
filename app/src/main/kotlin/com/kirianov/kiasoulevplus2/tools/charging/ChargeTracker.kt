@@ -406,13 +406,28 @@ object ChargeTracker {
         nowMs: Long,
     ): ChargeLog {
         val continuing = nowMs - log.lastSessionEndedAtMs < SESSION_GAP_MS && log.lastSessionEndedAtMs > 0L
+
+        // ПРОДОВЖЕННЯ БЕРЕТЬСЯ З ЗАКРИТОЇ СЕСІЇ, А НЕ З ПОТОЧНОЇ, і це виправлення
+        // помилки, яка з'їдала нічні зарядки на очах у власника.
+        //
+        // Закриття сесії обнуляє sessionKwh і кладе підсумок у lastSessionKwh.
+        // Продовжувати з sessionKwh означало продовжувати з нуля — завжди. У
+        // журналі це виглядало так: ознака заряджання блимала кожні кілька хвилин
+        // (кадр 581 то приходив, то ні, адаптер перепідключався), і за ніч
+        // набралося двадцять три кіловат-години дрібними шматками по 0.1–0.6, а на
+        // екрані стояло «остання зарядка 0.6 кВт·год».
+        //
+        // Добовий підсумок при цьому не постраждає: він накопичується приростами
+        // окремо й від відкриття-закриття сесії не залежить.
+        val carried = if (continuing) maxOf(log.sessionKwh, log.lastSessionKwh) else 0.0
+
         return log.copy(
             counterBaselineKwh = counterKwh,
             dischargedBaselineKwh = dischargedKwh,
             socBaselinePercent = socPercent,
             lastSeenAtMs = nowMs,
             charging = true,
-            sessionKwh = if (continuing) log.sessionKwh else 0.0,
+            sessionKwh = carried,
             sessionStartedAtMs = if (continuing && log.sessionStartedAtMs > 0L) log.sessionStartedAtMs else nowMs,
         )
     }

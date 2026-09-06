@@ -10,12 +10,21 @@
 // 4. Тримає готову криву в GeneralData і зберігає її у файл.
 // 5. Виконує запит «забути криву».
 //
+// 6. Веде ДРУГУ криву — за струмом — і криву кілометрів на відсоток.
+//
+// ЧОМУ КРИВИХ ДВІ. Лічильник прийнятої енергії міряє не кіловат-години: нічна
+// зарядка на 49.6 кВт·год за лічильником станції дала +23.0 за лічильником BMS, а
+// SOC виріс на 85 % — на всю шкалу виходить 27 кВт·год, тобто паспорт РІДНОГО
+// пакета. Лічильник відданої при цьому чесний: на поїздці він збігся з інтегралом
+// струму до десятої. Тому крива B бере віддане з лічильника, а рекуперацію рахує
+// інтегралом, і саме їй вірить прогноз; крива A лишається поруч, щоб розбіжність
+// було видно, а не щоб на ній щось будувати.
+//
 // ЧОГО ВІН НЕ РОБИТЬ:
-// - НЕ інтегрує потужність і НЕ залежить від знака струму: усе рахується
-//   різницею лічильників, які веде сама батарея.
-// - НЕ вимагає неперервних даних. Обрив зв'язку не псує замір, а лише відкладає
-//   його: лічильники абсолютні, і після повернення відлік просто починається
-//   від нового якоря.
+// - Криву A рахує ТІЛЬКИ різницею лічильників, які веде сама батарея, і не
+//   вимагає неперервних даних: обрив зв'язку замір не псує, а лише відкладає.
+// - Криву B без неперервного шматка не рахує взагалі: пропущену рекуперацію
+//   нема звідки взяти, і замір із діркою був би вигадкою.
 //
 // ДВА ВИПАДКИ, КОЛИ ЯКІР СКИДАЄТЬСЯ БЕЗ ЗАМІРУ:
 //  - зарядка. Тоді шкала йде вгору, і різниця лічильників означає протилежне;
@@ -49,6 +58,37 @@ class EnergyBlock(
 
     /** Точка, від якої міряється поточний інтервал. */
     private var anchor: Anchor? = null
+
+    /**
+     * Рекуперація, набрана від якоря інтегруванням потужності, кВт·год.
+     *
+     * Рахується з КОЖНОГО читання шини, а не з тих, де зрушив SOC: рекуперація —
+     * це секунди, і по рідких точках її не зібрати. Опитування йде раз на 0.8 с,
+     * цього вистачає.
+     */
+    private var regenKwh = 0.0
+
+    /**
+     * Чи цілий шматок спостережень від якоря.
+     *
+     * Одна дірка — і рекуперація за неї втрачена назавжди, а замір без неї
+     * завищив би витрату. Тоді інтервал іде тільки в криву A, якій дірки байдужі.
+     */
+    private var regenWhole = true
+
+    /**
+     * Скільки читань устигло увійти в інтеграл від якоря.
+     *
+     * Без цього лічильника крива B мовчки перетворилася б на валову віддану
+     * енергію: якщо інтегрування з якоїсь причини не працює, рекуперація виходить
+     * нульовою, і замір виглядає бездоганно — просто завищеним на всю
+     * рекуперацію інтервалу.
+     */
+    private var regenTicks = 0
+
+    /** Час і номер останнього читання шини: за ними інтегрується потужність. */
+    private var lastFrameMs: Long? = null
+    private var lastSequence: Long? = null
 
     /**
      * Останній ПОБАЧЕНИЙ відсоток і час, коли його побачили.
@@ -99,6 +139,9 @@ class EnergyBlock(
                         withContext(ioDispatcher) { store.useCar(vin) }
                         levels.reset()
                         anchor = null
+                        regenKwh = 0.0
+                        regenWhole = true
+                        regenTicks = 0
                         chargeStart = null
                         withContext(ioDispatcher) { store.load() }?.let { levels.restore(it) }
                         publish()
@@ -110,6 +153,9 @@ class EnergyBlock(
                     GeneralData.clearCurveRequest()
                     levels.reset()
                     anchor = null
+                    regenKwh = 0.0
+                    regenWhole = true
+                    regenTicks = 0
                     chargeStart = null
                     withContext(ioDispatcher) { store.clear() }
                     publish()
@@ -120,6 +166,10 @@ class EnergyBlock(
                 // батарею до своєї — значить зіпсувати обидві так, що числа
                 // лишаться правдоподібними й помилки ніхто не помітить.
                 if (!state.carLearning) return@collect
+
+                // Рекуперацію інтегруємо на кожному читанні шини — саме тому
+                // окремо від решти, яка чекає зрушення SOC.
+                integrateRegen(state)
 
                 // Напругу беремо з КОЖНОГО читання, а не лише з тих, де зрушив
                 // SOC: її крива набирається на порядок повільніше — їй потрібні
@@ -144,6 +194,44 @@ class EnergyBlock(
      * @return чи змінилася крива. Тільки тоді має сенс і зберігати, і публікувати:
      * читань приходить кілька на секунду, а замірів — один на кілька кілометрів.
      */
+    /**
+     * Додає до інтеграла рекуперації те, що прийшло цим читанням.
+     *
+     * Такт задає номер зчитування шини, а не зміна струму: однаковий струм двічі
+     * поспіль сховище стану за подію не вважає, а нам потрібен рівний хід часу.
+     *
+     * Дірка в часі ламає цілісність: за неї могло пройти будь-що, і замір, у
+     * якому частина рекуперації не порахована, завищив би витрату. Тому дірка не
+     * псує інтеграл мовчки, а знімає з нього довіру до наступного якоря.
+     */
+    private fun integrateRegen(state: State) {
+        val sequence = state.can.batteryFrames?.sequence ?: return
+        if (sequence == lastSequence) return
+        lastSequence = sequence
+
+        val now = nowMs()
+        val previous = lastFrameMs
+        lastFrameMs = now
+        if (previous == null) return
+
+        val gap = now - previous
+        if (gap <= 0L || gap > MAX_INTEGRATION_GAP_MS) {
+            regenWhole = false
+            return
+        }
+        if (!state.bms.hasData) {
+            regenWhole = false
+            return
+        }
+
+        // Додатний струм — енергія входить у пакет. Це і є рекуперація: авто на
+        // зарядці сюди не потрапляє, бо там інтервал відкидається цілком.
+        regenTicks++
+        val amps = state.bms.batteryCurrent
+        if (amps <= 0.0) return
+        regenKwh += amps * state.bms.batteryVoltage * gap / MS_PER_HOUR / 1000.0
+    }
+
     private fun accept(reading: Reading): Boolean {
         // Пауза міряється між ЧИТАННЯМИ, а не від якоря: сам інтервал цілком
         // законно триває кілька хвилин — стільки треба, щоб лічильник набрав
@@ -155,7 +243,7 @@ class EnergyBlock(
 
         val previous = anchor
         if (previous == null) {
-            anchor = reading.toAnchor()
+            moveAnchor(reading)
             return false
         }
 
@@ -165,7 +253,7 @@ class EnergyBlock(
             gapMs > MAX_GAP_MS ||
             reading.socPercent > previous.socPercent + SOC_RISE_TOLERANCE
         ) {
-            anchor = reading.toAnchor()
+            moveAnchor(reading)
             return false
         }
 
@@ -177,10 +265,34 @@ class EnergyBlock(
         val net = out - (reading.chargedKwh - previous.chargedKwh)
         val learned = levels.learn(previous.socPercent, reading.socPercent, net)
 
+        // Крива B: те саме віддане, але рекуперація — з інтеграла. Береться лише
+        // з цілого шматка спостережень: у дірці рекуперація не порахована, і
+        // замір вийшов би завищеним рівно на неї.
+        val learnedPower = regenWhole && regenTicks >= MIN_INTEGRATION_TICKS &&
+            levels.learnPower(previous.socPercent, reading.socPercent, out - regenKwh)
+
+        // Кілометри на відсоток. Одометр приходить широкомовним кадром і після
+        // перепідключення ще деякий час показує старе, тож беремо лише тоді, коли
+        // обидва кінці інтервалу його бачили.
+        val learnedKm = previous.odometerKm > 0.0 && reading.odometerKm > previous.odometerKm &&
+            levels.learnDistance(
+                previous.socPercent,
+                reading.socPercent,
+                reading.odometerKm - previous.odometerKm,
+            )
+
         // Якір переїжджає, якщо замір узято або якщо інтервал розтягнувся так,
         // що вже не буде взятий: тримати його далі означає нічого не міряти.
-        if (learned || out > MAX_STEP_KWH) anchor = reading.toAnchor()
-        return learned
+        if (learned || learnedPower || learnedKm || out > MAX_STEP_KWH) moveAnchor(reading)
+        return learned || learnedPower || learnedKm
+    }
+
+    /** Новий якір — новий відлік рекуперації, і довіра до нього поки що ціла. */
+    private fun moveAnchor(reading: Reading) {
+        anchor = reading.toAnchor()
+        regenKwh = 0.0
+        regenWhole = true
+        regenTicks = 0
     }
 
     /**
@@ -252,28 +364,33 @@ class EnergyBlock(
     }
 
     private fun publish() {
-        // Повна ємність: вимір із глибокої зарядки, а поки його немає — аксіома з
-        // відомого пакета. Місцевий нахил кривої тут НЕ використовується: угорі
-        // шкали відсоток найдешевший, і розтягнути його на всю шкалу означало б
-        // занизити ємність у рази.
-        val measuredTotal = levels.measuredTotalKwh
-        // Аксіому задає власник авто на екрані налаштувань: константа тут значила
-        // б, що всі машини однакові, а вони ні — рідний пакет удвічі менший за
-        // перепакований, і сплутати їх означає обіцяти вдвічі більший запас.
-        val total = measuredTotal ?: GeneralData.state.value.garage.active.effectivePackKwh
-        val curve = levels.curve(total)
+        // ВЕРХНЯ ТОЧКА КРИВОЇ — заявлена ємність із налаштувань авто, і тільки
+        // вона. Константа тут значила б, що всі машини однакові, а вони ні:
+        // рідний пакет удвічі менший за перепакований.
+        //
+        // Вимір із глибокої зарядки сюди БІЛЬШЕ НЕ ПІДСТАВЛЯЄТЬСЯ. Він рахується
+        // за лічильником прийнятої енергії, а той міряє шкалу рідного пакета:
+        // нічна зарядка на 49.6 кВт·год дала за ним 23.0, тобто 27 на всю шкалу.
+        // Підставити це числом ємності означало б удвічі занизити запас ходу.
+        val nominal = GeneralData.state.value.garage.active.effectivePackKwh
 
         GeneralData.updateCurve { current ->
             current.copy(
-                points = curve,
+                counterPoints = levels.curve(nominal),
+                powerPoints = levels.powerCurve(nominal),
+                distancePoints = levels.distanceCurve(),
                 measuredFromPercent = levels.measuredFromPercent,
                 measuredToPercent = levels.measuredToPercent,
                 coveredPercent = levels.coveredPercent,
                 voltagePoints = levels.voltageCurve(),
-                totalKwh = total,
-                totalMeasured = measuredTotal != null,
+                totalKwh = nominal,
+                totalMeasured = levels.measuredTotalKwh != null,
                 fullChargeSamples = levels.fullChargeSamples,
                 samples = levels.samples,
+                powerSamples = levels.powerSamples,
+                distanceSamples = levels.distanceSamples,
+                counterCapacityKwh = levels.capacityKwh(nominal),
+                powerCapacityKwh = levels.powerCapacityKwh(nominal),
             )
         }
     }
@@ -330,6 +447,7 @@ class EnergyBlock(
             chargedKwh = bms.cumulativeEnergyChargedKwh,
             charging = vehicle.charging.isCharging,
             atMs = nowMs(),
+            odometerKm = if (vehicle.hasOdometer) vehicle.odometerKm else 0.0,
         )
     }
 
@@ -339,8 +457,10 @@ class EnergyBlock(
         val chargedKwh: Double,
         val charging: Boolean,
         val atMs: Long,
+        /** Нуль означає «одометра ще не бачили»: кілометри тоді не міряються. */
+        val odometerKm: Double,
     ) {
-        fun toAnchor() = Anchor(socPercent, dischargedKwh, chargedKwh, atMs)
+        fun toAnchor() = Anchor(socPercent, dischargedKwh, chargedKwh, atMs, odometerKm)
     }
 
     private data class Anchor(
@@ -348,6 +468,7 @@ class EnergyBlock(
         val dischargedKwh: Double,
         val chargedKwh: Double,
         val atMs: Long,
+        val odometerKm: Double,
     )
 
     // internal, а не private: межі замірів стережуть тести.
@@ -374,6 +495,23 @@ class EnergyBlock(
          * зарядку без телефона.
          */
         const val MAX_GAP_MS = 10 * 60 * 1000L
+
+        /**
+         * Найбільша дірка між читаннями, крізь яку ще можна інтегрувати, мс.
+         *
+         * П'ять секунд: опитування йде раз на 0.8 с, тож звичайний такт сюди
+         * вкладається з великим запасом, а от пропущене вікно монітора чи
+         * перепідключення — уже ні. Через довшу дірку струм тримати константою не
+         * можна: за неї він устигає змінитися повністю.
+         */
+        const val MAX_INTEGRATION_GAP_MS = 5_000L
+
+        /**
+         * Скільки читань має увійти в інтеграл, щоб замір за струмом узагалі
+         * брати. Інтервал на кіловат-годину триває хвилини, тобто сотні читань;
+         * тридцять — це нижня межа, за якою інтегрування явно не працювало.
+         */
+        const val MIN_INTEGRATION_TICKS = 30
 
         private const val MS_PER_HOUR = 3_600_000.0
 

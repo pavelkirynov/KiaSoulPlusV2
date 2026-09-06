@@ -5,6 +5,7 @@ import com.kirianov.kiasoulevplus2.Data.ChargingState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.Pack
 import com.kirianov.kiasoulevplus2.Data.CarProfile
+import com.kirianov.kiasoulevplus2.Data.CurvePoint
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -125,13 +126,14 @@ class EnergyCurveTest {
     fun `a longer pass weighs more than a short one`() {
         val levels = EnergyLevels()
 
-        levels.learn(fromPercent = 90.0, toPercent = 85.0, netKwh = 2.5)  // весь кошик 85, нахил 0.5
-        levels.learn(fromPercent = 86.0, toPercent = 85.0, netKwh = 0.1)  // п'ята частина, нахил 0.1
+        levels.learn(fromPercent = 90.0, toPercent = 85.0, netKwh = 2.5)   // нахил 0.5
+        levels.learn(fromPercent = 85.5, toPercent = 85.0, netKwh = 0.05)  // нахил 0.1, пів відсотка
 
-        // Кошик 85 бачив 5 % при 0.5 і 1 % при 0.1 — з вагою це 0.433, а не
-        // просте середнє 0.3: коротший прохід важить рівно вп'ятеро менше.
-        val rate = levels.rateAt(87.0)!!
-        assertEquals(0.433, rate, 0.005)
+        // Кошик 85 бачив цілий відсоток при 0.5 і пів відсотка при 0.1 — з вагою
+        // це 0.367, а не просте середнє 0.3: коротший прохід важить удвічі менше.
+        assertEquals(0.367, levels.rateAt(85.5)!!, 0.005)
+        // Сусідній кошик короткого проходу не бачив узагалі.
+        assertEquals(0.5, levels.rateAt(87.5)!!, 0.001)
     }
 
     /** Замір розкладається по кошиках пропорційно пройденій у кожному частині. */
@@ -139,13 +141,14 @@ class EnergyCurveTest {
     fun `a measurement spanning several bins is spread across them`() {
         val levels = EnergyLevels()
 
-        // 96 -> 84 % шкали накриває три кошики: 95, 90 і 85.
+        // 96 -> 84 % шкали накриває дванадцять кошиків по одному відсотку.
         levels.learn(fromPercent = 96.0, toPercent = 84.0, netKwh = 6.0)
 
-        assertEquals(0.5, levels.rateAt(96.0)!!, 0.001)
+        assertEquals(0.5, levels.rateAt(95.5)!!, 0.001)
         assertEquals(0.5, levels.rateAt(92.0)!!, 0.001)
-        assertEquals(0.5, levels.rateAt(86.0)!!, 0.001)
-        assertNull("Кошик 70 не міряли", levels.rateAt(72.0))
+        assertEquals(0.5, levels.rateAt(84.5)!!, 0.001)
+        assertNull("Кошик 97 не міряли", levels.rateAt(97.5))
+        assertNull("Кошик 72 не міряли", levels.rateAt(72.0))
     }
 
     /** Нефізичний нахил — це помилка читання, а не батарея. */
@@ -175,41 +178,61 @@ class EnergyCurveTest {
         val levels = EnergyLevels()
         levels.learn(fromPercent = 90.0, toPercent = 80.0, netKwh = 5.0)
 
-        val curve = levels.curve(totalKwh = 51.0)
+        val curve = levels.curve(nominalKwh = 51.0)
 
-        assertEquals(21, curve.size)
-        assertEquals(0.0, curve.first().energyKwh, 0.001)
+        assertEquals(101, curve.size)
+        // Верхня точка — заявлена ємність: звідси крива й будується.
+        assertEquals(51.0, curve.last().energyKwh, 0.001)
         assertTrue("Виміряне не позначене", curve.any { it.socPercent == 85.0 && it.measured })
         assertTrue("Доведене позначене як вимір", curve.any { it.socPercent == 50.0 && !it.measured })
     }
 
+    /** Поки не зміряно нічого, крива — рівна лінія від заявленої ємності. */
+    @Test
+    fun `with nothing measured the curve is the datasheet line`() {
+        val curve = EnergyLevels().curve(nominalKwh = 51.0)
+
+        assertEquals(51.0, curve.last().energyKwh, 0.001)
+        assertEquals(0.0, curve.first().energyKwh, 0.001)
+        assertEquals(25.5, curve.first { it.socPercent == 50.0 }.energyKwh, 0.001)
+        assertTrue("Нічого не міряли — все має бути пунктиром", curve.none { it.measured })
+    }
+
     /**
-     * ГОЛОВНЕ ПРО ЦЮ КРИВУ: сума задана наперед, і місцевий нахил на неї не
-     * впливає.
+     * ГОЛОВНЕ ПРО ЦЮ КРИВУ: вона будується ЗВЕРХУ ВНИЗ і має право не зійтися.
      *
-     * Саме тут я й помилився. Зміряна ділянка 88–95 % дала 0.29 кВт·год на
-     * відсоток, і з цього виходило «у батареї 29 кВт·год» — при справжніх 51.
-     * Причина в тому, що шкала різко нерівна: відсоток угорі коштує близько
-     * кілометра, у кінці — від п'яти до десяти. Тому вимір задає ФОРМУ, а
-     * повна ємність приходить окремо.
+     * Верхня точка — заявлена ємність. Далі вниз ідуть виміряні нахили, і куди
+     * крива сяде на нулі — те й є відповідь. Сіла вище нуля — стільки насправді
+     * не набралося; сіла нижче — пакет більший за заявлений.
+     *
+     * Раніше було навпаки: сума задавалася наперед, а невиміряне тиснулося
+     * коефіцієнтом під неї. Така крива фізично не могла суперечити заявленому — і
+     * тому нічого про нього не казала.
      */
     @Test
-    fun `a local slope never changes the total`() {
+    fun `the curve may land above zero and that is the measurement`() {
         val levels = EnergyLevels()
-        // Дешевий відсоток угорі шкали: 7 % по 0.29 кВт·год.
-        levels.learn(fromPercent = 95.0, toPercent = 88.0, netKwh = 2.03)
+        // Скрізь по 0.29 кВт·год на відсоток — на всю шкалу це 29, а не 51.
+        levels.learn(fromPercent = 95.0, toPercent = 5.0, netKwh = 26.1)
 
-        val curve = levels.curve(totalKwh = 51.0)
+        val curve = levels.curve(nominalKwh = 51.0)
 
-        assertEquals("Сума кривої мусить лишитися повною ємністю", 51.0, curve.last().energyKwh, 0.01)
-        // Зміряна ділянка лишається зі своїм дешевим нахилом...
-        val measuredSlope = (curve.first { it.socPercent == 95.0 }.energyKwh -
-            curve.first { it.socPercent == 85.0 }.energyKwh) / 10.0
-        assertTrue("Зміряний нахил спотворено: $measuredSlope", measuredSlope < 0.35)
-        // ...а решта ємності дісталася невиміряній частині, і там відсоток дорожчий.
-        val tailSlope = (curve.first { it.socPercent == 55.0 }.energyKwh -
-            curve.first { it.socPercent == 50.0 }.energyKwh) / 5.0
-        assertTrue("Невиміряна частина мусить бути дорожчою: $tailSlope", tailSlope > measuredSlope)
+        assertEquals("Верх — заявлена ємність", 51.0, curve.last().energyKwh, 0.01)
+        assertEquals("Зміряно 29 — на нулі має лишитися 22", 22.0, curve.first().energyKwh, 0.5)
+        assertEquals("Зміряна ємність", 29.0, levels.capacityKwh(51.0), 0.5)
+    }
+
+    /** Зміряний нахил лишається таким, як зміряний: його більше не підганяють. */
+    @Test
+    fun `a measured slope is kept as measured`() {
+        val levels = EnergyLevels()
+        levels.learn(fromPercent = 95.0, toPercent = 88.0, netKwh = 2.03) // 0.29 на відсоток
+
+        val curve = levels.curve(nominalKwh = 51.0)
+        val slope = (curve.first { it.socPercent == 94.0 }.energyKwh -
+            curve.first { it.socPercent == 90.0 }.energyKwh) / 4.0
+
+        assertEquals(0.29, slope, 0.01)
     }
 
     /**
@@ -224,7 +247,7 @@ class EnergyCurveTest {
         levels.learn(fromPercent = 95.0, toPercent = 90.0, netKwh = 1.0)  // 0.2 на відсоток
         levels.learn(fromPercent = 20.0, toPercent = 15.0, netKwh = 4.0)  // 0.8 на відсоток
 
-        val curve = levels.curve(totalKwh = 51.0)
+        val curve = levels.curve(nominalKwh = 51.0)
         fun rateAt(percent: Double) = (curve.first { it.socPercent == percent }.energyKwh -
             curve.first { it.socPercent == percent - 5.0 }.energyKwh) / 5.0
 
@@ -233,7 +256,6 @@ class EnergyCurveTest {
         val middle = rateAt(55.0)
         val high = rateAt(85.0)
         assertTrue("Перехід не плавний: $low, $middle, $high", low > middle && middle > high)
-        assertEquals("Сума кривої мусить лишитися повною ємністю", 51.0, curve.last().energyKwh, 0.01)
     }
 
     // --- Крива напруги ------------------------------------------------------------
@@ -427,6 +449,9 @@ class EnergyCurveTest {
         // 16 комірок CATL по 3.18 кВт·год — рівно те, що стоїть в авто.
         assertEquals(Pack.USABLE_CAPACITY_KWH, curve.totalKwh, 0.001)
         assertFalse(curve.totalMeasured)
+        // Кривої B тут немає: інтеграл струму не працював — сирих кадрів шини в
+        // тесті не було, — і замір за струмом навмисно не береться.
+        assertEquals(0, curve.powerSamples)
         assertEquals(2.5, curve.points.first { it.socPercent == 85.0 }.energyKwh -
             curve.points.first { it.socPercent == 80.0 }.energyKwh, 0.05)
     }
@@ -569,6 +594,131 @@ class EnergyCurveTest {
 
         assertEquals(0, GeneralData.state.value.curve.samples)
         assertEquals(1, store.cleared)
+    }
+
+    // --- Крива за струмом і кілометри ---------------------------------------------
+
+    /**
+     * Крива B: віддане з лічильника мінус рекуперація з інтеграла.
+     *
+     * Тут і видно, чим вона відрізняється від A. Лічильник прийнятої каже, що
+     * повернулося 4 кВт·год, а струм за той самий час не повертав нічого — і
+     * різниця між кривими на графіку буде рівно ця.
+     */
+    @Test
+    fun `the current based curve ignores the charged counter`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        publish(socPercent = 90.0, dischargedKwh = 1_000.0, chargedKwh = 500.0)
+        repeat(40) { now += 1_000; traction(now) }
+        now += 1_000
+        publish(socPercent = 80.0, dischargedKwh = 1_006.0, chargedKwh = 504.0)
+
+        val curve = GeneralData.state.value.curve
+        assertEquals(1, curve.powerSamples)
+        // A: 6 віддано мінус 4 прийнято = 2 на 10 % шкали.
+        assertEquals(0.2, slopeOf(curve.counterPoints, 85.0), 0.02)
+        // B: ті самі 6 віддано, рекуперації струм не бачив жодної.
+        assertEquals(0.6, slopeOf(curve.powerPoints, 85.0), 0.02)
+    }
+
+    /** Рекуперація, побачена струмом, з кривої B віднімається. */
+    @Test
+    fun `regen seen by the current is taken off the curve`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        publish(socPercent = 90.0, dischargedKwh = 1_000.0, chargedKwh = 500.0)
+        // Половину читань тягнемо, половину рекуперуємо по +100 А при 360 В.
+        repeat(40) { step ->
+            now += 1_000
+            frame(now, amps = if (step % 2 == 0) -50.0 else 100.0)
+        }
+        now += 1_000
+        publish(socPercent = 80.0, dischargedKwh = 1_006.0, chargedKwh = 500.0)
+
+        // Двадцять секунд по 36 кВт — це 0.2 кВт·год рекуперації.
+        val curve = GeneralData.state.value.curve
+        assertEquals((6.0 - 0.2) / 10.0, slopeOf(curve.powerPoints, 85.0), 0.02)
+    }
+
+    /** Дірка в спостереженні ламає інтеграл: замір за струмом тоді не береться. */
+    @Test
+    fun `a gap in the readings drops the current based measurement`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        publish(socPercent = 90.0, dischargedKwh = 1_000.0, chargedKwh = 500.0)
+        // Десять секунд між читаннями замість звичних 0.8: крізь таку дірку
+        // інтегрувати не можна — за неї струм устигає змінитися повністю.
+        repeat(40) { now += 10_000; traction(now) }
+        now += 1_000
+        publish(socPercent = 80.0, dischargedKwh = 1_006.0, chargedKwh = 500.0)
+
+        val curve = GeneralData.state.value.curve
+        assertEquals("Замір за струмом мав відпасти", 0, curve.powerSamples)
+        assertEquals("А за лічильниками — лишитися", 1, curve.samples)
+    }
+
+    /** Кілометри на відсоток беруться з одометра на тому самому інтервалі. */
+    @Test
+    fun `kilometres per percent are measured from the odometer`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        publishWithOdometer(socPercent = 90.0, dischargedKwh = 1_000.0, odometerKm = 100_000.0)
+        now += 60_000
+        publishWithOdometer(socPercent = 80.0, dischargedKwh = 1_006.0, odometerKm = 100_020.0)
+
+        val curve = GeneralData.state.value.curve
+        assertEquals(1, curve.distanceSamples)
+        // Двадцять кілометрів на десять відсотків — по два на відсоток.
+        assertEquals(2.0, curve.distancePoints.first { it.socPercent == 85.5 }.km, 0.01)
+        // Там, де не їхали, точок немає взагалі: доводити пробіг нема з чого.
+        assertTrue(curve.distancePoints.none { it.socPercent < 80.0 })
+    }
+
+    private var frames = 0
+
+    /** Одне читання шини: кадр плюс розібрані з нього числа. */
+    private fun frame(atMs: Long, amps: Double) {
+        GeneralData.publishBatteryFrames(listOf("2101"), listOf("resp${frames++}@$atMs"))
+        GeneralData.updateBms(
+            BmsData(
+                displaySoc = 50.0,
+                batteryCurrent = amps,
+                batteryVoltage = 360.0,
+                cumulativeEnergyDischargedKwh = 1_000.0,
+                cumulativeEnergyChargedKwh = 500.0,
+            ),
+        )
+    }
+
+    private fun traction(atMs: Long) = frame(atMs, amps = -50.0)
+
+    private fun publishWithOdometer(socPercent: Double, dischargedKwh: Double, odometerKm: Double) {
+        GeneralData.updateBms(
+            BmsData(
+                displaySoc = 50.0,
+                cumulativeEnergyDischargedKwh = dischargedKwh,
+                cumulativeEnergyChargedKwh = 500.0,
+            ),
+        )
+        GeneralData.updateVehicle(
+            VehicleData(preciseSocPercent = socPercent, odometerKm = odometerKm),
+        )
+    }
+
+    /** Наскільки крива піднімається за один відсоток у цьому місці шкали. */
+    private fun slopeOf(points: List<CurvePoint>, percent: Double): Double {
+        val above = points.first { it.socPercent == percent + 1.0 }
+        val below = points.first { it.socPercent == percent }
+        return above.energyKwh - below.energyKwh
     }
 }
 

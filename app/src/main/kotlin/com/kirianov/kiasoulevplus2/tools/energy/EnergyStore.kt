@@ -113,13 +113,21 @@ class FileEnergyStore(private val root: File) : EnergyStore, CarDataStore {
      */
     private fun plus(a: LevelsSnapshot, b: LevelsSnapshot): LevelsSnapshot {
         val size = maxOf(a.sumKwh.size, b.sumKwh.size)
-        fun add(x: DoubleArray, y: DoubleArray) =
-            DoubleArray(size) { (x.getOrNull(it) ?: 0.0) + (y.getOrNull(it) ?: 0.0) }
+        fun add(x: DoubleArray, y: DoubleArray): DoubleArray {
+            if (x.isEmpty() && y.isEmpty()) return DoubleArray(0)
+            return DoubleArray(size) { (x.getOrNull(it) ?: 0.0) + (y.getOrNull(it) ?: 0.0) }
+        }
 
         return a.copy(
             sumKwh = add(a.sumKwh, b.sumKwh),
             sumPercent = add(a.sumPercent, b.sumPercent),
             samples = a.samples + b.samples,
+            sumPowerKwh = add(a.sumPowerKwh, b.sumPowerKwh),
+            sumPowerPercent = add(a.sumPowerPercent, b.sumPowerPercent),
+            powerSamples = a.powerSamples + b.powerSamples,
+            sumKm = add(a.sumKm, b.sumKm),
+            sumKmPercent = add(a.sumKmPercent, b.sumKmPercent),
+            distanceSamples = a.distanceSamples + b.distanceSamples,
             totalSumKwh = a.totalSumKwh + b.totalSumKwh,
             fullChargeSamples = a.fullChargeSamples + b.fullChargeSamples,
         )
@@ -146,6 +154,12 @@ class FileEnergyStore(private val root: File) : EnergyStore, CarDataStore {
                     sumKwh = energy,
                     sumPercent = percent,
                     samples = samples,
+                    sumPowerKwh = doubles(values["sumPowerKwh"]) ?: DoubleArray(0),
+                    sumPowerPercent = doubles(values["sumPowerPercent"]) ?: DoubleArray(0),
+                    powerSamples = (values["powerSamples"] as? Double)?.toInt() ?: 0,
+                    sumKm = doubles(values["sumKm"]) ?: DoubleArray(0),
+                    sumKmPercent = doubles(values["sumKmPercent"]) ?: DoubleArray(0),
+                    distanceSamples = (values["distanceSamples"] as? Double)?.toInt() ?: 0,
                     totalSumKwh = values["totalSumKwh"] as? Double ?: 0.0,
                     fullChargeSamples = (values["fullChargeSamples"] as? Double)?.toInt() ?: 0,
                     pendingSocPercent = values["pendingSocPercent"] as? Double ?: -1.0,
@@ -172,6 +186,12 @@ class FileEnergyStore(private val root: File) : EnergyStore, CarDataStore {
                         "sumKwh" to snapshot.sumKwh.toList(),
                         "sumPercent" to snapshot.sumPercent.toList(),
                         "samples" to snapshot.samples.toDouble(),
+                        "sumPowerKwh" to snapshot.sumPowerKwh.toList(),
+                        "sumPowerPercent" to snapshot.sumPowerPercent.toList(),
+                        "powerSamples" to snapshot.powerSamples.toDouble(),
+                        "sumKm" to snapshot.sumKm.toList(),
+                        "sumKmPercent" to snapshot.sumKmPercent.toList(),
+                        "distanceSamples" to snapshot.distanceSamples.toDouble(),
                         "totalSumKwh" to snapshot.totalSumKwh,
                         "fullChargeSamples" to snapshot.fullChargeSamples.toDouble(),
                         "pendingSocPercent" to snapshot.pendingSocPercent,

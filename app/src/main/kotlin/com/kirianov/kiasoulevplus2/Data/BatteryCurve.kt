@@ -18,8 +18,23 @@ package com.kirianov.kiasoulevplus2.Data
  * відсотком усереднюються: що більше поїздок, то точніша крива.
  */
 data class BatteryCurve(
-    /** Точки через 1 % шкали. [CurvePoint.measured] каже, вимір це чи доведення. */
-    val points: List<CurvePoint> = emptyList(),
+    /**
+     * Крива A — за різницею пожиттєвих лічильників, ΔkWhOut − ΔkWhIn.
+     *
+     * Точки через 1 % шкали. [CurvePoint.measured] каже, вимір це чи доведення.
+     */
+    val counterPoints: List<CurvePoint> = emptyList(),
+
+    /**
+     * Крива B — віддане за лічильником мінус рекуперація за інтегралом струму.
+     *
+     * Точніша, але вимоглива: інтегралу потрібен неперервний шматок спостережень,
+     * тож обрив зв'язку замір рве. Порожня, поки таких шматків не набралося.
+     */
+    val powerPoints: List<CurvePoint> = emptyList(),
+
+    /** Кілометри на відсоток шкали: скільки насправді проїхано на цьому відсотку. */
+    val distancePoints: List<DistancePoint> = emptyList(),
 
     /** Межі виміряної ділянки шкали. null — не міряли ще нічого. */
     val measuredFromPercent: Double? = null,
@@ -29,17 +44,15 @@ data class BatteryCurve(
     val coveredPercent: Double = 0.0,
 
     /**
-     * Повна ємність, до якої привязана крива, кВт·год.
+     * Заявлена ємність пакета, кВт·год — та, що стоїть у налаштуваннях авто.
      *
-     * ЦЕ НЕ СУМА ЗАМІРІВ. Шкала цього авто різко нерівна: відсоток угорі коштує
-     * близько кілометра, посередині близько двох, у кінці від п'яти до десяти.
-     * Тому місцевий нахил, зміряний на одній ділянці, не можна розтягувати на всю
-     * шкалу — так виходило 29 кВт·год замість справжніх п'ятдесяти.
+     * ЦЕ ВЕРХНЯ ТОЧКА КРИВОЇ, А НЕ ЇЇ СУМА. Крива починається звідси на ста
+     * відсотках і йде вниз по виміряних нахилах; куди вона прийде на нулі — те й
+     * буде зміряною ємністю ([counterCapacityKwh], [powerCapacityKwh]).
      *
-     * Повна ємність береться інакше: спершу як аксіома (пакет відомий — 16 комірок
-     * CATL по 3.18 кВт·год, разом 50.8), а далі як вимір із зарядки, що починалася
-     * з низьких відсотків. Заміри кривої задають ФОРМУ, тобто розподіл цієї
-     * ємності по шкалі.
+     * Раніше це число було сумою кривої: невиміряне тиснулося коефіцієнтом, щоб
+     * зійтися з ним. Така крива не могла суперечити заявленому — і тому нічого
+     * про нього не казала.
      */
     val totalKwh: Double = 0.0,
 
@@ -63,12 +76,48 @@ data class BatteryCurve(
     /** Скільки замірів форми увійшло в криву. */
     val samples: Int = 0,
 
+    /** Скільки замірів увійшло в криву B і в криву кілометрів. */
+    val powerSamples: Int = 0,
+    val distanceSamples: Int = 0,
+
+    /**
+     * Скільки кВт·год набралося по всій шкалі — тобто скільки в пакеті НАСПРАВДІ,
+     * якщо вірити замірам. Порівнюється з [totalKwh], заявленою в налаштуваннях.
+     */
+    val counterCapacityKwh: Double = 0.0,
+    val powerCapacityKwh: Double? = null,
+
     val request: CurveRequest = CurveRequest.None,
 ) {
+    /**
+     * Крива, якій вірить решта застосунку.
+     *
+     * Береться B, поки в ній є заміри, інакше A. Обидві намальовані на екрані для
+     * порівняння, але прогнозу потрібна одна, і це та, що не залежить від
+     * лічильника прийнятої енергії.
+     */
+    val points: List<CurvePoint> get() = powerPoints.ifEmpty { counterPoints }
+
     val hasMeasurements: Boolean get() = samples > 0 && measuredFromPercent != null
 
     /** Скільки кВт·год лишається на заданому відсотку. */
-    fun energyAt(socPercent: Double): Double? {
+    fun energyAt(socPercent: Double): Double? = energyAt(points, socPercent)
+
+    /**
+     * Скільки кВт·год лишається ДО НУЛЯ шкали.
+     *
+     * Не те саме, що [energyAt]. Крива будується згори — від заявленої ємності — і
+     * на нулі шкали сідає туди, куди привели заміри, а не обов'язково в нуль. Той
+     * залишок і є розбіжність між заявленим і зміряним; їхати на ньому не можна,
+     * тож прогнозу дістається лише різниця.
+     */
+    fun usableAt(socPercent: Double): Double? {
+        val here = energyAt(socPercent) ?: return null
+        val bottom = points.firstOrNull()?.energyKwh ?: return null
+        return (here - bottom).coerceAtLeast(0.0)
+    }
+
+    private fun energyAt(points: List<CurvePoint>, socPercent: Double): Double? {
         if (points.isEmpty()) return null
         val below = points.lastOrNull { it.socPercent <= socPercent } ?: return points.first().energyKwh
         val above = points.firstOrNull { it.socPercent >= socPercent } ?: return points.last().energyKwh
@@ -106,6 +155,18 @@ data class VoltagePoint(
     /** Те саме на комірку — так звичніше звіряти з паспортом хімії. */
     val voltsPerCell: Double get() = volts / Pack.CELLS_IN_SERIES
 }
+
+/**
+ * Точка кривої «кілометри на відсоток шкали».
+ *
+ * Стоїть окремо від кривої ємності навмисно: це не властивість батареї, а слід
+ * того, як їздили. Той самий відсоток у місті з кліматом і на трасі коштує різного
+ * пробігу, тож доводити тут нема чого — точки є лише там, де справді їхали.
+ */
+data class DistancePoint(
+    val socPercent: Double,
+    val km: Double,
+)
 
 enum class CurveRequest {
     None,

@@ -401,9 +401,12 @@ class MlBlock(
         //
         // Крива дає те, чого не дає ніщо інше, — РОЗПОДІЛ ємності по шкалі. Шкала
         // цього авто різко нерівна (інша хімія під заводською таблицею напруг),
-        // тож «залишилося 88 % від повної» і «залишилося 88 % шкали» — різні
-        // числа. Сама повна ємність у криву приходить окремо: аксіомою з відомого
-        // пакета, а потім виміром із зарядки з низьких відсотків.
+        // тож «залишилося 88 % від повної» і «залишилося 88 % шкали» — різні числа.
+        //
+        // Береться саме usableAt, а не energyAt. Крива будується згори — від
+        // заявленої ємності — і на нулі шкали сідає туди, куди привели заміри.
+        // Той залишок під нулем — розбіжність між заявленим і зміряним, і їхати
+        // на ньому не можна; прогнозу дістається тільки різниця.
         val curve = GeneralData.state.value.curve
         val prediction = socOf(vehicle)?.let { soc ->
             RangeEstimator.predict(
@@ -413,7 +416,7 @@ class MlBlock(
                 preciseSocPercent = soc,
                 recent = conditions,
                 basis = basis,
-                curveEnergyKwh = if (curve.hasMeasurements) curve.energyAt(soc) else null,
+                curveEnergyKwh = if (curve.hasMeasurements) curve.usableAt(soc) else null,
                 curveTotalMeasured = curve.totalMeasured,
             )
         }

@@ -13,7 +13,7 @@ import org.junit.Test
 class CarChartModelTest {
 
     private fun curveOf(vararg pairs: Pair<Double, Double>, measured: Boolean = true) = BatteryCurve(
-        points = pairs.map { CurvePoint(socPercent = it.first, energyKwh = it.second, measured = measured) },
+        counterPoints = pairs.map { CurvePoint(socPercent = it.first, energyKwh = it.second, measured = measured) },
         totalKwh = 50.88,
         coveredPercent = 65.0,
         samples = 12,
@@ -48,7 +48,7 @@ class CarChartModelTest {
     @Test
     fun `the part that was only inferred is drawn apart and dashed`() {
         val curve = BatteryCurve(
-            points = listOf(
+            counterPoints = listOf(
                 CurvePoint(0.0, 0.0, measured = false),
                 CurvePoint(25.0, 12.0, measured = false),
                 CurvePoint(50.0, 25.0, measured = true),
