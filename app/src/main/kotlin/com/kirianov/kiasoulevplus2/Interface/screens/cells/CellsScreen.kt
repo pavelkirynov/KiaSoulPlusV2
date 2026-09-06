@@ -80,7 +80,7 @@ private const val GRID_COLUMNS = 8
 private val GRID_CELL_HEIGHT = 26.dp
 
 /** Дванадцять рядів по висоті клітинки плюс проміжки. */
-private val GRID_HEIGHT = 12 * (GRID_CELL_HEIGHT + 3.dp)
+private val GRID_HEIGHT = (GRID_CELL_HEIGHT + 3.dp) * 12
 
 /** У блоках рядів удвічі більше, тож клітинка ще нижча. */
 private val BLOCK_CELL_HEIGHT = 22.dp
