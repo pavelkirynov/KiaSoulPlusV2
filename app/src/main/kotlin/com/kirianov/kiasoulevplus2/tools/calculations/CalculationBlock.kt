@@ -109,6 +109,9 @@ class CalculationBlock(
             .drop(1)
             .onEach {
                 startedAt = null
+                // Журнал зарядок теж став чужим: його час належить іншій машині, і
+                // порівнювати з ним — те саме, що порівнювати з нулем при запуску.
+                lastChargeSeenMs = null
                 GeneralData.clearTripHistory()
                 // Сам відлік не скидаємо: його підніме з теки нового авто
                 // keepRangeAccuracy. Обнулити тут означало б стерти чужий файл
@@ -145,8 +148,23 @@ class CalculationBlock(
             .onEach { reading ->
                 val current = GeneralData.state.value.rangeAccuracy
 
-                if (reading.charging || reading.lastChargeEndedAtMs != lastChargeSeenMs) {
-                    lastChargeSeenMs = reading.lastChargeEndedAtMs
+                // ПЕРШЕ ЧИТАННЯ НІЧОГО НЕ СКИДАЄ, і це не дрібниця.
+                //
+                // Журнал зарядок піднімається з файлу разом із часом останньої
+                // сесії, а лічильник побаченого починався з нуля — тож перше ж
+                // читання після запуску виглядало як «поки ми не дивилися, авто
+                // зарядилося», і відлік стирався. Доти він жив лише в пам'яті й
+                // стирати не було чого; щойно його навчили переживати оновлення,
+                // помилка вилізла назовні й з'їла 141.8 км спостережень за раз.
+                //
+                // Nullable, а не нуль-ознака: нуль — це теж момент часу, і на
+                // машині, яка ще жодного разу не заряджалася при застосунку, він
+                // цілком законний.
+                val seen = lastChargeSeenMs
+                lastChargeSeenMs = reading.lastChargeEndedAtMs
+                val chargedWhileAway = seen != null && reading.lastChargeEndedAtMs != seen
+
+                if (reading.charging || chargedWhileAway) {
                     if (current.started) GeneralData.updateRangeAccuracy(RangeAccuracy())
                     return@onEach
                 }
@@ -157,8 +175,13 @@ class CalculationBlock(
             .launchIn(scope)
     }
 
-    /** Коли скінчилася остання зарядка, яку ми вже врахували для скидання відліку. */
-    private var lastChargeSeenMs = 0L
+    /**
+     * Коли скінчилася остання зарядка, яку ми вже врахували для скидання відліку.
+     *
+     * null означає «ще жодного читання не бачили»: див. пояснення в
+     * [trackRangeAccuracy].
+     */
+    private var lastChargeSeenMs: Long? = null
 
     private data class RangeReading(
         val rangeKm: Double,

@@ -431,6 +431,74 @@ class EnergyCurveTest {
         )
     }
 
+    /**
+     * СТОЯНКА — НЕ ЗАМІР, і це найдорожча помилка з усіх можливих тут.
+     *
+     * Авто живить свою електроніку з тягового пакета й на місці, тож лічильник
+     * відданої росте і в дворі. За чотири години набігає кіловат-година, а шкала
+     * за той самий час сповзає на кілька відсотків — BMS підправляє оцінку, коли
+     * струму майже немає. Виходить «мало енергії на багато відсотків»: замір,
+     * який тягне всю криву вниз і виглядає при цьому бездоганно.
+     */
+    @Test
+    fun `standing still is not a measurement`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        publish(socPercent = 90.0, dischargedKwh = 1_000.0, chargedKwh = 500.0)
+        // Чотири години на місці: кіловат-година зі шкали на 4 %, тобто 0.25
+        // кВт·год на відсоток — удвічі менше за справжній нахил цієї батареї.
+        now += 4 * 60 * 60 * 1000L
+        publish(socPercent = 86.0, dischargedKwh = 1_001.2, chargedKwh = 500.0)
+
+        assertEquals(0, GeneralData.state.value.curve.samples)
+    }
+
+    /**
+     * Той самий інтервал, пройдений за годину, — уже їзда, і замір береться.
+     *
+     * Межа проходить по середній потужності: стоянка це сотні ватів, їзда —
+     * кіловати. Тут 1.2 кВт·год за годину, тобто 1.2 кВт — усе ще замало.
+     */
+    @Test
+    fun `a slow crawl still counts if the power says driving`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        publish(socPercent = 90.0, dischargedKwh = 1_000.0, chargedKwh = 500.0)
+        now += 10 * 60 * 1000L
+        // 2.4 кВт·год за десять хвилин — 14.4 кВт, звичайна міська їзда.
+        publish(socPercent = 86.0, dischargedKwh = 1_002.4, chargedKwh = 500.0)
+
+        assertEquals(1, GeneralData.state.value.curve.samples)
+    }
+
+    /**
+     * Кожен прийнятий інтервал іде в стан цілком, сирими числами.
+     *
+     * Без цього розбіжність між кривими лишається загадкою: на екрані видно лише
+     * підсумок, а помилка живе в окремому замірі.
+     */
+    @Test
+    fun `an accepted interval is published with its raw numbers`() {
+        val store = MemoryStore()
+        var now = 0L
+        EnergyBlock(store, nowMs = { now }, ioDispatcher = Dispatchers.Unconfined).start(scope)
+
+        publish(socPercent = 90.0, dischargedKwh = 1_000.0, chargedKwh = 500.0)
+        now += 60_000
+        publish(socPercent = 80.0, dischargedKwh = 1_006.0, chargedKwh = 501.0)
+
+        val sample = GeneralData.state.value.curve.lastSample!!
+        assertEquals(90.0, sample.fromPercent, 0.001)
+        assertEquals(80.0, sample.toPercent, 0.001)
+        assertEquals(6.0, sample.outKwh, 0.001)
+        assertEquals(1.0, sample.counterInKwh, 0.001)
+        assertTrue("Замір мав лягти в криву A", sample.intoCounter)
+    }
+
     /** Поїздка: шкала вниз, лічильник відданої вгору — це і є замір. */
     @Test
     fun `driving produces a measurement`() {

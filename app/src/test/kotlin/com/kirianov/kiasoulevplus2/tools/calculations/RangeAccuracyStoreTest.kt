@@ -1,5 +1,6 @@
 package com.kirianov.kiasoulevplus2.tools.calculations
 
+import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.RangeAccuracy
 import java.io.File
@@ -62,6 +63,60 @@ class RangeAccuracyStoreTest {
         assertTrue(accuracy.started)
         assertEquals(35.0, accuracy.drivenKm, 0.001)
         assertEquals("MINE", store.car)
+    }
+
+    /**
+     * РЕГРЕСІЯ: піднятий із файлу відлік стирався першим же читанням після запуску.
+     *
+     * Скидання завʼязане на «зʼявилася нова завершена зарядка», а лічильник
+     * побаченого починався з нуля. Журнал зарядок при цьому піднімається з файлу
+     * з НЕнульовим часом останньої сесії — і перше читання виглядало як «поки ми
+     * не дивилися, авто зарядилося». Доти відлік жив лише в памʼяті й стирати було
+     * нічого; щойно його навчили переживати оновлення, помилка зʼїла 141.8 км
+     * спостережень за один запуск.
+     */
+    @Test
+    fun `the first reading after a restart does not wipe the run`() {
+        val store = MemoryStore(
+            saved = RangeAccuracy(
+                startRangeKm = 200.0,
+                currentRangeKm = 108.0,
+                drivenKm = 141.8,
+                startOdometerKm = 189_000.0,
+                started = true,
+            ),
+        )
+        CalculationBlock(store, ioDispatcher = Dispatchers.Unconfined).start(scope)
+        GeneralData.updateGarage { it.copy(activeVin = "MINE") }
+
+        // Журнал зарядок з файлу: остання сесія скінчилася вчора ввечері.
+        GeneralData.updateChargeLog(ChargeLog(lastSessionEndedAtMs = 1_725_000_000_000L))
+
+        val accuracy = GeneralData.state.value.rangeAccuracy
+        assertTrue("Відлік мав пережити запуск", accuracy.started)
+        assertEquals(141.8, accuracy.drivenKm, 0.001)
+    }
+
+    /** А ось СПРАВЖНЯ нова зарядка відлік скидає: після неї обіцянка вже інша. */
+    @Test
+    fun `a charge that happened while we were away still resets the run`() {
+        val store = MemoryStore(
+            saved = RangeAccuracy(
+                startRangeKm = 200.0,
+                currentRangeKm = 108.0,
+                drivenKm = 141.8,
+                startOdometerKm = 189_000.0,
+                started = true,
+            ),
+        )
+        CalculationBlock(store, ioDispatcher = Dispatchers.Unconfined).start(scope)
+        GeneralData.updateGarage { it.copy(activeVin = "MINE") }
+
+        GeneralData.updateChargeLog(ChargeLog(lastSessionEndedAtMs = 1_725_000_000_000L))
+        // Друга сесія, вже за нашої присутності.
+        GeneralData.updateChargeLog(ChargeLog(lastSessionEndedAtMs = 1_725_003_600_000L))
+
+        assertTrue(GeneralData.state.value.rangeAccuracy.drivenKm == 0.0)
     }
 
     /** Кожна зміна відліку одразу лягає у файл: перезапуск може статися будь-коли. */

@@ -133,6 +133,19 @@ object JournalFormat {
                 "пакет=${num(after.garage.active.packKwh.takeIf { it > 0.0 })}"
         }
 
+        // СИРА ВІДПОВІДЬ КОЖНОГО БЛОКА, по рядку на блок.
+        //
+        // Підсумковий рядок нижче каже «озвалося шість із дев'яти» — і на цьому
+        // все: які саме байти привели до такого висновку, з нього не дізнатися.
+        // Перше ж опитування живої машини вперлося рівно в це: два блоки показали
+        // «відмовив, причина 0x78» і «0x21», і щоб зрозуміти, що це були за
+        // відмови, довелося здогадуватися. Тепер не доведеться.
+        val answer = after.faults.answer
+        if (answer != null && answer.sequence != before.faults.answer?.sequence) {
+            out += "$at dtc? ${answer.header} " +
+                answer.raw.joinToString(" | ") { "«${it.trim().ifEmpty { "тиша" }}»" }
+        }
+
         // ПОМИЛКИ БЛОКІВ. Рядок пишеться раз на опитування, коли воно скінчилося:
         // саме тоді відомо, хто озвався, а хто промовчав. Коди йдуть повністю —
         // їх одиниці, а без них рядок не варт нічого.
@@ -193,6 +206,23 @@ object JournalFormat {
                 "km=${curve.distanceSamples} " +
                 "charges=${curve.fullChargeSamples} " +
                 "from=${num(curve.measuredFromPercent)} to=${num(curve.measuredToPercent)}"
+        }
+
+        // КОЖЕН ПРИЙНЯТИЙ ІНТЕРВАЛ КРИВОЇ, з усіма сирими числами.
+        //
+        // Рядок «curve n=…» вище каже лише підсумок, а розійшлися саме окремі
+        // заміри: крива B дала 29.3 кВт·год на всю шкалу там, де сума відрізків за
+        // той самий день дає близько сорока. Здогадуватися, які інтервали тягнуть
+        // її вниз, немає сенсу — тут вони видно поштучно.
+        val sample = after.curve.lastSample
+        if (sample != null && sample.sequence != before.curve.lastSample?.sequence) {
+            out += "$at curve+ from=${num(sample.fromPercent)} to=${num(sample.toPercent)} " +
+                "out=${num(sample.outKwh)} in=${num(sample.counterInKwh)} " +
+                "reg=${num(sample.regenKwh)} kW=${num(sample.averagePowerKw)} " +
+                "km=${num(sample.km)} min=${num(sample.minutes)} " +
+                "ticks=${sample.ticks} whole=${flag(sample.whole)} " +
+                "A=${flag(sample.intoCounter)} B=${flag(sample.intoPower)} " +
+                "km?=${flag(sample.intoDistance)}"
         }
 
         val accuracyBefore = before.rangeAccuracy

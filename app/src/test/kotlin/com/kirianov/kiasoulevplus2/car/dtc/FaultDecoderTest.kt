@@ -1,6 +1,7 @@
 package com.kirianov.kiasoulevplus2.car.dtc
 
 import com.kirianov.kiasoulevplus2.Data.Ecu
+import com.kirianov.kiasoulevplus2.Data.Ecus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -18,7 +19,7 @@ class FaultDecoderTest {
     /** Одна помилка з активним станом. */
     @Test
     fun `a single confirmed fault is decoded`() {
-        val result = FaultDecoder.decode(bms, "59 02 FF 01 62 00 09")
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST, "59 02 FF 01 62 00 09")
 
         assertTrue(result.answered)
         val fault = result.faults.single()
@@ -30,8 +31,9 @@ class FaultDecoderTest {
     /** Літера береться зі старших двох бітів: 00 — P, 01 — C, 10 — B, 11 — U. */
     @Test
     fun `the letter comes from the top two bits`() {
-        val codes = FaultDecoder.decode(
+        val codes = FaultDecoder.decodeOne(
             bms,
+            Ecus.REQUEST,
             "59 02 FF 01 62 00 08 41 62 00 08 81 62 00 08 C1 62 00 08",
         ).faults.map { it.code }
 
@@ -41,7 +43,8 @@ class FaultDecoderTest {
     /** Друга цифра коду теж із першого байта — і саме на ній найлегше помилитися. */
     @Test
     fun `the first digit comes from the next two bits`() {
-        val codes = FaultDecoder.decode(bms, "59 02 FF 11 62 00 08 21 62 00 08 31 62 00 08")
+        val codes = FaultDecoder
+            .decodeOne(bms, Ecus.REQUEST, "59 02 FF 11 62 00 08 21 62 00 08 31 62 00 08")
             .faults.map { it.code }
 
         assertEquals(listOf("P1162-00", "P2162-00", "P3162-00"), codes)
@@ -50,7 +53,9 @@ class FaultDecoderTest {
     /** Третій байт — уточнення типу відмови, воно йде через дефіс. */
     @Test
     fun `the failure type is kept`() {
-        val fault = FaultDecoder.decode(bms, "59 02 FF C1 62 87 08").faults.single()
+        val fault = FaultDecoder
+            .decodeOne(bms, Ecus.REQUEST, "59 02 FF C1 62 87 08")
+            .faults.single()
 
         assertEquals("U0162-87", fault.code)
     }
@@ -58,7 +63,7 @@ class FaultDecoderTest {
     /** Порожня відповідь блока: помилок немає, і це не те саме, що мовчання. */
     @Test
     fun `an empty list means no faults, not silence`() {
-        val result = FaultDecoder.decode(bms, "59 02 FF")
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST, "59 02 FF")
 
         assertTrue("Блок озвався", result.answered)
         assertTrue(result.faults.isEmpty())
@@ -68,7 +73,7 @@ class FaultDecoderTest {
     /** Нулі в хвості кадру — доповнення, а не помилка з кодом P0000. */
     @Test
     fun `zero padding at the end is not a fault`() {
-        val result = FaultDecoder.decode(bms, "59 02 FF 01 62 00 08 00 00 00 00")
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST, "59 02 FF 01 62 00 08 00 00 00 00")
 
         assertEquals(1, result.faults.size)
     }
@@ -76,7 +81,7 @@ class FaultDecoderTest {
     /** Мовчання блока — його в цій машині просто немає. */
     @Test
     fun `silence is reported as no answer`() {
-        val result = FaultDecoder.decode(bms, "NO DATA")
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST, "NO DATA")
 
         assertFalse(result.answered)
         assertEquals("не відповів", result.note)
@@ -88,7 +93,7 @@ class FaultDecoderTest {
      */
     @Test
     fun `a refusal is not the same as a clean memory`() {
-        val result = FaultDecoder.decode(bms, "7F 19 31")
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST, "7F 19 31")
 
         assertTrue("Блок озвався, хай і відмовою", result.answered)
         assertTrue(result.faults.isEmpty())
@@ -98,7 +103,7 @@ class FaultDecoderTest {
     /** Незнайому причину відмови показуємо числом, а не вигаданим перекладом. */
     @Test
     fun `an unknown refusal keeps its number`() {
-        val result = FaultDecoder.decode(bms, "7F 19 A5")
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST, "7F 19 A5")
 
         assertTrue(result.note.contains("A5"))
     }
@@ -106,8 +111,9 @@ class FaultDecoderTest {
     /** Багаторамкова відповідь із префіксами кадрів розбирається так само. */
     @Test
     fun `a multi frame answer is decoded too`() {
-        val result = FaultDecoder.decode(
+        val result = FaultDecoder.decodeOne(
             bms,
+            Ecus.REQUEST,
             "0: 59 02 FF 01 62 00\n1: 08 41 62 00 08 C0 43",
         )
 
@@ -117,11 +123,117 @@ class FaultDecoderTest {
     /** Стан читається побітово, і лампа на панелі — окремий біт. */
     @Test
     fun `the status bits are read one by one`() {
-        val faults = FaultDecoder.decode(bms, "59 02 FF 01 62 00 89 01 63 00 08").faults
+        val faults = FaultDecoder
+            .decodeOne(bms, Ecus.REQUEST, "59 02 FF 01 62 00 89 01 63 00 08")
+            .faults
 
         assertTrue("Біт 7 — блок просить лампу", faults[0].warningLight)
         assertFalse(faults[1].warningLight)
         assertEquals("активна зараз", faults[0].stateText)
         assertEquals("підтверджена, зараз не повторюється", faults[1].stateText)
+    }
+
+    // --- KWP: друга мова, якою питаємо ті самі помилки ------------------------
+
+    /**
+     * Відповідь KWP влаштована інакше: `58 <кількість>` і по ТРИ байти на код —
+     * два байти самого коду й байт стану. Розібрати її правилами UDS означало б
+     * зсунутися на байт і намалювати впевнено неправильні числа.
+     */
+    @Test
+    fun `a kwp answer packs the code into two bytes`() {
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST_KWP, "58 02 01 62 09 C1 63 08")
+
+        assertTrue(result.answered)
+        assertEquals(listOf("P0162", "U0163"), result.faults.map { it.code })
+        assertTrue(result.faults[0].failingNow)
+    }
+
+    /** Порожня пам'ять по-старому: `58 00` і більше нічого. */
+    @Test
+    fun `an empty kwp answer means no faults`() {
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST_KWP, "58 00")
+
+        assertTrue(result.answered)
+        assertEquals("помилок немає", result.note)
+    }
+
+    /** Відмова на KWP посилається на службу 18, а не 19. */
+    @Test
+    fun `a kwp refusal names its own service`() {
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST_KWP, "7F 18 11")
+
+        assertTrue(result.answered)
+        assertEquals("не підтримує запит помилок", result.note)
+    }
+
+    /**
+     * Відмова на ЧУЖУ службу — не наша відмова.
+     *
+     * У буфері адаптера цілком може лежати хвіст попереднього обміну. Прийняти
+     * його за відповідь на свій запит означає оголосити блок несправним ні за що.
+     */
+    @Test
+    fun `a refusal for another service is ignored`() {
+        val result = FaultDecoder.decodeOne(bms, Ecus.REQUEST, "7F 21 11")
+
+        assertEquals("відповідь не розібрано", result.note)
+    }
+
+    // --- Дві мови разом: беремо ту відповідь, яка щось сказала ----------------
+
+    /**
+     * Саме те, що показала машина: на UDS блок каже «не знаю такої послуги», а на
+     * KWP спокійно віддає коди. Показати треба другу відповідь.
+     */
+    @Test
+    fun `the answer that said something wins`() {
+        val result = FaultDecoder.decode(bms, listOf("7F 19 11", "58 01 01 62 09"))
+
+        assertEquals(listOf("P0162"), result.faults.map { it.code })
+    }
+
+    /** «Помилок немає» змістовніше за відмову, навіть якщо прийшло другим. */
+    @Test
+    fun `a clean memory beats a refusal`() {
+        val result = FaultDecoder.decode(bms, listOf("7F 19 31", "58 00"))
+
+        assertEquals("помилок немає", result.note)
+    }
+
+    /** Відмова змістовніша за мовчання: блок є, просто не хоче відповідати. */
+    @Test
+    fun `a refusal beats silence`() {
+        val result = FaultDecoder.decode(bms, listOf("", "7F 18 31"))
+
+        assertTrue(result.answered)
+        assertEquals("не підтримує запит помилок", result.note)
+    }
+
+    /** Мовчання на обидві мови — блока в цій машині немає. */
+    @Test
+    fun `silence in both languages is still silence`() {
+        val result = FaultDecoder.decode(bms, listOf("", "NO DATA"))
+
+        assertFalse(result.answered)
+        assertEquals("не відповів", result.note)
+    }
+
+    /**
+     * «Зачекай» — не відмова, і в звіті це має читатися саме так.
+     *
+     * Обидва коди прийшли з живої машини: 0x78 від датчиків тиску, 0x21 від
+     * підсилювача керма. Обидва тоді показалися як «відмовив, причина 0x…».
+     */
+    @Test
+    fun `waiting is not refusing`() {
+        assertEquals(
+            "готував відповідь і не встиг",
+            FaultDecoder.decodeOne(bms, Ecus.REQUEST, "7F 19 78").note,
+        )
+        assertEquals(
+            "був зайнятий і не звільнився",
+            FaultDecoder.decodeOne(bms, Ecus.REQUEST, "7F 19 21").note,
+        )
     }
 }

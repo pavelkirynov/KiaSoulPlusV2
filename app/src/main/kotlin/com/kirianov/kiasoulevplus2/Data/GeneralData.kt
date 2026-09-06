@@ -153,7 +153,7 @@ object GeneralData {
     }
 
     /** Сира відповідь одного блока. Розбирає її блок car/dtc. */
-    fun publishFaultAnswer(header: String, raw: String) = updateFaults {
+    fun publishFaultAnswer(header: String, raw: List<String>) = updateFaults {
         it.copy(answer = FaultAnswer(header, raw, ++sequence))
     }
 

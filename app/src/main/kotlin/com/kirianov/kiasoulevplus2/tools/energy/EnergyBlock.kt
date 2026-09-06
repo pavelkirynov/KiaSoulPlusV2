@@ -37,6 +37,7 @@ package com.kirianov.kiasoulevplus2.tools.energy
 
 import com.kirianov.kiasoulevplus2.Data.BatteryCurve
 import com.kirianov.kiasoulevplus2.Data.CurveRequest
+import com.kirianov.kiasoulevplus2.Data.CurveSample
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.State
 import kotlinx.coroutines.CoroutineDispatcher
@@ -85,6 +86,10 @@ class EnergyBlock(
      * рекуперацію інтервалу.
      */
     private var regenTicks = 0
+
+    /** Останній прийнятий інтервал і його номер: див. [CurveSample]. */
+    private var lastSample: CurveSample? = null
+    private var sampleSequence = 0L
 
     /** Час і номер останнього читання шини: за ними інтегрується потужність. */
     private var lastFrameMs: Long? = null
@@ -143,6 +148,7 @@ class EnergyBlock(
                         regenWhole = true
                         regenTicks = 0
                         chargeStart = null
+                        lastSample = null
                         withContext(ioDispatcher) { store.load() }?.let { levels.restore(it) }
                         publish()
                     }
@@ -157,6 +163,7 @@ class EnergyBlock(
                     regenWhole = true
                     regenTicks = 0
                     chargeStart = null
+                    lastSample = null
                     withContext(ioDispatcher) { store.clear() }
                     publish()
                     return@collect
@@ -262,6 +269,22 @@ class EnergyBlock(
         // кіловат-години, ні відсотків шкали.
         if (out < MIN_STEP_KWH) return false
 
+        // СТОЯНКА — НЕ ВИМІР. Авто живить свою електроніку з тягового пакета й
+        // на місці, тож лічильник відданої росте і в дворі. Кіловат-година при
+        // 0.3-0.8 кВт набігає за кілька годин, а шкала за ті самі години встигає
+        // сповзти на кілька відсотків — BMS підправляє свою оцінку, коли струм
+        // майже нульовий. Виходить «мало енергії на багато відсотків», тобто
+        // замір, який тягне всю криву вниз, виглядаючи при цьому бездоганно.
+        //
+        // Поріг не абсолютний, а за середньою потужністю: стоянка — це одиниці
+        // сотень ват, їзда — десятки кіловат. Проміжку між ними немає навіть у
+        // найповільнішому заторі.
+        val minutes = (reading.atMs - previous.atMs).coerceAtLeast(0L) / MS_PER_MINUTE
+        if (minutes > 0.0 && out * 60.0 / minutes < MIN_DRIVING_POWER_KW) {
+            moveAnchor(reading)
+            return false
+        }
+
         val net = out - (reading.chargedKwh - previous.chargedKwh)
         val learned = levels.learn(previous.socPercent, reading.socPercent, net)
 
@@ -280,6 +303,32 @@ class EnergyBlock(
                 reading.socPercent,
                 reading.odometerKm - previous.odometerKm,
             )
+
+        // Сирі числа інтервалу — у стан, звідки їх забере журнал. Без них
+        // розбіжність між кривими лишається загадкою: на екрані видно тільки
+        // підсумок, а помилка живе в окремому замірі.
+        if (learned || learnedPower || learnedKm) {
+            sampleSequence++
+            lastSample = CurveSample(
+                fromPercent = previous.socPercent,
+                toPercent = reading.socPercent,
+                outKwh = out,
+                counterInKwh = reading.chargedKwh - previous.chargedKwh,
+                regenKwh = regenKwh,
+                km = if (previous.odometerKm > 0.0 && reading.odometerKm > previous.odometerKm) {
+                    reading.odometerKm - previous.odometerKm
+                } else {
+                    0.0
+                },
+                minutes = minutes,
+                ticks = regenTicks,
+                whole = regenWhole,
+                intoCounter = learned,
+                intoPower = learnedPower,
+                intoDistance = learnedKm,
+                sequence = sampleSequence,
+            )
+        }
 
         // Якір переїжджає, якщо замір узято або якщо інтервал розтягнувся так,
         // що вже не буде взятий: тримати його далі означає нічого не міряти.
@@ -391,6 +440,7 @@ class EnergyBlock(
                 distanceSamples = levels.distanceSamples,
                 counterCapacityKwh = levels.capacityKwh(nominal),
                 powerCapacityKwh = levels.powerCapacityKwh(nominal),
+                lastSample = this@EnergyBlock.lastSample,
             )
         }
     }
@@ -514,6 +564,16 @@ class EnergyBlock(
         const val MIN_INTEGRATION_TICKS = 30
 
         private const val MS_PER_HOUR = 3_600_000.0
+        private const val MS_PER_MINUTE = 60_000.0
+
+        /**
+         * Нижча середня потужність розряду — це стоянка, а не поїздка, кВт.
+         *
+         * Два кіловати стоять посередині порожнього місця: паразитний відбір на
+         * місці — 0.3-0.8 кВт (див. PARASITIC_DRAW_KW), найповільніша їзда — від
+         * десяти. Потрапити сюди випадково нема чим.
+         */
+        const val MIN_DRIVING_POWER_KW = 2.0
 
         /** Шкала подеколи здригається на десяті — це ще не зарядка. */
         const val SOC_RISE_TOLERANCE = 0.2

@@ -23,6 +23,7 @@ import com.kirianov.kiasoulevplus2.Data.FaultScanRequest
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.PairedDevice
 import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
+import com.kirianov.kiasoulevplus2.tools.frames.NegativeResponse
 import com.kirianov.kiasoulevplus2.tools.frames.VinDecoder
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
@@ -126,13 +127,44 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         scope.launch(Dispatchers.IO) {
             GeneralData.startFaultScan(Ecus.ALL.size)
             for (ecu in Ecus.ALL) {
-                val response = runCatching {
-                    canBridge.sendCANCommand(ecu.header, Ecus.REQUEST)
-                }.getOrDefault("")
-                GeneralData.publishFaultAnswer(ecu.header, response)
+                val answers = mutableListOf<String>()
+                var satisfied = false
+                for (request in Ecus.REQUESTS) {
+                    // Блок уже відповів по суті — друга мова нічого не додасть.
+                    // Порожній рядок замість пропуску тримає відповідність зі
+                    // списком запитів: розбір читає їх за порядком, і зсув
+                    // переплутав би мови між собою.
+                    if (satisfied) {
+                        answers += ""
+                        continue
+                    }
+                    val response = ask(ecu.header, request)
+                    answers += response
+                    satisfied = NegativeResponse.answeredWithData(response, request)
+                }
+                GeneralData.publishFaultAnswer(ecu.header, answers)
             }
             GeneralData.finishFaultScan(System.currentTimeMillis())
         }
+    }
+
+    /**
+     * Один запит до блока, з повтором на «зачекай».
+     *
+     * Дві причини відмови означають не «ні», а «ще раз» — 0x21 «зайнятий» і 0x78
+     * «готую відповідь», — і перше ж опитування живої машини принесло обидві. Тоді
+     * вони пішли в звіт як відмова, хоча блок просто просив дати йому секунду.
+     *
+     * Повтор рівно один: якщо блок зайнятий і після паузи, далі стукати в нього
+     * означає розтягувати опитування на хвилини заради того самого результату.
+     */
+    private suspend fun ask(header: String, request: String): String {
+        var response = runCatching { canBridge.sendCANCommand(header, request) }.getOrDefault("")
+        if (NegativeResponse.busy(response, request)) {
+            delay(BUSY_RETRY_DELAY_MS)
+            response = runCatching { canBridge.sendCANCommand(header, request) }.getOrDefault(response)
+        }
+        return response
     }
 
     /**
@@ -505,6 +537,15 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
          * немає чого.
          */
         const val SWEEP_WINDOW_MS = 500L
+
+        /**
+         * Скільки чекати, перш ніж перепитати блок, який сказав «зайнятий», мс.
+         *
+         * Півсекунди: 0x78 означає, що відповідь уже готується, і зазвичай вона
+         * приходить за десятки мілісекунд. Довша пауза множиться на кожен такий
+         * блок і розтягує все опитування.
+         */
+        const val BUSY_RETRY_DELAY_MS = 500L
 
         /**
          * Скільки разів питати VIN за одне підключення.
