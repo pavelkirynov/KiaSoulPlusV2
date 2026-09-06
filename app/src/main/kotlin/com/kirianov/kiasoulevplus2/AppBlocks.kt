@@ -15,6 +15,7 @@ import com.kirianov.kiasoulevplus2.services.foreground.ForegroundBlock
 import com.kirianov.kiasoulevplus2.tools.autoconnect.AutoConnectBlock
 import com.kirianov.kiasoulevplus2.tools.battery.DecoderBlock
 import com.kirianov.kiasoulevplus2.tools.cells.CellTestBlock
+import com.kirianov.kiasoulevplus2.tools.cells.FileCellHistoryStore
 import com.kirianov.kiasoulevplus2.tools.charging.ChargingBlock
 import com.kirianov.kiasoulevplus2.tools.charging.FileChargeStore
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
@@ -47,9 +48,10 @@ class AppBlocks(context: Context) {
     private val mlStore = FileMlStore(context.applicationContext.filesDir)
     private val energyStore = FileEnergyStore(context.applicationContext.filesDir)
     private val chargeStore = FileChargeStore(context.applicationContext.filesDir)
+    private val cellHistoryStore = FileCellHistoryStore(context.applicationContext.filesDir)
 
     /** Усе, що зберігає дані одного авто. Порядок значення не має. */
-    private val carStores = listOf(mlStore, energyStore, chargeStore)
+    private val carStores = listOf(mlStore, energyStore, chargeStore, cellHistoryStore)
     /**
      * Хто це авто. Від нього залежить, у якій теці лежать дані решти блоків.
      *
@@ -65,7 +67,7 @@ class AppBlocks(context: Context) {
     private val charging = ChargingBlock(chargeStore)
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))
     // Тест комірок під навантаженням: накопичує проходи й рахує підсумок.
-    private val cellTest = CellTestBlock()
+    private val cellTest = CellTestBlock(cellHistoryStore)
     // Каталог, а не Context: так сховище моделей лишається чистим Kotlin і
     // перевіряється тестами без емулятора, як і решта логіки проєкту.
     private val prediction = MlBlock(mlStore)

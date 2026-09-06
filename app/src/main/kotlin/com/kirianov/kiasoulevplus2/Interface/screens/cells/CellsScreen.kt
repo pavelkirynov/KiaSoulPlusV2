@@ -10,6 +10,7 @@ package com.kirianov.kiasoulevplus2.Interface.screens.cells
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +52,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kirianov.kiasoulevplus2.Data.CellData
+import com.kirianov.kiasoulevplus2.Data.CellHistory
+import com.kirianov.kiasoulevplus2.Data.CellLayout
+import com.kirianov.kiasoulevplus2.Data.CellRecord
+import com.kirianov.kiasoulevplus2.Data.CellTestResult
 import com.kirianov.kiasoulevplus2.Data.CellColorMode
 import com.kirianov.kiasoulevplus2.Data.CellHealth
 import com.kirianov.kiasoulevplus2.Data.CellValueMode
@@ -59,16 +64,26 @@ import com.kirianov.kiasoulevplus2.Data.CellTestState
 import com.kirianov.kiasoulevplus2.Data.ManualCells
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private const val GRID_COLUMNS = 8
 
-/** Реальна розбивка батареї Kia Soul EV на блоки. */
-private data class CellBlock(val startIndex: Int, val count: Int)
+/**
+ * Клітинка нижча за квадрат, а шрифт у ній більший.
+ *
+ * Квадрат 34×34 витрачав висоту на порожнечу, а число в ньому стояло восьмим
+ * кеглем — на ходу такі цифри не читаються, а дивляться на них саме на ходу, під
+ * час тесту. Ширина лишається від сітки, висота падає, шрифт росте.
+ */
+private val GRID_CELL_HEIGHT = 26.dp
 
-private val cellBlocks = listOf(
-    CellBlock(0, 14), CellBlock(14, 10), CellBlock(24, 10), CellBlock(34, 14),
-    CellBlock(48, 14), CellBlock(62, 10), CellBlock(72, 10), CellBlock(82, 14),
-)
+/** Дванадцять рядів по висоті клітинки плюс проміжки. */
+private val GRID_HEIGHT = 12 * (GRID_CELL_HEIGHT + 3.dp)
+
+/** У блоках рядів удвічі більше, тож клітинка ще нижча. */
+private val BLOCK_CELL_HEIGHT = 22.dp
 
 private enum class CellsViewMode { GRID, BLOCKS }
 
@@ -76,9 +91,16 @@ private enum class CellsViewMode { GRID, BLOCKS }
 fun CellsScreen(cellsViewModel: CellsViewModel) {
     var viewMode by remember { mutableStateOf(CellsViewMode.GRID) }
 
+    /** Час заміру, який зараз відкритий. Нуль — дивимось живі комірки. */
+    var shownAtMs by remember { mutableStateOf(0L) }
+
     val appState by cellsViewModel.uiState.collectAsState()
     val cellData = appState.cells
     val manualCells = appState.manualCells
+
+    val shownRecord = appState.cellHistory.records.firstOrNull { it.atMs == shownAtMs }
+    val shownCells = shownRecord?.let { cellsOf(it) } ?: cellData
+    val shownTest = shownRecord?.let { testOf(it, appState.cellTest) } ?: appState.cellTest
 
     // Індикатор виводиться прямо з прапорця запиту, тому розсинхрону бути не може.
     val isLoading = appState.inputBms.scanCellsRequested
@@ -162,12 +184,149 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
 
         Spacer(modifier = Modifier.height(6.dp))
 
+        HistoryCard(
+            history = appState.cellHistory,
+            shown = shownRecord,
+            canSave = cellData.cellVoltages.isNotEmpty(),
+            onSave = cellsViewModel::onSaveSnapshot,
+            onShow = { shownAtMs = if (shownAtMs == it) 0L else it },
+            onDelete = cellsViewModel::onDeleteRecord,
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
         when (viewMode) {
-            CellsViewMode.GRID -> CompactGridView(cellsViewModel, cellData, manualCells, appState.cellTest)
-            CellsViewMode.BLOCKS -> BlocksView(cellsViewModel, cellData, manualCells)
+            CellsViewMode.GRID -> CompactGridView(cellsViewModel, shownCells, manualCells, shownTest)
+            CellsViewMode.BLOCKS ->
+                BlocksView(cellsViewModel, shownCells, manualCells, shownTest)
         }
     }
 }
+
+/**
+ * Збережений замір показується тією самою сіткою, що й живі комірки.
+ *
+ * Для цього запис перетворюється назад на ті самі дві речі, які сітка вміє
+ * малювати, — напруги й підсумок тесту. Другої сітки «для історії» не з'являється,
+ * а отже й не буває так, що одна з них уміє щось, чого не вміє інша.
+ */
+private fun cellsOf(record: CellRecord) = CellData(
+    cellVoltages = record.restVolts,
+    minVoltage = record.restVolts.minOrNull() ?: 0.0,
+    maxVoltage = record.restVolts.maxOrNull() ?: 0.0,
+    deltaVoltage = record.spreadVolts,
+)
+
+private fun testOf(record: CellRecord, mode: CellTestState): CellTestState {
+    if (!record.fromLoadTest) return CellTestState(valueMode = CellValueMode.Rest)
+    val cells = record.restVolts.indices.map { index ->
+        CellVerdict(
+            index = index,
+            restVolts = record.restVolts[index],
+            excessMilliOhm = record.excessMilliOhm.getOrNull(index),
+            minVolts = record.minVolts.getOrNull(index) ?: 0.0,
+            worstDeviationVolts = 0.0,
+        )
+    }
+    return CellTestState(
+        colorMode = mode.colorMode,
+        valueMode = mode.valueMode,
+        result = CellTestResult(
+            sweeps = record.sweeps,
+            currentSpreadA = record.currentSpreadA,
+            cells = cells,
+            resistanceKnown = record.excessMilliOhm.isNotEmpty(),
+        ),
+    )
+}
+
+/**
+ * Список збережених замірів.
+ *
+ * Кожен рядок — дата, пробіг, заряд і розкид напруг. Саме розкид тут головне число:
+ * воно одне описує пакет коротше за всі дев'яносто шість комірок, і по ньому видно,
+ * чи є сенс відкривати замір узагалі.
+ */
+@Composable
+private fun HistoryCard(
+    history: CellHistory,
+    shown: CellRecord?,
+    canSave: Boolean,
+    onSave: () -> Unit,
+    onShow: (Long) -> Unit,
+    onDelete: (Long) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(text = "Історія замірів", fontSize = 16.sp)
+
+        Button(onClick = onSave, enabled = canSave, modifier = Modifier.fillMaxWidth()) {
+            Text("Зберегти замір")
+        }
+
+        if (history.isEmpty) {
+            Text(
+                text = "Порожньо. Закінчений тест під навантаженням лягає сюди сам, " +
+                    "а простий замір напруг — цією кнопкою. Порівнювати можна буде " +
+                    "з другого запису.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            return@Column
+        }
+
+        history.records.forEach { record ->
+            val open = record.atMs == shown?.atMs
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onShow(record.atMs) }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stampOf(record.atMs) +
+                            (if (record.fromLoadTest) " · тест" else " · спокій"),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (open) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                    )
+                    Text(
+                        text = "${formatDecimal(record.odometerKm, 0)} км · " +
+                            "${formatDecimal(record.socPercent, 0)} % · " +
+                            "${formatDecimal(record.batteryTempC, 0)} °C · " +
+                            "розкид ${formatDecimal(record.spreadVolts * 1000, 0)} мВ",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    text = "видалити",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.clickable { onDelete(record.atMs) },
+                )
+            }
+        }
+
+        if (shown != null) {
+            Text(
+                text = "Сітка показує замір від ${stampOf(shown.atMs)}. Натисніть на " +
+                    "нього ще раз, щоб повернутися до живих комірок.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+/** «06.09 08:46» — коротко, бо порівнюють заміри в межах місяців, а не років. */
+private fun stampOf(atMs: Long): String =
+    SimpleDateFormat("dd.MM HH:mm", Locale.US).format(Date(atMs))
 
 @Composable
 private fun CanLog(text: String) {
@@ -243,7 +402,7 @@ private fun CompactCellCell(
     ) {
         Text(
             text = "${index + 1}",
-            fontSize = 6.sp,
+            fontSize = 8.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -254,7 +413,7 @@ private fun CompactCellCell(
             // введення тут немає — просто текст.
             Text(
                 text = reading,
-                fontSize = 8.sp,
+                fontSize = 12.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -291,7 +450,7 @@ private fun CompactGridView(
         verticalArrangement = Arrangement.spacedBy(3.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .height(420.dp),
+            .height(GRID_HEIGHT),
     ) {
         items(CellData.TOTAL_CELLS) { index ->
             CompactCellCell(
@@ -299,7 +458,7 @@ private fun CompactGridView(
                 cellsViewModel = cellsViewModel,
                 cellData = cellData,
                 manualCells = manualCells,
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier.fillMaxWidth().height(GRID_CELL_HEIGHT),
                 loadColor = loadColorOf(index, test),
                 test = test,
             )
@@ -312,8 +471,8 @@ private fun BlocksView(
     cellsViewModel: CellsViewModel,
     cellData: CellData,
     manualCells: ManualCells,
+    test: CellTestState,
 ) {
-    val cellHeight = 22.dp
     val spacing = 1.dp
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -321,24 +480,27 @@ private fun BlocksView(
         val cellWidth = (maxWidth - spacing * (totalColumns - 1)) / totalColumns
 
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            cellBlocks.forEach { block ->
-                val columns = if (block.count == 14) 7 else 5
-                val rows = (block.count + columns - 1) / columns
-
+            // Порядок рядів — не порядок опитування: див. [CellLayout].
+            CellLayout.blocks.forEach { block ->
                 Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                    for (row in 0 until rows) {
+                    CellLayout.runsOf(block).forEach { run ->
+                        // Ряди по п'ять коротші за ряди по сім і притиснуті вліво:
+                        // лівий край скрізь має лишатися верхом стопки.
                         Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                            for (col in 0 until columns) {
-                                val offset = row * columns + col
-                                if (offset < block.count) {
-                                    CompactCellCell(
-                                        index = block.startIndex + offset,
-                                        cellsViewModel = cellsViewModel,
-                                        cellData = cellData,
-                                        manualCells = manualCells,
-                                        modifier = Modifier.width(cellWidth).height(cellHeight),
-                                    )
-                                }
+                            run.forEach { index ->
+                                CompactCellCell(
+                                    index = index,
+                                    cellsViewModel = cellsViewModel,
+                                    cellData = cellData,
+                                    manualCells = manualCells,
+                                    modifier = Modifier.width(cellWidth).height(BLOCK_CELL_HEIGHT),
+                                    // Колір і значення тесту тут такі самі, як у
+                                    // сітці. Без них друга вкладка показувала лише
+                                    // порожні клітинки — рівно там, куди дивляться,
+                                    // коли шукають, який бік пакета просів.
+                                    loadColor = loadColorOf(index, test),
+                                    test = test,
+                                )
                             }
                         }
                     }

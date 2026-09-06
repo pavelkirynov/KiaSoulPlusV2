@@ -14,8 +14,11 @@
 // теку.
 //
 // ЧОМУ ВИБІР РУКАМИ ПОТРІБЕН, ХОЧ VIN І САМ СЕБЕ НАЗИВАЄ. Без зв'язку VIN узяти
-// нізвідки, а подивитися накопичене хочеться й удома. Тому вибір руками є — але
-// тільки поки зв'язку немає: при живому авто він плутав би перегляд із обліком.
+// нізвідки, а подивитися накопичене хочеться й удома. І при живому авто теж: сидячи
+// в одній машині, буває треба зазирнути в дані другої — порівняти комірки до
+// перепакування й після. Тому вибір руками доступний завжди, але це саме ПЕРЕГЛЯД:
+// щойно обране й під'єднане розійшлися, облік і навчання спиняються, а екран
+// фарбується в інший колір.
 //
 // Блок не чіпає чужих сховищ: він лише кладе активний VIN у GeneralData, а кожен
 // блок сам переводить СВОЄ сховище й перечитує СВОЇ дані.
@@ -27,13 +30,16 @@ import com.kirianov.kiasoulevplus2.Data.CarProfile
 import com.kirianov.kiasoulevplus2.Data.Garage
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.Pack
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class GarageBlock(
     private val store: GarageStore,
@@ -52,14 +58,49 @@ class GarageBlock(
      */
     private val hadDataBeforeGarage: Boolean = false,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
     fun start(scope: CoroutineScope) {
         scope.launch {
             GeneralData.updateGarage { (store.load() ?: Garage()).copy(loaded = true) }
             adoptDetected(scope)
+            deleteRequested(scope)
             persist(scope)
         }
+    }
+
+    /**
+     * Видалення авто: спершу тека, потім запис у списку.
+     *
+     * Саме в такому порядку. Якби спершу зникав запис, а видалення теки не вдалося,
+     * на диску лишилися б дані, до яких уже нема як дістатися, — і вони мовчки
+     * повернулися б, щойно та сама машина з'явиться на шині знову.
+     *
+     * Активним стає найсвіжіше з решти. Порожній гараж лишає порожній activeVin:
+     * перше ж підключення заведе авто саме.
+     */
+    private fun deleteRequested(scope: CoroutineScope) {
+        GeneralData.state
+            .map { it.garage.deleteVin }
+            .distinctUntilChanged()
+            .onEach { vin ->
+                if (vin.isEmpty()) return@onEach
+                withContext(ioDispatcher) { store.deleteCarData(vin) }
+                GeneralData.updateGarage { garage ->
+                    val left = garage.cars.filterNot { it.vin == vin }
+                    garage.copy(
+                        cars = left,
+                        activeVin = if (garage.activeVin == vin) {
+                            left.maxByOrNull { it.lastSeenAtMs }?.vin.orEmpty()
+                        } else {
+                            garage.activeVin
+                        },
+                    )
+                }
+                GeneralData.clearCarDelete()
+            }
+            .launchIn(scope)
     }
 
     /**

@@ -2,6 +2,7 @@ package com.kirianov.kiasoulevplus2.tools.garage
 
 import com.kirianov.kiasoulevplus2.Data.CarProfile
 import com.kirianov.kiasoulevplus2.Data.Garage
+import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.Pack
 import com.kirianov.kiasoulevplus2.tools.charging.FileChargeStore
@@ -238,6 +239,64 @@ class GarageTest {
             val name = CarPaths.folderName(nasty)
             assertTrue("«$nasty» дало «$name»", name.all { it.isLetterOrDigit() })
             assertFalse(name.contains(".."))
+        }
+    }
+
+    /**
+     * ВИБІР РУКАМИ — ЦЕ ПЕРЕГЛЯД, А НЕ ПЕРЕМИКАННЯ ОБЛІКУ.
+     *
+     * Сидячи в одній машині, буває треба зазирнути в дані другої: порівняти
+     * комірки до перепакування й після. Показати це можна, а записувати туди живі
+     * числа з чужої шини — ні: рівно так одна нічна зарядка вже почалася з нуля.
+     */
+    @Test
+    fun `viewing another car stops the accounting`() {
+        GeneralData.updateConnection(ConnectionState.Connected, "тест")
+        GeneralData.updateGarage {
+            it.copy(
+                cars = listOf(CarProfile(vin = vin), CarProfile(vin = other)),
+                activeVin = vin,
+                detectedVin = vin,
+                vinConfirmed = true,
+            )
+        }
+        assertTrue("Своє авто — облік іде", GeneralData.state.value.carAccounting)
+
+        GeneralData.selectCar(other)
+
+        val state = GeneralData.state.value
+        assertTrue("Це і є перегляд чужого", state.garage.viewingOther)
+        assertFalse("Облік мусить спинитися", state.carAccounting)
+        assertFalse("Навчання теж", state.carLearning)
+    }
+
+    /** Видалення авто стирає його теку, а не лише рядок у списку. */
+    @Test
+    fun `deleting a car wipes its folder`() {
+        val root = directory()
+        try {
+            val store = FileGarageStore(root)
+            val folder = CarPaths.directoryFor(root, vin)
+            folder.mkdirs()
+            File(folder, "charge-log.json").writeText("{}")
+
+            GarageBlock(store, ioDispatcher = Dispatchers.Unconfined).start(scope)
+            GeneralData.updateGarage {
+                it.copy(
+                    cars = listOf(CarProfile(vin = vin), CarProfile(vin = other, lastSeenAtMs = 5L)),
+                    activeVin = vin,
+                    loaded = true,
+                )
+            }
+
+            GeneralData.requestCarDelete(vin)
+
+            assertFalse("Тека мусить зникнути", folder.exists())
+            val garage = GeneralData.state.value.garage
+            assertEquals(listOf(other), garage.cars.map { it.vin })
+            assertEquals("Активним стає те, що лишилося", other, garage.activeVin)
+        } finally {
+            root.deleteRecursively()
         }
     }
 }

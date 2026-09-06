@@ -13,17 +13,34 @@ package com.kirianov.kiasoulevplus2.tools.garage
 import com.kirianov.kiasoulevplus2.Data.CarProfile
 import com.kirianov.kiasoulevplus2.Data.Garage
 import com.kirianov.kiasoulevplus2.tools.json.MiniJson
+import com.kirianov.kiasoulevplus2.tools.paths.CarPaths
 import java.io.File
 import java.io.IOException
 
 interface GarageStore {
     fun load(): Garage?
     fun save(garage: Garage)
+
+    /**
+     * Стерти всі дані авто — цілу його теку.
+     *
+     * Тут, а не в кожному сховищі окремо, і це навмисно. Файли авто лежать в одній
+     * теці саме для того, щоб такі дії робилися одним рухом; питати кожне сховище
+     * «видали своє» означало б, що забуте сховище лишить по собі хвіст, який потім
+     * тихо повернеться разом із машиною.
+     *
+     * Порожня реалізація для сховища в пам'яті: там нема чого стирати.
+     */
+    fun deleteCarData(vin: String) {}
 }
 
 class FileGarageStore(private val root: File) : GarageStore {
 
     private val file get() = File(root, FILE_NAME)
+
+    override fun deleteCarData(vin: String) {
+        runCatching { CarPaths.directoryFor(root, vin).deleteRecursively() }
+    }
 
     override fun load(): Garage? = try {
         val source = file

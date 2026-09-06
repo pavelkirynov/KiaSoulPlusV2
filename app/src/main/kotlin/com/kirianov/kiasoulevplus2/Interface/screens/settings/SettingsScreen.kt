@@ -36,12 +36,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -81,6 +83,7 @@ fun SettingsScreen(settingsViewModel: SettingsViewModel) {
             onName = settingsViewModel::onCarNameChange,
             onPack = settingsViewModel::onPackKwhChange,
             onSelect = settingsViewModel::onCarSelected,
+            onDelete = settingsViewModel::onCarDeleted,
         )
 
         ShareCard(
@@ -122,6 +125,7 @@ private fun CarProfileCard(
     onName: (String) -> Unit,
     onPack: (String) -> String?,
     onSelect: (String) -> Unit,
+    onDelete: (String) -> Unit,
 ) {
     val car = garage.active
     var pack by remember(car.vin, car.packKwh) {
@@ -129,6 +133,7 @@ private fun CarProfileCard(
     }
     var error by remember { mutableStateOf<String?>(null) }
     var picking by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf<String?>(null) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -141,10 +146,12 @@ private fun CarProfileCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(text = "Профіль авто", fontSize = 18.sp)
-                // Вибір руками має сенс лише без зв'язку: на шині VIN сам себе
-                // назве, і давати можливість «дивитися чуже» при живому авто
-                // означало б плутати перегляд із обліком.
-                if (!connected && garage.cars.size > 1) {
+                // Вибір руками доступний завжди — це ПЕРЕГЛЯД, а не перемикання
+                // обліку. Сидячи в одній машині, буває треба зазирнути в дані
+                // другої: порівняти комірки до перепакування й після, глянути
+                // криву. Записи при цьому йдуть у те авто, що на шині, а екран
+                // фарбується в інший колір, щоб їх не сплутати.
+                if (garage.cars.size > 1) {
                     Text(
                         text = if (picking) "згорнути" else "обрати авто",
                         color = MaterialTheme.colorScheme.primary,
@@ -178,10 +185,11 @@ private fun CarProfileCard(
                 )
             }
 
-            if (garage.mismatched) {
+            if (garage.viewingOther) {
                 Text(
-                    text = "Увага: на шині інше авто (...${garage.detectedVin.takeLast(6)}). " +
-                        "Облік ведеться за обраним, а не за під'єднаним.",
+                    text = "Показано це авто, а на шині ...${garage.detectedVin.takeLast(6)}. " +
+                        "Живі числа йдуть від тієї машини, що на шині, і записуються " +
+                        "теж їй. Сюди зараз нічого не пишеться.",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -198,13 +206,51 @@ private fun CarProfileCard(
                             }
                             .padding(vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(text = known.name.ifEmpty { "...${known.vin.takeLast(6)}" })
-                        if (known.vin == car.vin) {
-                            Text(text = "обрано", color = MaterialTheme.colorScheme.primary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (known.vin == car.vin) {
+                                Text(text = "обрано", color = MaterialTheme.colorScheme.primary)
+                            }
+                            // Авто, яке зараз на шині, видалити не можна: воно
+                            // з'явилося б назад тієї ж миті, а дані вже пішли б.
+                            if (known.vin != garage.detectedVin) {
+                                Text(
+                                    text = "видалити",
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.clickable { removing = known.vin },
+                                )
+                            }
                         }
                     }
                 }
+            }
+
+            // Видалення питає підтвердження, і не з ввічливості: разом із авто
+            // зникає його тека, а в ній тижні замірів, яких більше нізвідки взяти.
+            removing?.let { vin ->
+                val name = garage.cars.firstOrNull { it.vin == vin }?.name.orEmpty()
+                AlertDialog(
+                    onDismissRequest = { removing = null },
+                    title = { Text("Видалити авто?") },
+                    text = {
+                        Text(
+                            "${name.ifEmpty { "...${vin.takeLast(6)}" }} — разом із кривою " +
+                                "ємності, обліком зарядок, моделлю прогнозу й історією комірок. " +
+                                "Повернути це буде нізвідки.",
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            onDelete(vin)
+                            removing = null
+                        }) { Text("Видалити", color = MaterialTheme.colorScheme.error) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { removing = null }) { Text("Скасувати") }
+                    },
+                )
             }
 
             OutlinedTextField(

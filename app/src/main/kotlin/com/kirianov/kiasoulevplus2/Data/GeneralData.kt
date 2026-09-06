@@ -119,6 +119,22 @@ object GeneralData {
     /** Що показувати в клітинках сітки. Вибір людини, не блока. */
     fun setCellValueMode(mode: CellValueMode) = updateCellTest { it.copy(valueMode = mode) }
 
+    // --- Історія замірів комірок -------------------------------------------------
+
+    fun updateCellHistory(transform: (CellHistory) -> CellHistory) =
+        _state.update { it.copy(cellHistory = transform(it.cellHistory)) }
+
+    /** Зберегти те, що зараз на екрані, окремим заміром. */
+    fun requestCellSnapshot() =
+        updateCellHistory { it.copy(request = CellHistoryRequest.Save) }
+
+    /** Видалити збережений замір за часом його зняття. */
+    fun requestCellRecordDelete(atMs: Long) =
+        updateCellHistory { it.copy(request = CellHistoryRequest.Delete, requestAtMs = atMs) }
+
+    fun clearCellHistoryRequest() =
+        updateCellHistory { it.copy(request = CellHistoryRequest.None, requestAtMs = 0L) }
+
     fun updateVehicle(vehicle: VehicleData) = _state.update { it.copy(vehicle = vehicle) }
 
     /** Облік зарядок за пожиттєвим лічильником: пише блок tools/charging. */
@@ -212,9 +228,22 @@ object GeneralData {
     /** Екран віддав файл системі «поділитися» — доручення виконано. */
     fun clearExportedPath() = updateShare { it.copy(exportedPath = "") }
 
-    /** Обране авто. Вручну — лише коли зв'язку немає: на шині VIN сам себе назве. */
+    /**
+     * Обране авто.
+     *
+     * Вибір руками — це ПЕРЕГЛЯД. Він показує дані обраного авто, але облік
+     * лишається за тим, що на шині: [com.kirianov.kiasoulevplus2.Data.Garage.identified]
+     * стає хибним, щойно обране й під'єднане розійшлися.
+     */
     fun selectCar(vin: String) =
         _state.update { it.copy(garage = it.garage.copy(activeVin = vin)) }
+
+    /** Видалити авто разом із його текою. Виконує блок гаража. */
+    fun requestCarDelete(vin: String) =
+        _state.update { it.copy(garage = it.garage.copy(deleteVin = vin)) }
+
+    fun clearCarDelete() =
+        _state.update { it.copy(garage = it.garage.copy(deleteVin = "")) }
 
     /** Корисна ємність пакета активного авто, кВт·год. Нуль означає «не задано». */
     fun setPackKwh(kwh: Double) = updateActiveCar { it.copy(packKwh = kwh) }

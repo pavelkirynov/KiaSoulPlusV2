@@ -18,6 +18,9 @@ data class State(
 
     /** Тест комірок під навантаженням: веде блок tools/cells. */
     val cellTest: CellTestState = CellTestState(),
+
+    /** Збережені заміри комірок цього авто: веде блок tools/cells. */
+    val cellHistory: CellHistory = CellHistory(),
     val vehicle: VehicleData = VehicleData(),
 
     /** Що відомо про зарядки: рахується за пожиттєвим лічильником BMS. */
@@ -91,8 +94,13 @@ data class State(
      * зупинити облік на цій підставі означало б утратити саме ту нічну зарядку,
      * заради якої все це й будувалося. Тому чекаємо лише поки питаємо; далі за
      * чужі числа відповідає сторож пожиттєвих лічильників.
+     *
+     * Ця поблажливість НЕ поширюється на випадок, коли шина вже назвала інше авто,
+     * ніж те, що на екрані. Там ми не «не знаємо, чиї числа» — там ми знаємо
+     * напевно, що вони чужі.
      */
-    val carAccounting: Boolean get() = !isConnected || garage.identified || !garage.vinPending
+    val carAccounting: Boolean
+        get() = !isConnected || garage.identified || (!garage.mismatched && !garage.vinPending)
 
     /**
      * Чи можна ВЧИТИСЯ на тому, що приходить із шини.

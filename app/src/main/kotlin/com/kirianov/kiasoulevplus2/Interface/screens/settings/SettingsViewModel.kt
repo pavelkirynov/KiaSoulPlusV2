@@ -26,6 +26,8 @@ class SettingsViewModel : ViewModel() {
     /** Обрати авто вручну. Має сенс лише без зв'язку: на шині VIN сам себе назве. */
     fun onCarSelected(vin: String) = GeneralData.selectCar(vin)
 
+    fun onCarDeleted(vin: String) = GeneralData.requestCarDelete(vin)
+
     // --- Обмін даними авто --------------------------------------------------------
 
     fun onExport() = GeneralData.requestCarExport()

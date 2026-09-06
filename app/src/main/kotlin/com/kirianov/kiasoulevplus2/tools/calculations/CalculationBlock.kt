@@ -27,6 +27,7 @@ import com.kirianov.kiasoulevplus2.Data.TripSample
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -41,6 +42,28 @@ class CalculationBlock(
         recordSamples(scope)
         trackRangeAccuracy(scope)
         resetOnDisconnect(scope)
+        resetOnCarChange(scope)
+    }
+
+    /**
+     * Змінилося авто — історія поїздки й точність прогнозу від нього.
+     *
+     * Скидається все, що склеює два знімки в один відрізок: одометр другої машини
+     * менший на сімдесят тисяч кілометрів, а лічильники в неї свої. Без цього
+     * витрата за поїздку рахувалася б із різниці чисел двох різних автомобілів —
+     * і виглядала б при цьому цілком правдоподібно.
+     */
+    private fun resetOnCarChange(scope: CoroutineScope) {
+        GeneralData.state
+            .map { it.garage.activeVin }
+            .distinctUntilChanged()
+            .drop(1)
+            .onEach {
+                startedAt = null
+                GeneralData.clearTripHistory()
+                GeneralData.updateRangeAccuracy(RangeAccuracy())
+            }
+            .launchIn(scope)
     }
 
     /**

@@ -60,6 +60,11 @@ class CellsViewModel : ViewModel() {
 
     fun onValueModeChange(mode: CellValueMode) = GeneralData.setCellValueMode(mode)
 
+    /** Зберегти те, що зараз на екрані, окремим заміром в історії авто. */
+    fun onSaveSnapshot() = GeneralData.requestCellSnapshot()
+
+    fun onDeleteRecord(atMs: Long) = GeneralData.requestCellRecordDelete(atMs)
+
     /** Зберігає введену вручну напругу; сам запис на диск робить блок сховища. */
     fun onManualVoltageEntered(index: Int, text: String) {
         parseDecimalInput(text)?.let { GeneralData.setManualCell(index, it) }
