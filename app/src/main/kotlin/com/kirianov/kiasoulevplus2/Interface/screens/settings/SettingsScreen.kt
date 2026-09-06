@@ -59,6 +59,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.kirianov.kiasoulevplus2.Data.CarProfile
 import com.kirianov.kiasoulevplus2.Data.Garage
 import com.kirianov.kiasoulevplus2.Data.Pack
 import com.kirianov.kiasoulevplus2.Data.PairedDevice
@@ -80,9 +81,8 @@ fun SettingsScreen(settingsViewModel: SettingsViewModel) {
         CarProfileCard(
             garage = state.garage,
             connected = state.isConnected,
-            onName = settingsViewModel::onCarNameChange,
-            onPack = settingsViewModel::onPackKwhChange,
             onSelect = settingsViewModel::onCarSelected,
+            onEdit = settingsViewModel::onCarEdited,
             onDelete = settingsViewModel::onCarDeleted,
         )
 
@@ -122,17 +122,13 @@ fun SettingsScreen(settingsViewModel: SettingsViewModel) {
 private fun CarProfileCard(
     garage: Garage,
     connected: Boolean,
-    onName: (String) -> Unit,
-    onPack: (String) -> String?,
     onSelect: (String) -> Unit,
+    onEdit: (String, String, Double) -> Unit,
     onDelete: (String) -> Unit,
 ) {
     val car = garage.active
-    var pack by remember(car.vin, car.packKwh) {
-        mutableStateOf(if (car.packKnown) formatDecimal(car.packKwh, 2) else "")
-    }
-    var error by remember { mutableStateOf<String?>(null) }
     var picking by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<String?>(null) }
     var removing by remember { mutableStateOf<String?>(null) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -151,33 +147,41 @@ private fun CarProfileCard(
                 // другої: порівняти комірки до перепакування й після, глянути
                 // криву. Записи при цьому йдуть у те авто, що на шині, а екран
                 // фарбується в інший колір, щоб їх не сплутати.
-                if (garage.cars.size > 1) {
-                    Text(
-                        text = if (picking) "згорнути" else "обрати авто",
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { picking = !picking },
-                    )
-                }
+                Text(
+                    text = if (picking) "згорнути" else "обрати авто",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { picking = !picking },
+                )
             }
 
             Text(
                 text = when {
-                    car.known -> "VIN ...${car.vin.takeLast(6)}"
-                    connected -> "VIN ще не прочитано з шини"
+                    car.name.isNotEmpty() -> car.name
+                    car.known -> "Без назви"
+                    connected -> "Авто ще не назвалося"
                     else -> "Авто не обрано"
                 },
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = 16.sp,
             )
+
+            if (car.known) {
+                Text(
+                    text = "VIN ...${car.vin.takeLast(6)} · " +
+                        "${formatDecimal(car.effectivePackKwh, 2)} кВт·год" +
+                        if (car.packKnown) "" else " (рідний пакет)",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
 
             // Поки авто не назвалося, облік стоїть — і людина має знати, чому
             // числа на екрані живі, а лічильник зарядки не рухається.
-            if (connected && !garage.identified) {
+            if (connected && !garage.identified && !garage.viewingOther) {
                 Text(
                     text = if (garage.vinPending) {
-                        "Авто ще не назвало VIN. Дані показуються, але нікуди не " +
-                            "записуються: поки невідомо, чиї вони."
+                        "Машина на шині ще не назвала VIN. Дані показуються, але " +
+                            "нікуди не записуються: поки невідомо, чиї вони."
                     } else {
-                        "Авто не назвало VIN. Облік іде за обраним авто — " +
+                        "Машина на шині не назвала VIN. Облік іде за обраним авто — " +
                             "перевірте, що це саме воно."
                     },
                     color = MaterialTheme.colorScheme.error,
@@ -196,34 +200,38 @@ private fun CarProfileCard(
             }
 
             if (picking) {
+                if (garage.cars.isEmpty()) {
+                    Text(
+                        text = "Гараж порожній. Авто заводиться саме, щойно назве VIN " +
+                            "на шині.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 garage.cars.sortedByDescending { it.lastSeenAtMs }.forEach { known ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onSelect(known.vin)
-                                picking = false
-                            }
-                            .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(text = known.name.ifEmpty { "...${known.vin.takeLast(6)}" })
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            if (known.vin == car.vin) {
-                                Text(text = "обрано", color = MaterialTheme.colorScheme.primary)
-                            }
-                            // Авто, яке зараз на шині, видалити не можна: воно
-                            // з'явилося б назад тієї ж миті, а дані вже пішли б.
-                            if (known.vin != garage.detectedVin) {
-                                Text(
-                                    text = "видалити",
-                                    color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.clickable { removing = known.vin },
-                                )
-                            }
-                        }
-                    }
+                    CarRow(
+                        car = known,
+                        chosen = known.vin == car.vin,
+                        onBus = known.vin == garage.detectedVin,
+                        onSelect = {
+                            onSelect(known.vin)
+                            picking = false
+                        },
+                        onEdit = { editing = known.vin },
+                        onDelete = { removing = known.vin },
+                    )
+                }
+            }
+
+            editing?.let { vin ->
+                garage.cars.firstOrNull { it.vin == vin }?.let { target ->
+                    EditCarDialog(
+                        car = target,
+                        onDismiss = { editing = null },
+                        onSave = { name, kwh ->
+                            onEdit(vin, name, kwh)
+                            editing = null
+                        },
+                    )
                 }
             }
 
@@ -253,58 +261,156 @@ private fun CarProfileCard(
                 )
             }
 
-            OutlinedTextField(
-                value = car.name,
-                onValueChange = onName,
-                label = { Text("Назва") },
-                placeholder = { Text("Soul EV") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            OutlinedTextField(
-                value = pack,
-                onValueChange = {
-                    pack = it
-                    error = onPack(it)
-                },
-                label = { Text("Ємність батареї, кВт·год") },
-                placeholder = { Text(formatDecimal(Pack.ORIGINAL_CAPACITY_KWH, 1)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                isError = error != null,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            error?.let {
-                Text(
-                    text = it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-
             Text(
                 text = if (car.packKnown) {
                     "Рахуємо за ${formatDecimal(car.packKwh, 2)} кВт·год. " +
                         "Це число — старт: глибока зарядка з низьких відсотків його уточнить."
                 } else {
-                    "Не задано, тому рахуємо за рідним пакетом — " +
+                    "Ємність не задано, тому рахуємо за рідним пакетом — " +
                         "${formatDecimal(Pack.ORIGINAL_CAPACITY_KWH, 1)} кВт·год. " +
-                        "Якщо батарею міняли, впишіть справжню ємність: інакше запас ходу " +
-                        "буде занижений у стільки ж разів, у скільки новий пакет більший."
+                        "Якщо батарею міняли, впишіть справжню через «обрати авто → змінити»: " +
+                        "інакше запас ходу буде занижений у стільки ж разів, у скільки новий " +
+                        "пакет більший."
                 },
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            Text(
-                text = "Зміна ємності перезбирає модель прогнозу заново — журнал поїздок " +
-                    "при цьому цілий, тож нічого не втрачається.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
     }
 }
+
+/** Один рядок списку: назва, і поруч те, що з цим авто можна зробити. */
+@Composable
+private fun CarRow(
+    car: CarProfile,
+    chosen: Boolean,
+    onBus: Boolean,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect)
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = car.name.ifEmpty { "...${car.vin.takeLast(6)}" })
+            Text(
+                text = "...${car.vin.takeLast(6)} · ${formatDecimal(car.effectivePackKwh, 2)} кВт·год" +
+                    if (chosen) " · обрано" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (chosen) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                text = "змінити",
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable(onClick = onEdit),
+            )
+            // Авто, яке зараз на шині, видалити не можна: воно з'явилося б назад
+            // тієї ж миті, а дані вже пішли б.
+            if (!onBus) {
+                Text(
+                    text = "видалити",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.clickable(onClick = onDelete),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * ПРАВКА АВТО ЖИВЕ У ВІКНІ, А НЕ ПРЯМО НА КАРТЦІ.
+ *
+ * Поля на картці стояли завжди відкритими, і кожен дотик до екрана міг тихо
+ * змінити ємність пакета. Ціна такої випадковості несиметрична: зміна ємності
+ * перезбирає модель прогнозу, і людина дізнається про це не одразу, а коли запас
+ * ходу почне брехати.
+ *
+ * Вікно ж вимагає двох свідомих дій — відкрити й зберегти, — і поки воно не
+ * збережене, у гаражі не змінюється нічого.
+ */
+@Composable
+private fun EditCarDialog(
+    car: CarProfile,
+    onDismiss: () -> Unit,
+    onSave: (String, Double) -> Unit,
+) {
+    var name by remember(car.vin) { mutableStateOf(car.name) }
+    var pack by remember(car.vin) {
+        mutableStateOf(if (car.packKnown) formatDecimal(car.packKwh, 2) else "")
+    }
+
+    val trimmed = pack.trim().replace(',', '.')
+    val kwh = if (trimmed.isEmpty()) 0.0 else trimmed.toDoubleOrNull()
+    val error = when {
+        kwh == null -> "Не схоже на число"
+        kwh < 0.0 -> "Ємність не буває від'ємною"
+        kwh > MAX_PLAUSIBLE_KWH -> "Більше за $MAX_PLAUSIBLE_KWH кВт·год у це авто не влізе"
+        else -> null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Авто ...${car.vin.takeLast(6)}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Назва") },
+                    placeholder = { Text("Soul EV") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = pack,
+                    onValueChange = { pack = it },
+                    label = { Text("Ємність батареї, кВт·год") },
+                    placeholder = { Text(formatDecimal(Pack.ORIGINAL_CAPACITY_KWH, 1)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    isError = error != null,
+                )
+                error?.let {
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    text = "Зміна ємності перезбирає модель прогнозу заново — журнал " +
+                        "поїздок при цьому цілий, тож нічого не втрачається.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(name.trim(), kwh ?: 0.0) },
+                enabled = error == null,
+            ) { Text("Зберегти") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Скасувати") }
+        },
+    )
+}
+
+/**
+ * Понад це в Soul EV не влізе фізично, і таке число майже напевно означає, що
+ * людина ввела ват-години або промахнулася комою.
+ */
+private const val MAX_PLAUSIBLE_KWH = 120.0
 
 /** Як під'єднуватися: самостійно чи вручну, і що вважати ознакою «сів за кермо». */
 @Composable

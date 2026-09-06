@@ -299,4 +299,33 @@ class GarageTest {
             root.deleteRecursively()
         }
     }
+
+    /**
+     * Правка зі списку міняє САМЕ ТЕ авто, на яке натиснули.
+     *
+     * Досі назва і ємність правилися лише в активного, тож щоб змінити другу
+     * машину, її довелося б спершу зробити активною — тобто перемкнути заразом усі
+     * екрани й графіки. Побічна дія виходила більшою за головну.
+     */
+    @Test
+    fun `editing a car from the list leaves the active one alone`() {
+        GeneralData.updateGarage {
+            it.copy(
+                cars = listOf(
+                    CarProfile(vin = vin, name = "Моя", packKwh = 50.88),
+                    CarProfile(vin = other, name = "", packKwh = 0.0),
+                ),
+                activeVin = vin,
+            )
+        }
+
+        GeneralData.editCar(other, name = "1960", packKwh = 27.0)
+
+        val garage = GeneralData.state.value.garage
+        assertEquals("Активне авто чіпати не можна", vin, garage.activeVin)
+        assertEquals("Моя", garage.cars.first { it.vin == vin }.name)
+        assertEquals(50.88, garage.cars.first { it.vin == vin }.packKwh, 0.001)
+        assertEquals("1960", garage.cars.first { it.vin == other }.name)
+        assertEquals(27.0, garage.cars.first { it.vin == other }.packKwh, 0.001)
+    }
 }

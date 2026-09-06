@@ -77,13 +77,22 @@ private const val GRID_COLUMNS = 8
  * кеглем — на ходу такі цифри не читаються, а дивляться на них саме на ходу, під
  * час тесту. Ширина лишається від сітки, висота падає, шрифт росте.
  */
-private val GRID_CELL_HEIGHT = 26.dp
+private val GRID_CELL_HEIGHT = 28.dp
+
+/**
+ * Розмір числа в клітинці. Один на всі режими, включно з полем введення: різні
+ * розміри на одній сітці читаються як різні дані.
+ */
+private val CELL_VALUE_SIZE = 14.sp
+
+/** Номер комірки: помітно дрібніший за значення, але читаний на ходу. */
+private val CELL_INDEX_SIZE = 9.sp
 
 /** Дванадцять рядів по висоті клітинки плюс проміжки. */
 private val GRID_HEIGHT = (GRID_CELL_HEIGHT + 3.dp) * 12
 
 /** У блоках рядів удвічі більше, тож клітинка ще нижча. */
-private val BLOCK_CELL_HEIGHT = 22.dp
+private val BLOCK_CELL_HEIGHT = 24.dp
 
 private enum class CellsViewMode { GRID, BLOCKS }
 
@@ -98,7 +107,13 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
     val cellData = appState.cells
     val manualCells = appState.manualCells
 
-    val shownRecord = appState.cellHistory.records.firstOrNull { it.atMs == shownAtMs }
+    // ПОРОЖНЯ СІТКА — ПОГАНА ВІДПОВІДЬ. Перемкнувся на друге авто, живі напруги
+    // погасли (вони від першого), і дивитися нема на що, хоч заміри в нього є.
+    // Тому коли своїх чисел на екрані немає, сітка сама відкриває найсвіжіший
+    // збережений замір цієї машини.
+    val newest = appState.cellHistory.records.firstOrNull()
+    val fallback = if (cellData.cellVoltages.isEmpty()) newest else null
+    val shownRecord = appState.cellHistory.records.firstOrNull { it.atMs == shownAtMs } ?: fallback
     val shownCells = shownRecord?.let { cellsOf(it) } ?: cellData
     val shownTest = shownRecord?.let { testOf(it, appState.cellTest) } ?: appState.cellTest
 
@@ -402,7 +417,7 @@ private fun CompactCellCell(
     ) {
         Text(
             text = "${index + 1}",
-            fontSize = 8.sp,
+            fontSize = CELL_INDEX_SIZE,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -413,7 +428,7 @@ private fun CompactCellCell(
             // введення тут немає — просто текст.
             Text(
                 text = reading,
-                fontSize = 12.sp,
+                fontSize = CELL_VALUE_SIZE,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -428,7 +443,15 @@ private fun CompactCellCell(
                 },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
-                textStyle = TextStyle(fontSize = 8.sp, textAlign = TextAlign.Center),
+                // ТОЙ САМИЙ РОЗМІР, ЩО Й У РЕШТІ РЕЖИМІВ. Поле введення має свій
+                // стиль, і поки він жив окремо, «Ввід» показував ті самі числа
+                // помітно дрібнішими за «ХХ» чи «Під навант.» — на тому самому
+                // екрані, тією самою сіткою.
+                textStyle = TextStyle(
+                    fontSize = CELL_VALUE_SIZE,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 2.dp),

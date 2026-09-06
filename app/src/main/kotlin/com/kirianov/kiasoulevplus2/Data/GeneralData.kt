@@ -250,6 +250,25 @@ object GeneralData {
 
     fun setCarName(name: String) = updateActiveCar { it.copy(name = name) }
 
+    /**
+     * Правка КОНКРЕТНОГО авто, а не активного.
+     *
+     * Потрібна саме така, бо правити машину доводиться зі списку — там, де її
+     * видно поруч із рештою. Робити її для цього активною означало б перемкнути
+     * заразом усі екрани й графіки, тобто зробити побічну дію більшою за головну.
+     */
+    fun editCar(vin: String, name: String, packKwh: Double) =
+        _state.update { state ->
+            val garage = state.garage
+            state.copy(
+                garage = garage.copy(
+                    cars = garage.cars.map {
+                        if (it.vin == vin) it.copy(name = name, packKwh = packKwh) else it
+                    },
+                ),
+            )
+        }
+
     private fun updateActiveCar(transform: (CarProfile) -> CarProfile) =
         _state.update { state ->
             val garage = state.garage

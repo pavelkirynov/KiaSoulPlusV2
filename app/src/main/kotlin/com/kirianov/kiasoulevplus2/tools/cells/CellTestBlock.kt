@@ -19,6 +19,7 @@
 
 package com.kirianov.kiasoulevplus2.tools.cells
 
+import com.kirianov.kiasoulevplus2.Data.CellData
 import com.kirianov.kiasoulevplus2.Data.CellHistoryRequest
 import com.kirianov.kiasoulevplus2.Data.CellRecord
 import com.kirianov.kiasoulevplus2.Data.CellSweep
@@ -67,6 +68,11 @@ class CellTestBlock(
                 GeneralData.updateCellTest {
                     it.copy(running = false, sweeps = emptyList(), result = CellLoad.summarize(emptyList()))
                 }
+                // ЖИВІ НАПРУГИ ТЕЖ ГАСИМО. Вони належать тій машині, з якої
+                // прочитані, і лишити їх у сітці означає показувати чужі комірки
+                // під назвою обраного авто — саме те, що людина й побачила:
+                // дивиться одне авто, а в клітинках числа з іншої шини.
+                GeneralData.updateCells(CellData())
                 GeneralData.updateCellHistory { it.copy(records = records, loaded = true) }
             }
             .launchIn(scope)

@@ -19,6 +19,7 @@ import com.kirianov.kiasoulevplus2.tools.cells.FileCellHistoryStore
 import com.kirianov.kiasoulevplus2.tools.charging.ChargingBlock
 import com.kirianov.kiasoulevplus2.tools.charging.FileChargeStore
 import com.kirianov.kiasoulevplus2.tools.calculations.CalculationBlock
+import com.kirianov.kiasoulevplus2.tools.calculations.FileRangeAccuracyStore
 import com.kirianov.kiasoulevplus2.tools.energy.EnergyBlock
 import com.kirianov.kiasoulevplus2.tools.energy.FileEnergyStore
 import com.kirianov.kiasoulevplus2.tools.garage.FileGarageStore
@@ -40,7 +41,6 @@ class AppBlocks(context: Context) {
 
     private val bluetooth = BluetoothBlock(ElmBluetoothManager())
     private val decoders = DecoderBlock()
-    private val calculations = CalculationBlock()
     private val probe = ProbeBlock()
     private val vehicle = VehicleBlock()
     private val settings = SettingsBlock(FileSettingsStore(context.applicationContext.filesDir))
@@ -49,9 +49,11 @@ class AppBlocks(context: Context) {
     private val energyStore = FileEnergyStore(context.applicationContext.filesDir)
     private val chargeStore = FileChargeStore(context.applicationContext.filesDir)
     private val cellHistoryStore = FileCellHistoryStore(context.applicationContext.filesDir)
+    private val rangeStore = FileRangeAccuracyStore(context.applicationContext.filesDir)
 
     /** Усе, що зберігає дані одного авто. Порядок значення не має. */
-    private val carStores = listOf(mlStore, energyStore, chargeStore, cellHistoryStore)
+    private val carStores =
+        listOf(mlStore, energyStore, chargeStore, cellHistoryStore, rangeStore)
     /**
      * Хто це авто. Від нього залежить, у якій теці лежать дані решти блоків.
      *
@@ -63,6 +65,9 @@ class AppBlocks(context: Context) {
         store = FileGarageStore(context.applicationContext.filesDir),
         hadDataBeforeGarage = carStores.any { it.hasLegacyData() },
     )
+    // Нижче сховищ навмисно: властивості створюються згори вниз, і блок,
+    // створений раніше за своє сховище, отримав би null.
+    private val calculations = CalculationBlock(rangeStore)
     private val autoConnect = AutoConnectBlock()
     private val charging = ChargingBlock(chargeStore)
     private val storage = StorageBlock(SharedPreferencesCellStore(context.applicationContext))

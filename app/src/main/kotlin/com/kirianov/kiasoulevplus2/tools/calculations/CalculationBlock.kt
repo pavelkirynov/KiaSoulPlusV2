@@ -25,15 +25,22 @@ import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.TripHistory
 import com.kirianov.kiasoulevplus2.Data.TripSample
 import com.kirianov.kiasoulevplus2.Data.VehicleData
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class CalculationBlock(
+    private val store: RangeAccuracyStore = NoRangeAccuracyStore,
     private val elapsedMillis: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private var startedAt: Long? = null
 
@@ -41,8 +48,50 @@ class CalculationBlock(
         recalculateOnChange(scope)
         recordSamples(scope)
         trackRangeAccuracy(scope)
+        keepRangeAccuracy(scope)
         resetOnDisconnect(scope)
         resetOnCarChange(scope)
+    }
+
+    /**
+     * Відлік перевірки прогнозу мусить пережити перезапуск.
+     *
+     * Він набирається кілометрами — до трьох відсоток нічого не означає, — а жив
+     * тільки в пам'яті. Тому кожне оновлення застосунку починало перевірку з нуля,
+     * і побачити її результат виходило хіба випадково.
+     *
+     * Тека береться від активного авто: одометр другої машини менший на сімдесят
+     * тисяч кілометрів, і відлік із чужої теки показав би поїздку завдовжки в
+     * мінус сімдесят тисяч.
+     */
+    private fun keepRangeAccuracy(scope: CoroutineScope) {
+        scope.launch {
+            launch {
+                GeneralData.state
+                    .map { it.garage.activeVin }
+                    .filter { it.isNotEmpty() }
+                    .distinctUntilChanged()
+                    .collect { vin ->
+                        val saved = withContext(ioDispatcher) {
+                            store.useCar(vin)
+                            store.load()
+                        }
+                        GeneralData.updateRangeAccuracy(saved ?: RangeAccuracy())
+                    }
+            }
+
+            // Пишемо не на кожне читання, а раз на сто метрів дороги: прогноз
+            // оновлюється щосекунди, і файл на сто байтів переписувався б так
+            // само часто — задарма.
+            GeneralData.state
+                .map { it.rangeAccuracy }
+                .distinctUntilChanged { old, new ->
+                    old.started == new.started &&
+                        (old.drivenKm * 10).toInt() == (new.drivenKm * 10).toInt()
+                }
+                .drop(1)
+                .collect { withContext(ioDispatcher) { store.save(it) } }
+        }
     }
 
     /**
@@ -61,7 +110,9 @@ class CalculationBlock(
             .onEach {
                 startedAt = null
                 GeneralData.clearTripHistory()
-                GeneralData.updateRangeAccuracy(RangeAccuracy())
+                // Сам відлік не скидаємо: його підніме з теки нового авто
+                // keepRangeAccuracy. Обнулити тут означало б стерти чужий файл
+                // тим самим рухом, яким ми до нього перемикаємось.
             }
             .launchIn(scope)
     }
@@ -181,4 +232,14 @@ class CalculationBlock(
             }
             .launchIn(scope)
     }
+}
+
+/**
+ * Відлік, який нікуди не зберігається: для тестів і для складання без сховища.
+ *
+ * Об'єкт, а не null: блок не мусить питати «а чи є сховище» на кожній зміні.
+ */
+object NoRangeAccuracyStore : RangeAccuracyStore {
+    override fun load(): RangeAccuracy? = null
+    override fun save(accuracy: RangeAccuracy) {}
 }
