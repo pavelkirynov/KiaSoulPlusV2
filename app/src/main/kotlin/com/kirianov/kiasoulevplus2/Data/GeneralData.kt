@@ -114,7 +114,10 @@ object GeneralData {
     fun clearCellTestRequest() = updateCellTest { it.copy(request = CellTestRequest.None) }
 
     /** Яким із двох висновків фарбувати комірки. Вибір людини, не блока. */
-    fun setCellColorMode(mode: CellColorMode) = updateCellTest { it.copy(colorMode = mode) }
+    // Колір комірок більше не залежить від вердикту тесту: він рахується від
+    // медіани пакета з порогами, які ставить власник. Перемикача «фарбувати за
+    // опором / за мінімумом» на екрані немає, тож і сеттера тут немає — саме
+    // поле лишається, бо його читають збережені заміри.
 
     /** Що показувати в клітинках сітки. Вибір людини, не блока. */
     fun setCellValueMode(mode: CellValueMode) = updateCellTest { it.copy(valueMode = mode) }
@@ -306,6 +309,16 @@ object GeneralData {
     /** Список спарованих пристроїв: публікує блок Bluetooth. */
     fun updatePairedDevices(devices: List<PairedDevice>) =
         _state.update { it.copy(pairedDevices = devices) }
+
+    /** Пороги фарбування комірок з вікна налаштувань на екрані «Комірки». */
+    fun setCellPalette(mode: CellValueMode, palette: CellPalette) =
+        _state.update {
+            it.copy(
+                settings = it.settings.copy(
+                    cellPalettes = it.settings.cellPalettes.with(mode, palette),
+                ),
+            )
+        }
 
     fun setJournalEnabled(enabled: Boolean) =
         _state.update { it.copy(settings = it.settings.copy(journal = enabled)) }

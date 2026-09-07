@@ -1,9 +1,19 @@
 // ====================================================================================
 // ЕКРАН КОМІРОК (CellsScreen)
 //
-// Показує 96 комірок сіткою або за реальними блоками ВВБ, лог ELM327 та кнопку
-// зчитування. Значення, зчитані з авто, мають пріоритет; вручну введені зберігаються
-// в SharedPreferences і показуються, доки з машини нічого не прийшло.
+// Показує 96 комірок трьома розкладками — рівною сіткою, блоками ВВБ і модулями
+// 6s, — і кнопку зчитування. Значення, зчитані з авто, мають пріоритет; вручну
+// введені зберігаються й показуються, доки з машини нічого не прийшло.
+//
+// ФАРБУЄ ВІДХИЛЕННЯ ВІД МЕДІАНИ ПАКЕТА, а не саме значення, і в кожному режимі
+// своїми порогами: у спокої комірки розходяться на одиниці мілівольт, під струмом
+// на десятки. Досі колір брав лише вердикт тесту під навантаженням, і режими «ХХ»,
+// «Відхилення» та «Ввід» стояли безбарвними — саме ті, в яких дивляться найчастіше.
+// Порогами керує вікно з кнопки над сіткою; самі числа — в [CellReadings].
+//
+// ЛОГА ELM ТУТ БІЛЬШЕ НЕМА. Він займав сотню точок висоти на екрані, куди приходять
+// дивитися на дев'яносто шість комірок, а те саме видно в журналі й на екрані
+// «Експерименти».
 // ====================================================================================
 
 package com.kirianov.kiasoulevplus2.Interface.screens.cells
@@ -21,9 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -32,10 +40,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,9 +55,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -54,15 +65,17 @@ import androidx.compose.ui.unit.sp
 import com.kirianov.kiasoulevplus2.Data.CellData
 import com.kirianov.kiasoulevplus2.Data.CellHistory
 import com.kirianov.kiasoulevplus2.Data.CellLayout
+import com.kirianov.kiasoulevplus2.Data.CellLevel
+import com.kirianov.kiasoulevplus2.Data.CellPalette
+import com.kirianov.kiasoulevplus2.Data.CellReadings
 import com.kirianov.kiasoulevplus2.Data.CellRecord
 import com.kirianov.kiasoulevplus2.Data.CellTestResult
-import com.kirianov.kiasoulevplus2.Data.CellColorMode
-import com.kirianov.kiasoulevplus2.Data.CellHealth
 import com.kirianov.kiasoulevplus2.Data.CellValueMode
 import com.kirianov.kiasoulevplus2.Data.CellVerdict
 import com.kirianov.kiasoulevplus2.Data.CellTestState
 import com.kirianov.kiasoulevplus2.Data.ManualCells
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
+import com.kirianov.kiasoulevplus2.tools.format.parseDecimalInput
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -94,7 +107,16 @@ private val GRID_HEIGHT = (GRID_CELL_HEIGHT + 3.dp) * 12
 /** У блоках рядів удвічі більше, тож клітинка ще нижча. */
 private val BLOCK_CELL_HEIGHT = 24.dp
 
-private enum class CellsViewMode { GRID, BLOCKS }
+/**
+ * Модулі 6s: дванадцять комірок в рядок, тож клітинка вузька — і саме тому висока.
+ *
+ * Число в неї по горизонталі не влазить жодним кеглем: на 28 точок ширини «3.65»
+ * доводиться або обрізати, або писати сьомим шрифтом. Тому текст тут повернутий на
+ * 90°, і висота клітинки — це та довжина, якою число врешті й читається.
+ */
+private val SIX_CELL_HEIGHT = 66.dp
+
+private enum class CellsViewMode { GRID, BLOCKS, SIX }
 
 @Composable
 fun CellsScreen(cellsViewModel: CellsViewModel) {
@@ -102,6 +124,17 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
 
     /** Час заміру, який зараз відкритий. Нуль — дивимось живі комірки. */
     var shownAtMs by remember { mutableStateOf(0L) }
+
+    /**
+     * Історія згорнута, поки її не попросили.
+     *
+     * Двадцять записів по два рядки — це пів екрана над сіткою, і щоразу, коли
+     * треба глянути на комірки, доводилося їх прокручувати.
+     */
+    var historyOpen by remember { mutableStateOf(false) }
+
+    /** Чи відкрите вікно порогів фарбування. */
+    var paletteOpen by remember { mutableStateOf(false) }
 
     val appState by cellsViewModel.uiState.collectAsState()
     val cellData = appState.cells
@@ -157,31 +190,30 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
             test = appState.cellTest,
             onToggle = cellsViewModel::onLoadTestToggle,
             onClear = cellsViewModel::onLoadTestClear,
-            onMode = cellsViewModel::onColorModeChange,
         )
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        CanLog(
-            text = cellData.debugInfo.ifEmpty { appState.debugInfo.ifEmpty { "Логи порожні." } },
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             FilterChip(
                 selected = viewMode == CellsViewMode.GRID,
                 onClick = { viewMode = CellsViewMode.GRID },
-                label = { Text("Сітка (8x12)") },
+                label = { Text("Сітка") },
                 modifier = Modifier.weight(1f),
             )
             FilterChip(
                 selected = viewMode == CellsViewMode.BLOCKS,
                 onClick = { viewMode = CellsViewMode.BLOCKS },
-                label = { Text("По блоках ВВБ") },
+                label = { Text("Блоки ВВБ") },
+                modifier = Modifier.weight(1f),
+            )
+            FilterChip(
+                selected = viewMode == CellsViewMode.SIX,
+                onClick = { viewMode = CellsViewMode.SIX },
+                label = { Text("Модулі 6s") },
                 modifier = Modifier.weight(1f),
             )
         }
@@ -202,7 +234,9 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
         HistoryCard(
             history = appState.cellHistory,
             shown = shownRecord,
+            open = historyOpen,
             canSave = cellData.cellVoltages.isNotEmpty(),
+            onToggleOpen = { historyOpen = !historyOpen },
             onSave = cellsViewModel::onSaveSnapshot,
             onShow = { shownAtMs = if (shownAtMs == it) 0L else it },
             onDelete = cellsViewModel::onDeleteRecord,
@@ -210,11 +244,50 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        when (viewMode) {
-            CellsViewMode.GRID -> CompactGridView(cellsViewModel, shownCells, manualCells, shownTest)
-            CellsViewMode.BLOCKS ->
-                BlocksView(cellsViewModel, shownCells, manualCells, shownTest)
+        // ЧИМ ФАРБУЄМО. Пороги — свої для кожного режиму значень, а відхилення
+        // рахується від медіани пакета: див. [CellReadings].
+        val valueMode = shownTest.valueMode
+        val palette = appState.settings.cellPalettes.of(valueMode)
+        val readings = CellReadings.allOf(valueMode, shownCells, manualCells, shownTest)
+        val median = CellReadings.medianOf(readings)
+
+        ColorLegend(
+            unit = appState.settings.cellPalettes.unitOf(valueMode),
+            palette = palette,
+            counts = CellReadings.countOf(readings, palette),
+            onOpenSettings = { paletteOpen = true },
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        val paint: (Int) -> Color? = { index ->
+            colorOf(CellReadings.levelOf(readings.getOrNull(index), median, palette))
         }
+
+        when (viewMode) {
+            CellsViewMode.GRID ->
+                CompactGridView(cellsViewModel, shownCells, manualCells, shownTest, paint)
+            CellsViewMode.BLOCKS ->
+                BlocksView(cellsViewModel, shownCells, manualCells, shownTest, paint)
+            CellsViewMode.SIX ->
+                SixModulesView(cellsViewModel, shownCells, manualCells, shownTest, paint)
+        }
+    }
+
+    if (paletteOpen) {
+        PaletteDialog(
+            title = titleOf(shownTest.valueMode),
+            unit = appState.settings.cellPalettes.unitOf(shownTest.valueMode),
+            palette = appState.settings.cellPalettes.of(shownTest.valueMode),
+            onDismiss = { paletteOpen = false },
+            onApply = { warn, bad ->
+                cellsViewModel.onPaletteChange(
+                    shownTest.valueMode,
+                    CellPalette(warnAt = warn, badAt = bad),
+                )
+                paletteOpen = false
+            },
+        )
     }
 }
 
@@ -266,7 +339,9 @@ private fun testOf(record: CellRecord, mode: CellTestState): CellTestState {
 private fun HistoryCard(
     history: CellHistory,
     shown: CellRecord?,
+    open: Boolean,
     canSave: Boolean,
+    onToggleOpen: () -> Unit,
     onSave: () -> Unit,
     onShow: (Long) -> Unit,
     onDelete: (Long) -> Unit,
@@ -278,17 +353,38 @@ private fun HistoryCard(
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(text = "Історія замірів", fontSize = 16.sp)
-
-        Button(onClick = onSave, enabled = canSave, modifier = Modifier.fillMaxWidth()) {
-            Text("Зберегти замір")
+        // ДВІ КНОПКИ В РЯД, А НЕ СПИСОК НА ПІВЕКРАНА. Заміри потрібні рідко, а
+        // комірки — щоразу; список над сіткою доводилося прокручувати кожного
+        // разу, коли треба було глянути на пакет.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Button(onClick = onSave, enabled = canSave, modifier = Modifier.weight(1f)) {
+                Text("Зберегти")
+            }
+            Button(onClick = onToggleOpen, modifier = Modifier.weight(1f)) {
+                Text(if (open) "Сховати" else "Показати (${history.records.size})")
+            }
         }
+
+        // Замір, який зараз на сітці, видно й зі згорнутою історією: інакше
+        // незрозуміло, чому числа не змінюються, коли авто на зв'язку.
+        if (shown != null) {
+            Text(
+                text = "Сітка показує замір від ${stampOf(shown.atMs)}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        if (!open) return@Column
 
         if (history.isEmpty) {
             Text(
                 text = "Порожньо. Закінчений тест під навантаженням лягає сюди сам, " +
-                    "а простий замір напруг — цією кнопкою. Порівнювати можна буде " +
-                    "з другого запису.",
+                    "а простий замір напруг — кнопкою «Зберегти». Порівнювати можна " +
+                    "буде з другого запису.",
                 style = MaterialTheme.typography.bodySmall,
             )
             return@Column
@@ -330,8 +426,7 @@ private fun HistoryCard(
 
         if (shown != null) {
             Text(
-                text = "Сітка показує замір від ${stampOf(shown.atMs)}. Натисніть на " +
-                    "нього ще раз, щоб повернутися до живих комірок.",
+                text = "Натисніть на замір ще раз, щоб повернутися до живих комірок.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -342,38 +437,6 @@ private fun HistoryCard(
 /** «06.09 08:46» — коротко, бо порівнюють заміри в межах місяців, а не років. */
 private fun stampOf(atMs: Long): String =
     SimpleDateFormat("dd.MM HH:mm", Locale.US).format(Date(atMs))
-
-@Composable
-private fun CanLog(text: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF1E1E1E), shape = RoundedCornerShape(8.dp))
-            .padding(10.dp),
-    ) {
-        Text(
-            text = "CAN / ELM Log:",
-            color = Color(0xFFAAAAAA),
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 100.dp)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            Text(
-                text = text,
-                color = Color(0xFF00FF66),
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
-                lineHeight = 15.sp,
-            )
-        }
-    }
-}
 
 @Composable
 private fun StatItem(label: String, value: Double) {
@@ -396,6 +459,11 @@ private fun CompactCellCell(
     modifier: Modifier,
     loadColor: Color? = null,
     test: CellTestState? = null,
+    /**
+     * Текст боком: у модулях 6s дванадцять клітинок в рядок, і число в них по
+     * горизонталі не влазить жодним читаним кеглем.
+     */
+    vertical: Boolean = false,
 ) {
     val canVoltage = cellData.cellVoltages.getOrElse(index) { 0.0 }
     val activeVoltage = if (canVoltage > 0.0) canVoltage else manualCells.voltageAt(index)
@@ -403,7 +471,10 @@ private fun CompactCellCell(
     var textValue by remember(activeVoltage) {
         mutableStateOf(if (activeVoltage > 0.0) formatDecimal(activeVoltage, 2) else "")
     }
-    val reading = if (test == null || test.valueMode == CellValueMode.Entry) null else cellTextOf(index, test)
+    // ПОРОЖНЄ ЧИСЛО — ЦЕ НЕ ЧИСЛО. Коли в обраному режимі для цієї комірки нічого
+    // немає, показуємо напругу в полі введення, а не порожню клітинку: збережений
+    // простий замір (у ньому є напруги, але немає тесту) показував саме порожні.
+    val reading = test?.let { cellTextOf(index, it).takeIf { text -> text.isNotEmpty() } }
 
     Box(
         modifier = modifier
@@ -426,13 +497,21 @@ private fun CompactCellCell(
         if (reading != null) {
             // Готове число з тесту: правити його руками немає сенсу, тож і поля
             // введення тут немає — просто текст.
+            //
+            // Повернутий текст НЕ обмежується шириною клітинки: поворот не міняє
+            // розмір, який лягає в розкладку, тож обмеження зробило б число
+            // обрізаним ще до повороту. Місце йому дає висота клітинки.
             Text(
                 text = reading,
                 fontSize = CELL_VALUE_SIZE,
                 textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 1.dp),
+                maxLines = 1,
+                softWrap = false,
+                modifier = if (vertical) {
+                    Modifier.rotate(-90f)
+                } else {
+                    Modifier.fillMaxWidth().padding(horizontal = 1.dp)
+                },
             )
         } else {
             BasicTextField(
@@ -466,6 +545,7 @@ private fun CompactGridView(
     cellData: CellData,
     manualCells: ManualCells,
     test: CellTestState,
+    paint: (Int) -> Color?,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(GRID_COLUMNS),
@@ -482,7 +562,7 @@ private fun CompactGridView(
                 cellData = cellData,
                 manualCells = manualCells,
                 modifier = Modifier.fillMaxWidth().height(GRID_CELL_HEIGHT),
-                loadColor = loadColorOf(index, test),
+                loadColor = paint(index),
                 test = test,
             )
         }
@@ -495,6 +575,7 @@ private fun BlocksView(
     cellData: CellData,
     manualCells: ManualCells,
     test: CellTestState,
+    paint: (Int) -> Color?,
 ) {
     val spacing = 1.dp
 
@@ -517,11 +598,11 @@ private fun BlocksView(
                                     cellData = cellData,
                                     manualCells = manualCells,
                                     modifier = Modifier.width(cellWidth).height(BLOCK_CELL_HEIGHT),
-                                    // Колір і значення тесту тут такі самі, як у
-                                    // сітці. Без них друга вкладка показувала лише
-                                    // порожні клітинки — рівно там, куди дивляться,
-                                    // коли шукають, який бік пакета просів.
-                                    loadColor = loadColorOf(index, test),
+                                    // Колір і значення тут такі самі, як у сітці.
+                                    // Без них друга вкладка показувала лише порожні
+                                    // клітинки — рівно там, куди дивляться, коли
+                                    // шукають, який бік пакета просів.
+                                    loadColor = paint(index),
                                     test = test,
                                 )
                             }
@@ -555,7 +636,6 @@ private fun LoadTestCard(
     test: CellTestState,
     onToggle: () -> Unit,
     onClear: () -> Unit,
-    onMode: (CellColorMode) -> Unit,
 ) {
     val result = test.result
 
@@ -627,38 +707,180 @@ private fun LoadTestCard(
             style = MaterialTheme.typography.bodyMedium,
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = test.colorMode == CellColorMode.Resistance,
-                onClick = { onMode(CellColorMode.Resistance) },
-                label = { Text("Фарбувати за опором") },
-            )
-            FilterChip(
-                selected = test.colorMode == CellColorMode.Minimum,
-                onClick = { onMode(CellColorMode.Minimum) },
-                label = { Text("за мінімумом") },
-            )
-        }
     }
 }
 
 /**
- * Колір комірки за результатом тесту, або null, коли фарбувати нема за чим.
- *
- * Фарбуємо за ОПОРОМ, а не за вольтами. У спокої напруга слабкої комірки нормальна,
- * і розфарбувати за нею означало б показати різнобій там, де його немає, і не
- * показати там, де він є.
+ * Колір за градацією. Норма не фарбується взагалі: заливка на всіх дев'яноста
+ * шести клітинках не виділяє нічого, а лише робить числа гіршими для читання.
  */
-private fun loadColorOf(index: Int, test: CellTestState): Color? {
-    val verdict = test.result.cells.getOrNull(index) ?: return null
-    val health = when (test.colorMode) {
-        CellColorMode.Resistance -> verdict.health
-        CellColorMode.Minimum -> verdict.minHealth
+private fun colorOf(level: CellLevel): Color? = when (level) {
+    CellLevel.Bad -> Color(0xFFFF6347)
+    CellLevel.Warn -> Color(0xFFFFC43D)
+    CellLevel.Normal -> null
+}
+
+/** Назва режиму значень у вікні порогів — та сама, що на чипах над сіткою. */
+private fun titleOf(mode: CellValueMode): String = when (mode) {
+    CellValueMode.Entry -> "Ввід"
+    CellValueMode.Rest -> "ХХ"
+    CellValueMode.UnderLoad -> "Під навантаженням"
+    CellValueMode.Deviation -> "Відхилення"
+    CellValueMode.Resistance -> "Опір"
+}
+
+/**
+ * Рядок під чипами: чим саме зараз пофарбовано і скільки комірок вибилося.
+ *
+ * Без нього заливка — загадка: жовтий і червоний нічого не означають, поки не
+ * сказано, від чого відлік і з якої різниці починається колір.
+ */
+@Composable
+private fun ColorLegend(
+    unit: String,
+    palette: CellPalette,
+    counts: Map<CellLevel, Int>,
+    onOpenSettings: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Мілівольти читаються цілими, мілооми — ні: слабка комірка вибивається
+        // на десяті частки, і «0» замість «0.25» означало б інше.
+        val decimals = if (unit == "мОм") 2 else 0
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Колір — відхилення від медіани пакета: " +
+                    "жовтий від ${formatDecimal(palette.low, decimals)} $unit, " +
+                    "червоний від ${formatDecimal(palette.high, decimals)} $unit.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            val warn = counts[CellLevel.Warn] ?: 0
+            val bad = counts[CellLevel.Bad] ?: 0
+            Text(
+                text = if (warn + bad == 0) {
+                    "За порогами не вибилася жодна комірка."
+                } else {
+                    "Вибилося: жовтих $warn, червоних $bad."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = onOpenSettings) { Text("Пороги") }
     }
-    return when (health) {
-        CellHealth.Critical -> Color(0xFFFF6347)
-        CellHealth.Weak -> Color(0xFFFFC43D)
-        else -> null
+}
+
+/**
+ * Вікно порогів для ОДНОГО режиму значень.
+ *
+ * Один режим за раз, а не всі п'ять списком: пороги в них живуть у різних
+ * порядках величин, і поставлені поруч вони читалися б як помилка. Правиться той,
+ * що зараз на екрані, — і результат видно одразу, не закриваючи вікна двічі.
+ */
+@Composable
+private fun PaletteDialog(
+    title: String,
+    unit: String,
+    palette: CellPalette,
+    onDismiss: () -> Unit,
+    onApply: (Double, Double) -> Unit,
+) {
+    val decimals = if (unit == "мОм") 2 else 0
+    var warn by remember(palette) { mutableStateOf(formatDecimal(palette.warnAt, decimals)) }
+    var bad by remember(palette) { mutableStateOf(formatDecimal(palette.badAt, decimals)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Пороги кольору · $title") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Від якого відхилення від медіани пакета фарбувати, $unit. " +
+                        "У спокої комірки розходяться на одиниці мілівольт, під " +
+                        "струмом — на десятки, тож у кожного режиму пороги свої.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = warn,
+                    onValueChange = { warn = it },
+                    label = { Text("Жовтий від, $unit") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = bad,
+                    onValueChange = { bad = it },
+                    label = { Text("Червоний від, $unit") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    // Нерозібране число не міняє нічого: порожній порог пофарбував
+                    // би весь пакет, а це гірше, ніж не зберегти правку.
+                    val warnValue = parseDecimalInput(warn) ?: palette.warnAt
+                    val badValue = parseDecimalInput(bad) ?: palette.badAt
+                    onApply(warnValue, badValue)
+                },
+            ) { Text("Зберегти") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Скасувати") } },
+    )
+}
+
+/**
+ * МОДУЛІ 6s: як батарея стоїть під підлогою насправді.
+ *
+ * Шістнадцять модулів по шість комірок, двома рядами по вісім; правий ряд іде
+ * знизу вгору — див. [CellLayout.sixCellRows]. Клітинки тут вузькі, бо їх у рядок
+ * дванадцять, і саме тому високі: число в них написане боком.
+ */
+@Composable
+private fun SixModulesView(
+    cellsViewModel: CellsViewModel,
+    cellData: CellData,
+    manualCells: ManualCells,
+    test: CellTestState,
+    paint: (Int) -> Color?,
+) {
+    val spacing = 1.dp
+    val rows = CellLayout.sixCellRows()
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        // Дві колонки по шість комірок плюс проміжок між колонками.
+        val columns = CellLayout.SIX * 2
+        val cellWidth = (maxWidth - spacing * (columns + 1)) / columns
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            rows.forEach { pair ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    pair.forEach { module ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                            module.forEach { index ->
+                                CompactCellCell(
+                                    index = index,
+                                    cellsViewModel = cellsViewModel,
+                                    cellData = cellData,
+                                    manualCells = manualCells,
+                                    modifier = Modifier
+                                        .width(cellWidth)
+                                        .height(SIX_CELL_HEIGHT),
+                                    loadColor = paint(index),
+                                    test = test,
+                                    vertical = true,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

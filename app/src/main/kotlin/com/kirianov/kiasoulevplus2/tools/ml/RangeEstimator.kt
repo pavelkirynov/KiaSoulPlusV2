@@ -38,27 +38,13 @@ object RangeEstimator {
         preciseSocPercent: Double,
         recent: DriveConditions,
         basis: PredictionBasis = PredictionBasis(),
-        /**
-         * Енергія, що лишилася, за ВИМІРЯНОЮ кривою ємності, кВт·год.
-         *
-         * Коли вона є, вона й береться: крива знає, як ємність РОЗПОДІЛЕНА по
-         * шкалі, а шкала цього авто різко нерівна — відсоток угорі коштує
-         * близько кілометра, у кінці від п'яти до десяти. Сама повна ємність у
-         * криву приходить окремо: аксіомою з відомого пакета, а далі виміром із
-         * зарядки з низьких відсотків.
-         */
-        curveEnergyKwh: Double? = null,
-        /**
-         * Чи зміряна повна ємність зарядкою з низьких відсотків, чи вона поки
-         * аксіома. Крива дає розподіл ємності по шкалі навіть на аксіомі, тож
-         * «взяли з кривої» і «зміряли» — різні речі, і плутати їх не можна.
-         */
-        curveTotalMeasured: Boolean = false,
     ): MlPrediction? {
         if (preciseSocPercent < 0.0) return null
 
-        val measuredEnergy = curveEnergyKwh?.takeIf { it.isFinite() && it > 0.0 }
-        val energyKwh = measuredEnergy ?: capacity.energyRemainingKwh(preciseSocPercent)
+        // Залишок бере МОДЕЛЬ — вона знає і повну ємність, і як та розподілена
+        // по шкалі. Крива ємності сюди більше не підставляється: чому саме, і
+        // якими числами це доведено, написано в MlBlock над цим викликом.
+        val energyKwh = capacity.energyRemainingKwh(preciseSocPercent)
         if (energyKwh <= 0.0) return null
 
         val whPerKm = consumption.predictWhPerKm(recent)
@@ -77,7 +63,9 @@ object RangeEstimator {
             rangeToKm = bounds.second,
             realPercent = capacity.realPercent(preciseSocPercent),
             usableEnergyRemainingKwh = energyKwh,
-            capacityMeasured = measuredEnergy != null && curveTotalMeasured,
+            // Чи ємність зміряна, а не взята з паспорта перепаковки. Це про
+            // модель, і тільки про неї: іншого джерела в прогнозі більше немає.
+            capacityMeasured = capacity.capacityMeasured,
             whPerKm = whPerKm,
             measuredBand = measured != null,
             scenarios = SCENARIO_SPEEDS_KMH.map { speed ->

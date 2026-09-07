@@ -7,6 +7,9 @@
 package com.kirianov.kiasoulevplus2.tools.settings
 
 import com.kirianov.kiasoulevplus2.Data.Settings
+import com.kirianov.kiasoulevplus2.Data.CellPalette
+import com.kirianov.kiasoulevplus2.Data.CellPalettes
+import com.kirianov.kiasoulevplus2.Data.CellValueMode
 import com.kirianov.kiasoulevplus2.tools.json.MiniJson
 import java.io.File
 import java.io.IOException
@@ -43,6 +46,7 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                         journal = values["journal"] as? Boolean ?: defaults.journal,
                         wakeOnDeviceAddress = values["wakeOnDevice"] as? String
                             ?: defaults.wakeOnDeviceAddress,
+                        cellPalettes = palettesOf(values, defaults.cellPalettes),
                     )
                 }
             }
@@ -58,17 +62,44 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
             directory.mkdirs()
             file.writeText(
                 MiniJson.encode(
-                    linkedMapOf(
+                    linkedMapOf<String, Any?>(
                         "autoConnect" to settings.autoConnect,
                         "journal" to settings.journal,
                         "wakeOnDevice" to settings.wakeOnDeviceAddress,
-                    ),
+                    ).also { fields ->
+                        // Пороги пишуться плоскими ключами, а не вкладеним
+                        // об'єктом: MiniJson навмисно вміє лише плоскі карти, і
+                        // заводити для п'яти пар чисел справжній парсер JSON
+                        // означало б платити бібліотекою за один рядок файлу.
+                        CellValueMode.entries.forEach { mode ->
+                            val palette = settings.cellPalettes.of(mode)
+                            fields[keyOf(mode) + "Warn"] = palette.warnAt
+                            fields[keyOf(mode) + "Bad"] = palette.badAt
+                        }
+                    },
                 ),
             )
         } catch (_: IOException) {
             // Втратити налаштування неприємно, але не варто падіння застосунку.
         }
     }
+
+    /**
+     * Пороги з плоских ключів. Відсутній ключ означає «цього ще не налаштовували»
+     * — тоді береться типове значення, а не нуль: нуль пофарбував би весь пакет.
+     */
+    private fun palettesOf(values: Map<String, Any?>, defaults: CellPalettes): CellPalettes {
+        var palettes = defaults
+        CellValueMode.entries.forEach { mode ->
+            val fallback = defaults.of(mode)
+            val warn = values[keyOf(mode) + "Warn"] as? Double ?: fallback.warnAt
+            val bad = values[keyOf(mode) + "Bad"] as? Double ?: fallback.badAt
+            palettes = palettes.with(mode, CellPalette(warnAt = warn, badAt = bad))
+        }
+        return palettes
+    }
+
+    private fun keyOf(mode: CellValueMode): String = "cell" + mode.name
 
     private companion object {
         const val FILE_NAME = "settings.json"

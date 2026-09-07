@@ -58,43 +58,16 @@ class RangeEstimatorTest {
     }
 
     /**
-     * Крива задає залишок енергії, бо знає розподіл ємності по шкалі. Шкала цього
-     * авто різко нерівна, і «88 % шкали» не означає «88 % енергії».
+     * ЗАЛИШОК БЕРЕ МОДЕЛЬ, І ТІЛЬКИ ВОНА.
+     *
+     * Крива ємності теж знає розподіл по шкалі й теж підставлялася сюди — доки
+     * замір настінною станцією не показав, котра з двох права. Зарядка від 0.2 %
+     * до 98.3 % узяла з розетки 50.81 кВт·год, тобто в комірки прийшло 43-45;
+     * модель у той момент казала 40.0, крива за струмом — 29.6. На екрані це
+     * виглядало як 176 км там, де та сама машина щойно проїхала 271.
      */
     @Test
-    fun `the curve decides the remaining energy`() {
-        val car = VirtualCar()
-        val (consumption, capacity, quality) = trainedOn(car, capacityKwh = 51.0)
-
-        fun predictWith(curveEnergyKwh: Double?, totalMeasured: Boolean = true) = RangeEstimator.predict(
-            consumption = consumption,
-            capacity = capacity,
-            quality = quality,
-            preciseSocPercent = 80.0,
-            recent = DriveConditions.steady(60.0),
-            curveEnergyKwh = curveEnergyKwh,
-            curveTotalMeasured = totalMeasured,
-        )
-
-        val assumed = predictWith(null)!!
-        val measured = predictWith(23.0)!!
-
-        assertEquals(23.0, measured.usableEnergyRemainingKwh, 0.001)
-        assertTrue("вимір не позначено", measured.capacityMeasured)
-        assertFalse("припущення позначено виміром", assumed.capacityMeasured)
-        // Крива на аксіомі дає число, але виміром воно не називається.
-        assertFalse(predictWith(23.0, totalMeasured = false)!!.capacityMeasured)
-        assertTrue(
-            "менша ємність мусить дати менший запас: ${assumed.rangeKm} проти ${measured.rangeKm}",
-            measured.rangeKm < assumed.rangeKm,
-        )
-        // Сценарії теж мусять їхати від виміряної енергії, а не від припущеної.
-        assertTrue(measured.scenarios.all { it.rangeKm < assumed.rangeKm })
-    }
-
-    /** Порожній вимір нічого не ламає: береться припущення, як і до нього. */
-    @Test
-    fun `a curve with nothing measured falls back to the model`() {
+    fun `the remaining energy comes from the model`() {
         val car = VirtualCar()
         val (consumption, capacity, quality) = trainedOn(car, capacityKwh = 51.0)
 
@@ -104,11 +77,33 @@ class RangeEstimatorTest {
             quality = quality,
             preciseSocPercent = 80.0,
             recent = DriveConditions.steady(60.0),
-            curveEnergyKwh = 0.0,
         )!!
 
-        assertFalse(prediction.capacityMeasured)
-        assertEquals(capacity.energyRemainingKwh(80.0), prediction.usableEnergyRemainingKwh, 0.001)
+        assertEquals(
+            capacity.energyRemainingKwh(80.0),
+            prediction.usableEnergyRemainingKwh,
+            0.001,
+        )
+        // Модель уже вчилася на цьому авто, тож ємність саме зміряна.
+        assertTrue("вивчена ємність мусить називатися виміром", prediction.capacityMeasured)
+    }
+
+    /** Поки модель ще нічого не бачила, ємність — не вимір, і так і позначено. */
+    @Test
+    fun `an untrained model does not call its capacity a measurement`() {
+        val capacity = CapacityModel(nominalCapacityKwh = 51.0)
+        val car = VirtualCar()
+        val (consumption, _, quality) = trainedOn(car, capacityKwh = 51.0)
+
+        val prediction = RangeEstimator.predict(
+            consumption = consumption,
+            capacity = capacity,
+            quality = quality,
+            preciseSocPercent = 80.0,
+            recent = DriveConditions.steady(60.0),
+        )
+
+        assertFalse(prediction?.capacityMeasured ?: true)
     }
 
     /** Швидше їхати — менше проїхати. Сценарії мають бути впорядковані. */

@@ -8,7 +8,8 @@
 package com.kirianov.kiasoulevplus2.Interface.screens.cells
 
 import androidx.lifecycle.ViewModel
-import com.kirianov.kiasoulevplus2.Data.CellColorMode
+import com.kirianov.kiasoulevplus2.Data.CellPalette
+import com.kirianov.kiasoulevplus2.Data.CellPalettes
 import com.kirianov.kiasoulevplus2.Data.CellTestRequest
 import com.kirianov.kiasoulevplus2.Data.CellValueMode
 import com.kirianov.kiasoulevplus2.Data.GeneralData
@@ -56,9 +57,11 @@ class CellsViewModel : ViewModel() {
 
     fun onLoadTestClear() = GeneralData.requestCellTest(CellTestRequest.Clear)
 
-    fun onColorModeChange(mode: CellColorMode) = GeneralData.setCellColorMode(mode)
-
     fun onValueModeChange(mode: CellValueMode) = GeneralData.setCellValueMode(mode)
+
+    /** Пороги фарбування для одного режиму значень: див. [CellPalettes]. */
+    fun onPaletteChange(mode: CellValueMode, palette: CellPalette) =
+        GeneralData.setCellPalette(mode, palette)
 
     /** Зберегти те, що зараз на екрані, окремим заміром в історії авто. */
     fun onSaveSnapshot() = GeneralData.requestCellSnapshot()
