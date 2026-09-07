@@ -5,7 +5,7 @@
 // 6s, — і кнопку зчитування. Значення, зчитані з авто, мають пріоритет; вручну
 // введені зберігаються й показуються, доки з машини нічого не прийшло.
 //
-// ФАРБУЄ ВІДХИЛЕННЯ ВІД МЕДІАНИ ПАКЕТА, а не саме значення, і в кожному режимі
+// ФАРБУЄ ВІДСТАВАННЯ ВІД НАЙКРАЩОЇ КОМІРКИ, а не саме значення, і в кожному режимі
 // своїми порогами: у спокої комірки розходяться на одиниці мілівольт, під струмом
 // на десятки. Досі колір брав лише вердикт тесту під навантаженням, і режими «ХХ»,
 // «Відхилення» та «Ввід» стояли безбарвними — саме ті, в яких дивляться найчастіше.
@@ -244,24 +244,24 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // ЧИМ ФАРБУЄМО. Пороги — свої для кожного режиму значень, а відхилення
-        // рахується від медіани пакета: див. [CellReadings].
+        // ЧИМ ФАРБУЄМО. Пороги — свої для кожного режиму значень, а відставання
+        // рахується від найкращої комірки в пакеті: див. [CellReadings].
         val valueMode = shownTest.valueMode
         val palette = appState.settings.cellPalettes.of(valueMode)
         val readings = CellReadings.allOf(valueMode, shownCells, manualCells, shownTest)
-        val median = CellReadings.medianOf(readings)
+        val reference = CellReadings.referenceOf(readings, valueMode)
 
         ColorLegend(
             unit = appState.settings.cellPalettes.unitOf(valueMode),
             palette = palette,
-            counts = CellReadings.countOf(readings, palette),
+            counts = CellReadings.countOf(readings, valueMode, palette),
             onOpenSettings = { paletteOpen = true },
         )
 
         Spacer(modifier = Modifier.height(6.dp))
 
         val paint: (Int) -> Color? = { index ->
-            colorOf(CellReadings.levelOf(readings.getOrNull(index), median, palette))
+            colorOf(CellReadings.levelOf(readings.getOrNull(index), reference, palette))
         }
 
         when (viewMode) {
@@ -280,11 +280,8 @@ fun CellsScreen(cellsViewModel: CellsViewModel) {
             unit = appState.settings.cellPalettes.unitOf(shownTest.valueMode),
             palette = appState.settings.cellPalettes.of(shownTest.valueMode),
             onDismiss = { paletteOpen = false },
-            onApply = { warn, bad ->
-                cellsViewModel.onPaletteChange(
-                    shownTest.valueMode,
-                    CellPalette(warnAt = warn, badAt = bad),
-                )
+            onApply = { palette ->
+                cellsViewModel.onPaletteChange(shownTest.valueMode, palette)
                 paletteOpen = false
             },
         )
@@ -716,6 +713,7 @@ private fun LoadTestCard(
  */
 private fun colorOf(level: CellLevel): Color? = when (level) {
     CellLevel.Bad -> Color(0xFFFF6347)
+    CellLevel.Alert -> Color(0xFFFF9F1C)
     CellLevel.Warn -> Color(0xFFFFC43D)
     CellLevel.Normal -> null
 }
@@ -750,20 +748,23 @@ private fun ColorLegend(
         // Мілівольти читаються цілими, мілооми — ні: слабка комірка вибивається
         // на десяті частки, і «0» замість «0.25» означало б інше.
         val decimals = if (unit == "мОм") 2 else 0
+        val steps = palette.steps
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Колір — відхилення від медіани пакета: " +
-                    "жовтий від ${formatDecimal(palette.low, decimals)} $unit, " +
-                    "червоний від ${formatDecimal(palette.high, decimals)} $unit.",
+                text = "Колір — відставання від найкращої комірки: жовтий від " +
+                    "${formatDecimal(steps[0], decimals)}, оранжевий від " +
+                    "${formatDecimal(steps[1], decimals)}, червоний від " +
+                    "${formatDecimal(steps[2], decimals)} $unit.",
                 style = MaterialTheme.typography.bodySmall,
             )
             val warn = counts[CellLevel.Warn] ?: 0
+            val alert = counts[CellLevel.Alert] ?: 0
             val bad = counts[CellLevel.Bad] ?: 0
             Text(
-                text = if (warn + bad == 0) {
+                text = if (warn + alert + bad == 0) {
                     "За порогами не вибилася жодна комірка."
                 } else {
-                    "Вибилося: жовтих $warn, червоних $bad."
+                    "Вибилося: жовтих $warn, оранжевих $alert, червоних $bad."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -786,10 +787,11 @@ private fun PaletteDialog(
     unit: String,
     palette: CellPalette,
     onDismiss: () -> Unit,
-    onApply: (Double, Double) -> Unit,
+    onApply: (CellPalette) -> Unit,
 ) {
     val decimals = if (unit == "мОм") 2 else 0
     var warn by remember(palette) { mutableStateOf(formatDecimal(palette.warnAt, decimals)) }
+    var alert by remember(palette) { mutableStateOf(formatDecimal(palette.alertAt, decimals)) }
     var bad by remember(palette) { mutableStateOf(formatDecimal(palette.badAt, decimals)) }
 
     AlertDialog(
@@ -798,15 +800,24 @@ private fun PaletteDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Від якого відхилення від медіани пакета фарбувати, $unit. " +
-                        "У спокої комірки розходяться на одиниці мілівольт, під " +
-                        "струмом — на десятки, тож у кожного режиму пороги свої.",
+                    text = "Від якого відставання від НАЙКРАЩОЇ комірки фарбувати, " +
+                        "$unit. Найкращі в пакеті здорові за визначенням — вони й " +
+                        "показують, на що ця хімія здатна на цьому заряді. У спокої " +
+                        "комірки розходяться на одиниці мілівольт, під струмом — на " +
+                        "десятки, тож у кожного режиму пороги свої.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
                     value = warn,
                     onValueChange = { warn = it },
                     label = { Text("Жовтий від, $unit") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = alert,
+                    onValueChange = { alert = it },
+                    label = { Text("Оранжевий від, $unit") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                 )
@@ -824,9 +835,13 @@ private fun PaletteDialog(
                 onClick = {
                     // Нерозібране число не міняє нічого: порожній порог пофарбував
                     // би весь пакет, а це гірше, ніж не зберегти правку.
-                    val warnValue = parseDecimalInput(warn) ?: palette.warnAt
-                    val badValue = parseDecimalInput(bad) ?: palette.badAt
-                    onApply(warnValue, badValue)
+                    onApply(
+                        CellPalette(
+                            warnAt = parseDecimalInput(warn) ?: palette.warnAt,
+                            alertAt = parseDecimalInput(alert) ?: palette.alertAt,
+                            badAt = parseDecimalInput(bad) ?: palette.badAt,
+                        ),
+                    )
                 },
             ) { Text("Зберегти") }
         },

@@ -7,8 +7,8 @@ import org.junit.Test
 /**
  * Досі колір у сітці брався лише з вердикту тесту під навантаженням, і режими
  * «ХХ», «Відхилення» та «Ввід» стояли безбарвними — саме ті, в яких найчастіше й
- * дивляться. Тут перевіряється те, що їх фарбує: число режиму й його відхилення
- * від медіани пакета.
+ * дивляться. Тут перевіряється те, що їх фарбує: число режиму й його відставання
+ * від НАЙКРАЩОЇ комірки пакета.
  */
 class CellReadingsTest {
 
@@ -24,41 +24,60 @@ class CellReadingsTest {
     private fun testWith(cells: List<CellVerdict>) =
         CellTestState(result = CellTestResult(cells = cells))
 
-    /** Медіана непарної й парної кількості: половину пакета можна не міряти. */
+    /**
+     * ЕТАЛОН — НАЙВИЩА НАПРУГА В ПАКЕТІ, а не середня й не медіана.
+     *
+     * Найкращі комірки здорові за визначенням: вони показують, на що ця хімія
+     * здатна на цьому заряді. Медіана натомість повзе за пакетом — коли просіла
+     * третина комірок, вона просідає з ними, і провал перестає виглядати провалом.
+     */
     @Test
-    fun `the median ignores what was not measured`() {
-        assertEquals(3.0, CellReadings.medianOf(listOf(1.0, null, 3.0, null, 5.0))!!, 0.001)
-        assertEquals(3.5, CellReadings.medianOf(listOf(1.0, 3.0, 4.0, 6.0))!!, 0.001)
-        assertNull(CellReadings.medianOf(listOf(null, null)))
+    fun `the reference is the best cell in the pack`() {
+        val volts = listOf(3700.0, null, 3680.0, 3650.0)
+
+        assertEquals(
+            3700.0,
+            CellReadings.referenceOf(volts, CellValueMode.Rest)!!,
+            0.001,
+        )
+        assertNull(CellReadings.referenceOf(listOf(null, null), CellValueMode.Rest))
     }
 
     /**
-     * ФАРБУЄ ВІДХИЛЕННЯ, А НЕ САМЕ ЧИСЛО. На повному заряді всі комірки біля
+     * ДЛЯ ОПОРУ НАЙКРАЩИЙ — НАЙНИЖЧИЙ. Відлік «від максимуму» тут означав би, що
+     * весь пакет відстає від найгіршої комірки, тобто фарбувати треба здорові.
+     */
+    @Test
+    fun `for resistance the best cell is the lowest`() {
+        val ohms = listOf(0.42, 0.45, 0.90)
+
+        assertEquals(
+            0.42,
+            CellReadings.referenceOf(ohms, CellValueMode.Resistance)!!,
+            0.001,
+        )
+    }
+
+    /**
+     * ФАРБУЄ ВІДСТАВАННЯ, А НЕ САМЕ ЧИСЛО. На повному заряді всі комірки біля
      * 4.1 В, на порожньому — біля 3.3, і однакова заливка на обох означала б
      * різні речі.
      */
     @Test
-    fun `the level comes from the deviation, not the value`() {
-        val palette = CellPalette(warnAt = 15.0, badAt = 30.0)
+    fun `the level comes from the gap to the best cell`() {
+        val palette = CellPalette(warnAt = 15.0, alertAt = 30.0, badAt = 50.0)
 
         assertEquals(CellLevel.Normal, CellReadings.levelOf(4100.0, 4100.0, palette))
         assertEquals(CellLevel.Normal, CellReadings.levelOf(3300.0, 3300.0, palette))
         assertEquals(CellLevel.Warn, CellReadings.levelOf(3280.0, 3300.0, palette))
-        assertEquals(CellLevel.Bad, CellReadings.levelOf(3260.0, 3300.0, palette))
-    }
-
-    /** Комірка, що вибилася ВГОРУ, — теж розбаланс, і теж має фарбуватися. */
-    @Test
-    fun `a cell above the pack is flagged too`() {
-        val palette = CellPalette(warnAt = 15.0, badAt = 30.0)
-
-        assertEquals(CellLevel.Bad, CellReadings.levelOf(3340.0, 3300.0, palette))
+        assertEquals(CellLevel.Alert, CellReadings.levelOf(3265.0, 3300.0, palette))
+        assertEquals(CellLevel.Bad, CellReadings.levelOf(3240.0, 3300.0, palette))
     }
 
     /** Порожня клітинка не фарбується: «не міряли» — не норма й не провал. */
     @Test
     fun `a missing value is not painted`() {
-        val palette = CellPalette(warnAt = 1.0, badAt = 2.0)
+        val palette = CellPalette(warnAt = 1.0, alertAt = 2.0, badAt = 3.0)
 
         assertEquals(CellLevel.Normal, CellReadings.levelOf(null, 3300.0, palette))
         assertEquals(CellLevel.Normal, CellReadings.levelOf(3300.0, null, palette))
@@ -113,12 +132,17 @@ class CellReadingsTest {
     /** Рядок під сіткою рахує, скільки комірок вибилося за кожен порог. */
     @Test
     fun `the counts add up to the whole pack`() {
-        // Медіана тут 3300: п'ять відомих чисел, і три з них однакові.
-        val values = listOf(3300.0, 3300.0, 3300.0, 3280.0, 3250.0, null)
-        val counts = CellReadings.countOf(values, CellPalette(warnAt = 15.0, badAt = 30.0))
+        // Еталон тут 3300 — найвища. Відставання: 0, 20, 35, 60 і «не міряли».
+        val values = listOf(3300.0, 3280.0, 3265.0, 3240.0, null)
+        val counts = CellReadings.countOf(
+            values,
+            CellValueMode.Rest,
+            CellPalette(warnAt = 15.0, alertAt = 30.0, badAt = 50.0),
+        )
 
-        assertEquals(1, counts[CellLevel.Bad])
         assertEquals(1, counts[CellLevel.Warn])
+        assertEquals(1, counts[CellLevel.Alert])
+        assertEquals(1, counts[CellLevel.Bad])
         assertEquals(values.size, counts.values.sum())
     }
 

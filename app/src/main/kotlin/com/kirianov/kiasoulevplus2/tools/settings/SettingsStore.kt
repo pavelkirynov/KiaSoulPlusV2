@@ -74,6 +74,7 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                         CellValueMode.entries.forEach { mode ->
                             val palette = settings.cellPalettes.of(mode)
                             fields[keyOf(mode) + "Warn"] = palette.warnAt
+                            fields[keyOf(mode) + "Alert"] = palette.alertAt
                             fields[keyOf(mode) + "Bad"] = palette.badAt
                         }
                     },
@@ -87,14 +88,20 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
     /**
      * Пороги з плоских ключів. Відсутній ключ означає «цього ще не налаштовували»
      * — тоді береться типове значення, а не нуль: нуль пофарбував би весь пакет.
+     * Так само читаються й файли з двома порогами замість трьох: середній просто
+     * візьметься типовим.
      */
     private fun palettesOf(values: Map<String, Any?>, defaults: CellPalettes): CellPalettes {
         var palettes = defaults
         CellValueMode.entries.forEach { mode ->
             val fallback = defaults.of(mode)
             val warn = values[keyOf(mode) + "Warn"] as? Double ?: fallback.warnAt
+            val alert = values[keyOf(mode) + "Alert"] as? Double ?: fallback.alertAt
             val bad = values[keyOf(mode) + "Bad"] as? Double ?: fallback.badAt
-            palettes = palettes.with(mode, CellPalette(warnAt = warn, badAt = bad))
+            palettes = palettes.with(
+                mode,
+                CellPalette(warnAt = warn, alertAt = alert, badAt = bad),
+            )
         }
         return palettes
     }

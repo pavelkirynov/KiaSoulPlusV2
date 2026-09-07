@@ -6,13 +6,16 @@
 // тесту — і в режимах «ХХ», «Відхилення» та «Ввід» сітка стояла безбарвною, хоча
 // саме в них найчастіше й дивляться.
 //
-// ВІДХИЛЕННЯ БЕРЕТЬСЯ ВІД МЕДІАНИ, А НЕ ВІД СЕРЕДНЬОГО. Кілька провалених комірок
-// тягнуть середнє за собою: на тлі просілого середнього вони перестають виглядати
-// провалом, а решта пакета натомість починає. Медіану вони не тягнуть.
+// ВІДЛІК ІДЕ ВІД НАЙКРАЩОЇ КОМІРКИ, А НЕ ВІД СЕРЕДНЬОЇ ЧИ МЕДІАНИ. Сітка
+// відповідає на питання «які комірки зіпсовані», і найкращі в пакеті здорові за
+// визначенням: вони показують, на що ця хімія здатна в цьому стані заряду.
+// Середнє й медіана натомість повзуть за пакетом — коли просіла третина комірок,
+// медіана просідає з ними, і провал перестає виглядати провалом.
 //
-// І ВІДХИЛЕННЯ БЕРЕТЬСЯ ЗА МОДУЛЕМ. Комірка, яка вибилася вгору, — така сама
-// ознака розбалансу, як і та, що просіла; яка з них зіпсована, каже не колір, а
-// саме число, і воно лишається на екрані.
+// ДЛЯ НАПРУГ НАЙКРАЩА — НАЙВИЩА, ДЛЯ ОПОРУ — НАЙНИЖЧИЙ. Це та сама думка, просто
+// опір вимірює зіпсованість прямо, а напруга — навпаки. Відлік «від максимуму» в
+// опорі означав би, що вся батарея відстає від найгіршої комірки, тобто фарбувати
+// треба здорові.
 //
 // Чистий об'єкт без стану: перевіряється тестами.
 // ====================================================================================
@@ -65,33 +68,40 @@ object CellReadings {
         test: CellTestState,
     ): List<Double?> = (0 until Pack.CELLS_IN_SERIES).map { valueOf(it, mode, cells, manual, test) }
 
-    /** Медіана відомих чисел; null — відомих немає. */
-    fun medianOf(values: List<Double?>): Double? {
-        val known = values.filterNotNull().filter { it.isFinite() }.sorted()
+    /**
+     * Найкраща комірка в пакеті — та, від якої рахується відставання решти.
+     *
+     * Для напруг це найвища, для опору — найнижчий: див. пояснення в шапці файлу.
+     * null — міряних комірок немає, і фарбувати нема від чого.
+     */
+    fun referenceOf(values: List<Double?>, mode: CellValueMode): Double? {
+        val known = values.filterNotNull().filter { it.isFinite() }
         if (known.isEmpty()) return null
-        val middle = known.size / 2
-        return if (known.size % 2 == 1) {
-            known[middle]
-        } else {
-            (known[middle - 1] + known[middle]) / 2.0
-        }
+        return if (mode == CellValueMode.Resistance) known.min() else known.max()
     }
 
     /**
-     * Наскільки комірка вибивається з пакета — і, отже, яким кольором її залити.
+     * Наскільки комірка відстає від найкращої — і, отже, яким кольором її залити.
+     *
+     * Модуль різниці, а не знак: від найкращої всі відхилення й так в один бік, а
+     * модуль заодно страхує від випадку, коли еталон узятий не з цього набору.
      *
      * Порожня клітинка не фарбується взагалі: «не міряли» мусить виглядати як
      * порожнє місце, а не як норма й не як провал.
      */
-    fun levelOf(value: Double?, median: Double?, palette: CellPalette): CellLevel {
-        if (value == null || median == null || !value.isFinite()) return CellLevel.Normal
-        return palette.levelOf(abs(value - median))
+    fun levelOf(value: Double?, reference: Double?, palette: CellPalette): CellLevel {
+        if (value == null || reference == null || !value.isFinite()) return CellLevel.Normal
+        return palette.levelOf(abs(value - reference))
     }
 
-    /** Скільки комірок вибилося за пороги: рядок під сіткою рахує саме це. */
-    fun countOf(values: List<Double?>, palette: CellPalette): Map<CellLevel, Int> {
-        val median = medianOf(values)
-        val levels = values.map { levelOf(it, median, palette) }
+    /** Скільки комірок вибилося за кожен порог: рядок під сіткою рахує саме це. */
+    fun countOf(
+        values: List<Double?>,
+        mode: CellValueMode,
+        palette: CellPalette,
+    ): Map<CellLevel, Int> {
+        val reference = referenceOf(values, mode)
+        val levels = values.map { levelOf(it, reference, palette) }
         return CellLevel.entries.associateWith { level -> levels.count { it == level } }
     }
 }

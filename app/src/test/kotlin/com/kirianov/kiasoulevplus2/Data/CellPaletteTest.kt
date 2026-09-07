@@ -1,38 +1,43 @@
 package com.kirianov.kiasoulevplus2.Data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Комірку фарбує не значення, а відхилення від решти пакета — і пороги в кожного
- * режиму свої, бо в спокої комірки розходяться на одиниці мілівольт, а під струмом
- * на десятки. Один порог на всі режими або пофарбував би все, або нічого.
+ * Комірку фарбує не значення, а відставання від найкращої в пакеті — і пороги в
+ * кожного режиму свої, бо в спокої комірки розходяться на одиниці мілівольт, а під
+ * струмом на десятки. Один порог на всі режими або пофарбував би все, або нічого.
  */
 class CellPaletteTest {
 
-    private val palette = CellPalette(warnAt = 15.0, badAt = 30.0)
+    private val palette = CellPalette(warnAt = 15.0, alertAt = 30.0, badAt = 50.0)
 
     @Test
-    fun `three bands, two thresholds`() {
+    fun `four bands, three thresholds`() {
         assertEquals(CellLevel.Normal, palette.levelOf(0.0))
         assertEquals(CellLevel.Normal, palette.levelOf(14.9))
         assertEquals(CellLevel.Warn, palette.levelOf(15.0))
         assertEquals(CellLevel.Warn, palette.levelOf(29.9))
-        assertEquals(CellLevel.Bad, palette.levelOf(30.0))
+        assertEquals(CellLevel.Alert, palette.levelOf(30.0))
+        assertEquals(CellLevel.Alert, palette.levelOf(49.9))
+        assertEquals(CellLevel.Bad, palette.levelOf(50.0))
         assertEquals(CellLevel.Bad, palette.levelOf(500.0))
     }
 
     /**
-     * Порядок порогів не гарантований: у полі введення можна набрати «погано» менше
-     * за «підозра». Плутати їх не можна — вийшло б, що весь пакет червоний.
+     * Порядок порогів не гарантований: у полях введення можна набрати «червоний»
+     * меншим за «жовтий». Плутати їх не можна — вийшло б, що весь пакет червоний.
      */
     @Test
-    fun `swapped thresholds still work`() {
-        val swapped = CellPalette(warnAt = 30.0, badAt = 15.0)
+    fun `thresholds in any order still work`() {
+        val muddled = CellPalette(warnAt = 50.0, alertAt = 15.0, badAt = 30.0)
 
-        assertEquals(CellLevel.Normal, swapped.levelOf(10.0))
-        assertEquals(CellLevel.Warn, swapped.levelOf(20.0))
-        assertEquals(CellLevel.Bad, swapped.levelOf(40.0))
+        assertEquals(listOf(15.0, 30.0, 50.0), muddled.steps)
+        assertEquals(CellLevel.Normal, muddled.levelOf(10.0))
+        assertEquals(CellLevel.Warn, muddled.levelOf(20.0))
+        assertEquals(CellLevel.Alert, muddled.levelOf(40.0))
+        assertEquals(CellLevel.Bad, muddled.levelOf(60.0))
     }
 
     /** Нечисло нічого не фарбує: «не міряли» — не те саме, що «погано». */
@@ -48,19 +53,20 @@ class CellPaletteTest {
 
         assertEquals(palettes.rest, palettes.of(CellValueMode.Rest))
         assertEquals(palettes.underLoad, palettes.of(CellValueMode.UnderLoad))
-        org.junit.Assert.assertTrue(
+        assertTrue(
             "під струмом просадка більша, порог мусить бути вищим",
-            palettes.underLoad.high > palettes.rest.high,
+            palettes.underLoad.badAt > palettes.rest.badAt,
         )
     }
 
-    /** Зміна порога одного режиму не чіпає решту. */
+    /** Зміна порогів одного режиму не чіпає решту. */
     @Test
     fun `changing one mode leaves the others alone`() {
         val palettes = CellPalettes()
-        val changed = palettes.with(CellValueMode.Rest, CellPalette(warnAt = 5.0, badAt = 9.0))
+        val mine = CellPalette(warnAt = 5.0, alertAt = 7.0, badAt = 9.0)
+        val changed = palettes.with(CellValueMode.Rest, mine)
 
-        assertEquals(CellPalette(warnAt = 5.0, badAt = 9.0), changed.of(CellValueMode.Rest))
+        assertEquals(mine, changed.of(CellValueMode.Rest))
         assertEquals(palettes.underLoad, changed.underLoad)
         assertEquals(palettes.resistance, changed.resistance)
     }

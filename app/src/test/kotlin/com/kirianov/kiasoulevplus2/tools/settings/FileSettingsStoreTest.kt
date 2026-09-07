@@ -53,14 +53,23 @@ class FileSettingsStoreTest {
     fun `cell colour thresholds survive a restart`() {
         val store = FileSettingsStore(directory())
         val palettes = CellPalettes()
-            .with(CellValueMode.Rest, CellPalette(warnAt = 7.0, badAt = 21.0))
-            .with(CellValueMode.UnderLoad, CellPalette(warnAt = 80.0, badAt = 150.0))
+            .with(CellValueMode.Rest, CellPalette(warnAt = 7.0, alertAt = 14.0, badAt = 21.0))
+            .with(
+                CellValueMode.UnderLoad,
+                CellPalette(warnAt = 80.0, alertAt = 110.0, badAt = 150.0),
+            )
 
         store.save(Settings(cellPalettes = palettes))
 
         val loaded = store.load()!!.cellPalettes
-        assertEquals(CellPalette(warnAt = 7.0, badAt = 21.0), loaded.of(CellValueMode.Rest))
-        assertEquals(CellPalette(warnAt = 80.0, badAt = 150.0), loaded.of(CellValueMode.UnderLoad))
+        assertEquals(
+            CellPalette(warnAt = 7.0, alertAt = 14.0, badAt = 21.0),
+            loaded.of(CellValueMode.Rest),
+        )
+        assertEquals(
+            CellPalette(warnAt = 80.0, alertAt = 110.0, badAt = 150.0),
+            loaded.of(CellValueMode.UnderLoad),
+        )
         // Незмінені режими лишаються типовими, а не нульовими.
         assertEquals(CellPalettes().resistance, loaded.resistance)
     }
