@@ -75,8 +75,13 @@ enum class CellLevel { Normal, Warn, Alert, Bad }
  * середньому 0.45.
  */
 data class CellPalettes(
-    val entry: CellPalette = CellPalette(warnAt = 15.0, alertAt = 30.0, badAt = 50.0),
-    val rest: CellPalette = CellPalette(warnAt = 15.0, alertAt = 30.0, badAt = 50.0),
+    // КРОК BMS — 20 мВ, І ЦЕ ЗАДАЄ НИЖНЮ МЕЖУ ПОРОГІВ. Напруги комірок приходять
+    // по шині цілими кроками (див. CellDecoder.VOLTS_PER_STEP), тож найменша
+    // різниця, яку взагалі можна побачити, — рівно 20 мВ, і означає вона майже
+    // нічого. Порог у 20 мВ фарбував усе, що на один крок нижче найкращої, тобто
+    // весь пакет одразу: перший же живий екран показав 95 жовтих із 96.
+    val entry: CellPalette = CellPalette(warnAt = 40.0, alertAt = 60.0, badAt = 80.0),
+    val rest: CellPalette = CellPalette(warnAt = 40.0, alertAt = 60.0, badAt = 80.0),
     val underLoad: CellPalette = CellPalette(warnAt = 60.0, alertAt = 120.0, badAt = 200.0),
     val deviation: CellPalette = CellPalette(warnAt = 30.0, alertAt = 60.0, badAt = 100.0),
     val resistance: CellPalette = CellPalette(warnAt = 0.1, alertAt = 0.2, badAt = 0.35),

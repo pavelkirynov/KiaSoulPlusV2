@@ -491,24 +491,35 @@ private fun CompactCellCell(
                 .align(Alignment.TopStart)
                 .padding(1.dp),
         )
-        if (reading != null) {
+        if (vertical) {
+            // У ВУЗЬКІЙ КЛІТИНЦІ ПОЛЯ ВВЕДЕННЯ НЕМАЄ, і це не пропуск.
+            //
+            // Поле розкладається по ширині — двадцять вісім точок, — і число в
+            // ньому обрізається до смужки незалежно від того, повернуте воно чи
+            // ні: поворот міняє те, як текст намальовано, а не те, скільки місця
+            // йому виміряли. Тому тут завжди текст, і завжди повернутий; правити
+            // напруги руками є де — на рівній сітці.
+            //
+            // Повернутий текст НЕ обмежується шириною клітинки: місце йому дає
+            // висота, а поворот відбувається вже після вимірювання.
+            Text(
+                text = reading ?: textValue,
+                fontSize = CELL_VALUE_SIZE,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.rotate(-90f),
+            )
+        } else if (reading != null) {
             // Готове число з тесту: правити його руками немає сенсу, тож і поля
             // введення тут немає — просто текст.
-            //
-            // Повернутий текст НЕ обмежується шириною клітинки: поворот не міняє
-            // розмір, який лягає в розкладку, тож обмеження зробило б число
-            // обрізаним ще до повороту. Місце йому дає висота клітинки.
             Text(
                 text = reading,
                 fontSize = CELL_VALUE_SIZE,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 softWrap = false,
-                modifier = if (vertical) {
-                    Modifier.rotate(-90f)
-                } else {
-                    Modifier.fillMaxWidth().padding(horizontal = 1.dp)
-                },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 1.dp),
             )
         } else {
             BasicTextField(
@@ -802,11 +813,21 @@ private fun PaletteDialog(
                 Text(
                     text = "Від якого відставання від НАЙКРАЩОЇ комірки фарбувати, " +
                         "$unit. Найкращі в пакеті здорові за визначенням — вони й " +
-                        "показують, на що ця хімія здатна на цьому заряді. У спокої " +
-                        "комірки розходяться на одиниці мілівольт, під струмом — на " +
-                        "десятки, тож у кожного режиму пороги свої.",
+                        "показують, на що ця хімія здатна на цьому заряді.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                if (unit == "мВ") {
+                    // Без цього рядка пороги нижче 40 мВ виглядають розумно, а
+                    // фарбують увесь пакет: різниці в один крок BMS не буває
+                    // менше, і майже нічого не означає.
+                    Text(
+                        text = "BMS віддає напруги кроками по 20 мВ, тож різниця в " +
+                            "один крок нічого не означає. Порог нижче 40 мВ " +
+                            "пофарбує всі комірки, крім найкращої.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(
                     value = warn,
                     onValueChange = { warn = it },
