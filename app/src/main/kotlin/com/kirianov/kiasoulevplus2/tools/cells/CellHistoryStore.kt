@@ -120,6 +120,7 @@ class FileCellHistoryStore(private val root: File) : CellHistoryStore, CarDataSt
             "excessMilliOhm" to record.excessMilliOhm,
             "sweeps" to record.sweeps.toDouble(),
             "currentSpreadA" to record.currentSpreadA,
+            "peakLoadKw" to record.peakLoadKw,
         ),
     )
 
@@ -139,6 +140,7 @@ class FileCellHistoryStore(private val root: File) : CellHistoryStore, CarDataSt
             excessMilliOhm = doubles(values["excessMilliOhm"]).orEmpty(),
             sweeps = (values["sweeps"] as? Double)?.toInt() ?: 0,
             currentSpreadA = values["currentSpreadA"] as? Double ?: 0.0,
+            peakLoadKw = values["peakLoadKw"] as? Double ?: 0.0,
         )
     }
 

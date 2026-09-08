@@ -98,10 +98,20 @@ object CellLoad {
         val currents = steady.map { it.currentA }
         val spread = if (currents.isEmpty()) 0.0 else (currents.max() - currents.min())
         val power = sweeps.map { it.powerKw }.average()
+        // Пік розряду, а не за модулем: під ним і знято найглибші просадки. Якщо
+        // за весь тест авто лише гальмувало, піку розряду немає — нуль тут чесний.
+        val peak = sweeps.maxOf { it.loadKw }.coerceAtLeast(0.0)
 
         val cellCount = sweeps.maxOf { it.voltages.size }
         if (cellCount == 0) {
-            return CellTestResult(sweeps.size, steady.size, spread, power, note = "Напруг не прочитано")
+            return CellTestResult(
+                sweeps = sweeps.size,
+                steadySweeps = steady.size,
+                currentSpreadA = spread,
+                averagePowerKw = power,
+                peakLoadKw = peak,
+                note = "Напруг не прочитано",
+            )
         }
 
         val basic = withMinimumHealth((0 until cellCount).map { index -> basicVerdict(index, sweeps) })
@@ -113,6 +123,7 @@ object CellLoad {
                 steadySweeps = steady.size,
                 currentSpreadA = spread,
                 averagePowerKw = power,
+                peakLoadKw = peak,
                 cells = basic,
                 resistanceKnown = false,
                 note = whyNoResistance(steady.size, spread),
@@ -124,6 +135,7 @@ object CellLoad {
             steadySweeps = steady.size,
             currentSpreadA = spread,
             averagePowerKw = power,
+            peakLoadKw = peak,
             cells = basic.map { verdict ->
                 val excess = excessOf(verdict.index, steady)
                 verdict.copy(excessMilliOhm = excess, health = healthOf(excess))

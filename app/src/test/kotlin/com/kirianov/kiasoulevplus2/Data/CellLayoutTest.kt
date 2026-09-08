@@ -41,7 +41,11 @@ class CellLayoutTest {
         )
     }
 
-    // --- Розкладка «блоки 6s» --------------------------------------------------
+    // --- Розкладка «модулі 6s» -------------------------------------------------
+
+    /** Номери на екрані, з одиниці: так їх і читає власник. */
+    private fun screen(): List<List<List<Int>>> =
+        CellLayout.sixCellRows().map { row -> row.map { module -> module.map { it + 1 } } }
 
     /** Шістнадцять модулів по шість, і кожна комірка рівно в одному з них. */
     @Test
@@ -58,43 +62,67 @@ class CellLayoutTest {
     }
 
     /**
-     * Ліва колонка згори вниз — це модулі 1-8 у порядку опитування.
+     * ЛІВА КОЛОНКА, ЯК ЇЇ НАЗВАВ ВЛАСНИК: «6-1, 7-12, 18-13… останній 43-48».
      *
-     * Це половина розкладки, яку легко переплутати з простою сіткою: вона й
-     * справді така сама. Уся різниця в правій колонці.
+     * Напрямок нумерації всередині модуля чергується, бо міжмодульний провід іде
+     * то по лівому боку стопки, то по правому. Намальована підряд сітка бреше в
+     * половині рядів — і саме ці ряди тут і перевіряються.
      */
     @Test
-    fun `the left column runs top down in polling order`() {
-        val rows = CellLayout.sixCellRows()
+    fun `the left column alternates direction row by row`() {
+        val rows = screen()
 
-        assertEquals(listOf(0, 1, 2, 3, 4, 5), rows.first()[0])
-        assertEquals(listOf(42, 43, 44, 45, 46, 47), rows.last()[0])
+        assertEquals(listOf(6, 5, 4, 3, 2, 1), rows[0][0])
+        assertEquals(listOf(7, 8, 9, 10, 11, 12), rows[1][0])
+        assertEquals(listOf(18, 17, 16, 15, 14, 13), rows[2][0])
+        assertEquals(listOf(19, 20, 21, 22, 23, 24), rows[3][0])
+        assertEquals(listOf(43, 44, 45, 46, 47, 48), rows[7][0])
     }
 
     /**
-     * ПРАВА КОЛОНКА ЧИТАЄТЬСЯ ЗНИЗУ ВГОРУ, і всередині модуля теж.
+     * ПРАВА КОЛОНКА ЙДЕ ЗНИЗУ ВГОРУ: «49-54» знизу, «96-91» зверху.
      *
-     * Так модулі стоять у машині: нумерація обходить пакет змійкою, і намальована
-     * підряд права половина була б перевернутою — тобто показувала б просідання
-     * не з того боку, з якого воно є.
+     * Ланцюг перескакує з нижнього лівого модуля в нижній правий і піднімається
+     * назад — тому верхній правий модуль останній у пакеті, а не дев'ятий.
      */
     @Test
-    fun `the right column runs bottom up and is mirrored inside`() {
-        val rows = CellLayout.sixCellRows()
+    fun `the right column runs bottom up`() {
+        val rows = screen()
 
-        // Найвищий правий модуль — останній у пакеті, комірки 96..91.
-        assertEquals(listOf(95, 94, 93, 92, 91, 90), rows.first()[1])
-        // Найнижчий правий — дев'ятий, комірки 54..49.
-        assertEquals(listOf(53, 52, 51, 50, 49, 48), rows.last()[1])
+        assertEquals(listOf(49, 50, 51, 52, 53, 54), rows[7][1])
+        assertEquals(listOf(60, 59, 58, 57, 56, 55), rows[6][1])
+        assertEquals(listOf(85, 86, 87, 88, 89, 90), rows[1][1])
+        assertEquals(listOf(96, 95, 94, 93, 92, 91), rows[0][1])
     }
 
-    /** Змійка не рветься: сусідні кінці колонок — сусідні комірки. */
+    /**
+     * ЗМІЙКА НЕ РВЕТЬСЯ — головна перевірка всієї розкладки.
+     *
+     * Сусідні номери мусять бути сусідніми й на екрані: або одне під одним у тій
+     * самій колонці, або поруч на переході між колонками. Якщо десь напрямок
+     * модуля переставлено, ця перевірка це й покаже.
+     */
     @Test
-    fun `the snake closes at the bottom`() {
-        val rows = CellLayout.sixCellRows()
-        val leftEnd = rows.last()[0].last()
-        val rightStart = rows.last()[1].last()
+    fun `consecutive cells are neighbours on the screen`() {
+        val rows = screen()
 
-        assertEquals("низ лівої колонки й низ правої мусять бути сусідами", leftEnd + 1, rightStart)
+        // Перехід між рядами лівої колонки: кінці стоять один під одним.
+        (0 until 7).forEach { row ->
+            val below = rows[row + 1][0]
+            assertTrue(
+                "ряд $row лівої колонки не стикується з наступним",
+                rows[row][0].first() + 1 == below.first() || rows[row][0].last() + 1 == below.last(),
+            )
+        }
+        // Перехід між колонками: 48 знизу ліворуч, 49 знизу праворуч.
+        assertEquals(rows[7][0].last() + 1, rows[7][1].first())
+        // Перехід між рядами правої колонки, знизу вгору.
+        (7 downTo 1).forEach { row ->
+            val above = rows[row - 1][1]
+            assertTrue(
+                "ряд $row правої колонки не стикується з тим, що вище",
+                rows[row][1].first() + 1 == above.first() || rows[row][1].last() + 1 == above.last(),
+            )
+        }
     }
 }

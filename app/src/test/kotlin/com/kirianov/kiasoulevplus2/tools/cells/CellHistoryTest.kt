@@ -186,4 +186,37 @@ class CellHistoryTest {
         sweeps = 42,
         currentSpreadA = 88.0,
     )
+
+    /**
+     * Навантаження зберігається разом із заміром і повертається з файлу.
+     *
+     * Без нього збережені напруги через місяць нічого не скажуть: незрозуміло,
+     * порівнюєш ти два однакові тести чи спокійну поїздку з розгоном у підйом.
+     */
+    @Test
+    fun `the peak load is written to the file and read back`() {
+        val directory = File.createTempFile("cells", "").apply { delete(); mkdirs() }
+        try {
+            val store = FileCellHistoryStore(directory)
+            store.useCar("MINE")
+            store.save(
+                listOf(
+                    CellRecord(
+                        atMs = 1_000L,
+                        odometerKm = 189_000.0,
+                        socPercent = 62.0,
+                        batteryTempC = 24.0,
+                        restVolts = List(96) { 3.80 },
+                        sweeps = 40,
+                        currentSpreadA = 180.0,
+                        peakLoadKw = 76.0,
+                    ),
+                ),
+            )
+
+            assertEquals(76.0, store.load().single().peakLoadKw, 0.001)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
 }

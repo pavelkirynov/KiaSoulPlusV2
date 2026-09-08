@@ -134,6 +134,7 @@ class CellTestBlock(
                 },
                 sweeps = result.sweeps,
                 currentSpreadA = result.currentSpreadA,
+                peakLoadKw = result.peakLoadKw,
             ),
         )
     }

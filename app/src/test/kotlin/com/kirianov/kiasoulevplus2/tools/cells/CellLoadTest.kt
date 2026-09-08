@@ -16,6 +16,12 @@ class CellLoadTest {
     /**
      * Пакет із однією слабкою коміркою. Усі комірки просідають від струму однаково,
      * а слабка — глибше рівно на своєму надлишковому опорі.
+     *
+     * УВАГА ПРО ЗНАК: тут `currentA` додатний означає навантаження, бо так простіше
+     * читати арифметику просадки. На шині знак протилежний — від'ємний струм це
+     * розряд (див. BmsData.batteryCurrent). Опору це байдуже: він виводиться з
+     * НАХИЛУ, а нахил від знака не залежить. А от навантаження в кіловатах — ні,
+     * тому воно перевіряється окремо, справжнім знаком.
      */
     private fun sweepAt(
         currentA: Double,
@@ -242,5 +248,54 @@ class CellLoadTest {
             negative.weakest!!.excessMilliOhm!!,
             0.05,
         )
+    }
+
+    // --- Під яким навантаженням міряли ----------------------------------------
+
+    /** Прохід із справжнім знаком шини: від'ємний струм — це розряд. */
+    private fun busSweep(currentA: Double, packVolts: Double = 380.0) = CellSweep(
+        voltages = List(cells) { 3.80 },
+        currentBeforeA = currentA,
+        currentAfterA = currentA,
+        packVolts = packVolts,
+        atMs = 0L,
+    )
+
+    /**
+     * ПІК НАВАНТАЖЕННЯ — ЦЕ ПІК РОЗРЯДУ, А НЕ МОДУЛЬ СТРУМУ.
+     *
+     * Без цього числа мінімуми напруг нічого не значать: «3.41 В» під десятьма
+     * кіловатами й під сімдесятьма — два різні висновки про ту саму комірку.
+     */
+    @Test
+    fun `the peak load is the deepest discharge of the test`() {
+        val result = CellLoad.summarize(
+            listOf(busSweep(-50.0), busSweep(-200.0), busSweep(-10.0)),
+        )
+
+        // 200 А × 380 В = 76 кВт.
+        assertEquals(76.0, result.peakLoadKw, 0.5)
+    }
+
+    /**
+     * Гальмування — не навантаження. За модулем струму рекуперація виглядає так
+     * само, як розгін, але комірка під нею не просідає, а піднімається.
+     */
+    @Test
+    fun `regen does not count as load`() {
+        val result = CellLoad.summarize(listOf(busSweep(80.0), busSweep(120.0)))
+
+        assertEquals(0.0, result.peakLoadKw, 0.001)
+    }
+
+    /** Змішаний тест: беремо найглибший розряд і не зважаємо на гальмування. */
+    @Test
+    fun `a mixed test reports only the discharge peak`() {
+        val result = CellLoad.summarize(
+            listOf(busSweep(150.0), busSweep(-100.0), busSweep(90.0)),
+        )
+
+        // 100 А × 380 В = 38 кВт, хоч гальмування й було сильнішим за струмом.
+        assertEquals(38.0, result.peakLoadKw, 0.5)
     }
 }

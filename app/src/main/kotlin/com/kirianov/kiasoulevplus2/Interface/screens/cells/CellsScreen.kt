@@ -319,6 +319,7 @@ private fun testOf(record: CellRecord, mode: CellTestState): CellTestState {
         result = CellTestResult(
             sweeps = record.sweeps,
             currentSpreadA = record.currentSpreadA,
+            peakLoadKw = record.peakLoadKw,
             cells = cells,
             resistanceKnown = record.excessMilliOhm.isNotEmpty(),
         ),
@@ -408,7 +409,15 @@ private fun HistoryCard(
                         text = "${formatDecimal(record.odometerKm, 0)} км · " +
                             "${formatDecimal(record.socPercent, 0)} % · " +
                             "${formatDecimal(record.batteryTempC, 0)} °C · " +
-                            "розкид ${formatDecimal(record.spreadVolts * 1000, 0)} мВ",
+                            "розкид ${formatDecimal(record.spreadVolts * 1000, 0)} мВ" +
+                            // Навантаження — лише в тестових записах: у простому
+                            // замірі його немає, і нуль там читався б як «міряли
+                            // без нагрузки», що неправда.
+                            if (record.peakLoadKw > 0.0) {
+                                " · до ${formatDecimal(record.peakLoadKw, 0)} кВт"
+                            } else {
+                                ""
+                            },
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -684,6 +693,16 @@ private fun LoadTestCard(
             style = MaterialTheme.typography.bodySmall,
         )
 
+        // ПІД ЯКИМ НАВАНТАЖЕННЯМ МІРЯЛИ. Без цього числа мінімуми не значать
+        // нічого: «3.41 В» під десятьма кіловатами й під сімдесятьма — два різні
+        // висновки про ту саму комірку. Точність тут не потрібна, потрібен порядок.
+        Text(
+            text = "Найбільше навантаження за тест: " +
+                "${formatDecimal(result.peakLoadKw, 0)} кВт — під ним і знято " +
+                "найглибші просадки.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+
         if (result.note.isNotEmpty()) {
             Text(
                 text = result.note,
@@ -886,16 +905,22 @@ private fun SixModulesView(
     paint: (Int) -> Color?,
 ) {
     val spacing = 1.dp
+    val moduleGap = 6.dp
     val rows = CellLayout.sixCellRows()
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        // Дві колонки по шість комірок плюс проміжок між колонками.
+        // ШИРИНУ ТРЕБА ВІДРАХУВАТИ ТОЧНО, інакше остання колонка зрізається.
+        //
+        // Проміжків тут два різних: між комірками всередині модуля і між самими
+        // модулями. Спершу з ширини відніматься лише перші — і дванадцята колонка
+        // не влазила рівно на розмір другого.
         val columns = CellLayout.SIX * 2
-        val cellWidth = (maxWidth - spacing * (columns + 1)) / columns
+        val used = moduleGap + spacing * ((CellLayout.SIX - 1) * 2)
+        val cellWidth = (maxWidth - used) / columns
 
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             rows.forEach { pair ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(moduleGap)) {
                     pair.forEach { module ->
                         Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
                             module.forEach { index ->
