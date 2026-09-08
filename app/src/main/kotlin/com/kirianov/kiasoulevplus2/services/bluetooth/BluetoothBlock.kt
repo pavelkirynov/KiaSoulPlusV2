@@ -369,6 +369,17 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
             val response = canBridge.sendCANCommand(header, command)
             GeneralData.publishBatteryFrames(listOf(command), listOf(response))
 
+            // Знос комірок і межі температур — раз на кілька хвилин, а не щоцикл.
+            // Знос міряється місяцями; питати його щосекунди означало б витрачати
+            // шину на число, яке за секунду не змінюється.
+            if (pollTick % HEALTH_EVERY_N_POLLS == 0L) {
+                val health = BmsCommands.REQUEST_PACK_HEALTH
+                GeneralData.publishPackHealthFrame(
+                    health,
+                    canBridge.sendCANCommand(header, health),
+                )
+            }
+
             // Пробіг і швидкість приходять широкомовними кадрами, а не на запит,
             // тому раз на кілька циклів слухаємо шину в режимі монітора.
             if (pollTick++ % MONITOR_EVERY_N_POLLS == 0L) captureBroadcast()
@@ -530,6 +541,15 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
 
         /** Одне вікно монітора на кожні стільки циклів опитування. */
         const val MONITOR_EVERY_N_POLLS = 4L
+
+        /**
+         * Один запит зносу комірок на кожні стільки циклів опитування.
+         *
+         * Двісті циклів — це кілька хвилин ходу. Знос комірок міряється місяцями,
+         * межі температур — хвилинами; частіше питати нема за чим, а шина в нас
+         * одна й на ній уже й так черга.
+         */
+        const val HEALTH_EVERY_N_POLLS = 200L
 
         /**
          * Вікно вільного прослуховування, без фільтра. Коротке навмисно: адаптер

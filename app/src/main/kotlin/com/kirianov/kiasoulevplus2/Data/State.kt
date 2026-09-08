@@ -15,6 +15,15 @@ data class State(
     /** Розібрані показники: сюди пише блок декодерів. */
     val bms: BmsData = BmsData(),
 
+    /**
+     * Що батарея думає про власний знос: кадр 21 05, веде блок tools/battery.
+     *
+     * Окремо від [bms] навмисно: те приходить щосекунди, це — раз на кілька
+     * хвилин, і зливати їх в одне означало б або питати знос задарма часто, або
+     * загубити його між тактами.
+     */
+    val packHealth: PackHealth = PackHealth(),
+
     /** Помилки блоків авто: веде блок car/dtc. */
     val faults: FaultState = FaultState(),
     val cells: CellData = CellData(),

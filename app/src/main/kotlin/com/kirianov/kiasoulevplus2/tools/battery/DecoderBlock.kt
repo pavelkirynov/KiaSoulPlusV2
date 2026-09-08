@@ -10,6 +10,7 @@ package com.kirianov.kiasoulevplus2.tools.battery
 
 import com.kirianov.kiasoulevplus2.Data.CellSweep
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.Data.PackHealth
 import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -28,7 +29,30 @@ class DecoderBlock(
         GeneralData.state
             .map { it.garage.activeVin }
             .distinctUntilChanged()
-            .onEach { watermark.forgetCar() }
+            .onEach {
+                watermark.forgetCar()
+                // Знос належить тій батареї, у якої його спитали. Лишити його на
+                // екрані при перемиканні означало б приписати чужий зношений
+                // пакет — і саме цієї помилки не помітно, бо число правдоподібне.
+                GeneralData.updatePackHealth(PackHealth())
+            }
+            .launchIn(scope)
+
+        // ЗНОС БАТАРЕЇ — ОКРЕМИМ ПОТОКОМ, бо кадр 21 05 приходить раз на кілька
+        // хвилин. Якби він ліг у той самий потік, кожен його прихід виглядав би як
+        // новий такт опитування.
+        GeneralData.state
+            .map { it.can.packHealthFrames }
+            .filterNotNull()
+            .distinctUntilChanged()
+            .onEach { frames ->
+                val bytes = FrameParser.parse(frames.responses.firstOrNull().orEmpty())
+                val health = PackHealthDecoder.decode(bytes)
+                // Нерозібраний кадр НЕ стирає попередній: знос за хвилину не
+                // змінюється, і показати прочерк замість вчорашнього числа — гірше,
+                // ніж показати вчорашнє.
+                if (health.known) GeneralData.updatePackHealth(health)
+            }
             .launchIn(scope)
 
         GeneralData.state

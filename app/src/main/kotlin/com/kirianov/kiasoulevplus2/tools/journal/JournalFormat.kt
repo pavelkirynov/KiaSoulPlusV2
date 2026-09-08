@@ -58,6 +58,12 @@ object JournalFormat {
             add("U=${num(bms.batteryVoltage)}")
             add("I=${num(bms.batteryCurrent)}")
             add("chg=${flag(vehicle.charging.isCharging)}")
+            // МЕЖІ, ЯКІ ВИСТАВЛЯЄ САМА BMS, і 12-вольтовий акумулятор. Перше
+            // об'єднує «машина не тягне» з «батарея не дозволяє», друге —
+            // найчастіша причина «не запускається» в електромобілі.
+            add("okOut=${num(bms.availableDischargeKw.takeIf { bms.hasData })}")
+            add("okIn=${num(bms.availableChargeKw.takeIf { bms.hasData })}")
+            add("v12=${num(bms.auxVolts.takeIf { it > 0.0 })}")
             add("kWhIn=${num(bms.cumulativeEnergyChargedKwh)}")
             add("kWhOut=${num(bms.cumulativeEnergyDischargedKwh)}")
             // Лічильники в ампер-годинах мають крок 0.1 А·год, тобто вдесятеро
@@ -131,6 +137,22 @@ object JournalFormat {
         if (before.garage.activeVin != after.garage.activeVin && after.garage.activeVin.isNotEmpty()) {
             out += "$at car ...${after.garage.activeVin.takeLast(6)} " +
                 "пакет=${num(after.garage.active.packKwh.takeIf { it > 0.0 })}"
+        }
+
+        // ЩО БАТАРЕЯ ДУМАЄ ПРО СЕБЕ. Кадр 21 05 приходить раз на кілька хвилин,
+        // тож рядок рідкий — і саме тому потрібен: за ним видно, як знос і межі
+        // температур повзуть із місяцями, а на екрані видно тільки «зараз».
+        val healthBefore = before.packHealth
+        val healthAfter = after.packHealth
+        if (healthAfter.known && healthAfter != healthBefore) {
+            out += "$at health tMax=${num(healthAfter.maxTempC)} " +
+                "tMin=${num(healthAfter.minTempC)} " +
+                "tIn=${num(healthAfter.inletTempC)} " +
+                "wear=${num(healthAfter.maxDeteriorationPercent)}" +
+                "/№${healthAfter.maxDeteriorationCell} " +
+                "best=${num(healthAfter.minDeteriorationPercent)}" +
+                "/№${healthAfter.minDeteriorationCell} " +
+                "socD=${num(healthAfter.displaySoc)}"
         }
 
         // СИРА ВІДПОВІДЬ КОЖНОГО БЛОКА, по рядку на блок.

@@ -201,4 +201,108 @@ class BmsResponseDecoderTest {
         assertTrue(data.displaySoc in 0.0..100.0)
         assertTrue(data.batteryVoltage in 200.0..450.0)
     }
+
+    // --- Те, що лежало в кадрі й досі викидалося ------------------------------
+
+    /**
+     * Кадр із заповненими новими полями.
+     *
+     * Зміщення тут навмисно виписані числами, а не константами декодера: тест
+     * мусить ловити зсув таблиці, а не повторювати його за тим, що перевіряє.
+     */
+    private fun richFrame(): List<Int> = MutableList(60) { 0 }.apply {
+        this[6] = 0xA0                    // SOC 80 %
+        this[7] = 0x0F; this[8] = 0xA0    // 4000 × 0.01 = 40.00 кВт заряду
+        this[9] = 0x1D; this[10] = 0x4C   // 7500 × 0.01 = 75.00 кВт розряду
+        this[11] = 0xE0                   // біти 7, 6, 5: заряджається, CHAdeMO, Type 1
+        this[14] = 0x0E; this[15] = 0x4C  // 366.0 В
+        // Вісім модулів: 21..28 °C, з пропуском байта 23.
+        this[16] = 21; this[17] = 22; this[18] = 23; this[19] = 24
+        this[20] = 25; this[21] = 26; this[22] = 27
+        this[23] = 0x7F                   // байт-сусід, який до температур не належить
+        this[24] = 28
+        this[25] = 0xC8                   // 200 × 0.02 = 4.00 В — найвища комірка
+        this[26] = 42                     // її номер
+        this[27] = 0xC3                   // 195 × 0.02 = 3.90 В — найнижча
+        this[28] = 7                      // її номер
+        this[29] = 4                      // вентилятор, крок 4
+        this[30] = 120                    // 120 Гц
+        this[31] = 0x8C                   // 140 / 10 = 14.0 В на 12-вольтовому
+        // Час роботи: 3 600 000 с = 1000 годин.
+        this[48] = 0x00; this[49] = 0x36; this[50] = 0xEE; this[51] = 0x80
+        this[55] = 0x1B; this[56] = 0x58  // 7000 об/хв
+    }
+
+    /**
+     * ЖОДНОГО ЗАЙВОГО ЗАПИТУ: усе це лежало в кадрі, який застосунок читає
+     * щосекунди, і просто не розбиралося.
+     */
+    @Test
+    fun `the rest of the frame is decoded too`() {
+        val bms = BmsResponseDecoder.decode(richFrame())
+
+        assertEquals(40.0, bms.availableChargeKw, 0.001)
+        assertEquals(75.0, bms.availableDischargeKw, 0.001)
+        assertEquals(4.0, bms.maxCellVolts, 0.001)
+        assertEquals(42, bms.maxCellNumber)
+        assertEquals(3.9, bms.minCellVolts, 0.001)
+        assertEquals(7, bms.minCellNumber)
+        assertEquals(4, bms.fanStep)
+        assertEquals(120, bms.fanHz)
+        assertEquals(14.0, bms.auxVolts, 0.001)
+        assertEquals(1000.0, bms.operatingHours, 0.01)
+        assertEquals(7000, bms.motorRpm)
+    }
+
+    /** Прапорці роз'ємів і зарядки — три різні біти одного байта. */
+    @Test
+    fun `the charging flags are three separate bits`() {
+        val all = BmsResponseDecoder.decode(richFrame())
+        assertTrue(all.bmsCharging)
+        assertTrue(all.chademoPlugged)
+        assertTrue(all.j1772Plugged)
+
+        val onlyChademo = BmsResponseDecoder.decode(
+            richFrame().toMutableList().apply { this[11] = 0x40 },
+        )
+        assertFalse(onlyChademo.bmsCharging)
+        assertTrue(onlyChademo.chademoPlugged)
+        assertFalse(onlyChademo.j1772Plugged)
+    }
+
+    /**
+     * ВІСІМ МОДУЛІВ ЛЕЖАТЬ НЕ ПІДРЯД: між сьомим і восьмим стоїть чужий байт.
+     * Прочитати їх діапазоном означало б показати сміття замість восьмого модуля.
+     */
+    @Test
+    fun `the eight module temperatures skip the byte between them`() {
+        val temps = BmsResponseDecoder.decode(richFrame()).moduleTempsC
+
+        assertEquals(listOf(21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0), temps)
+    }
+
+    /** Мороз читається зі знаком: модулі бувають і мінусовими. */
+    @Test
+    fun `module temperatures are signed`() {
+        val frozen = richFrame().toMutableList().apply { this[16] = 0xF6 } // -10
+        val temps = BmsResponseDecoder.decode(frozen).moduleTempsC
+
+        assertEquals(-10.0, temps.first(), 0.001)
+    }
+
+    /**
+     * Короткий кадр не має ні позбавляти нас заряду з напругою, ні вигадувати
+     * температури: порожній список, а не вісім нулів. Нуль градусів — законна
+     * температура, і відрізнити її від «не прочитали» треба на око.
+     */
+    @Test
+    fun `a short frame gives no module temperatures at all`() {
+        val short = richFrame().take(20)
+        val bms = BmsResponseDecoder.decode(short)
+
+        assertEquals(80.0, bms.displaySoc, 0.001)
+        assertTrue("температур бути не мусить", bms.moduleTempsC.isEmpty())
+        assertEquals(0, bms.motorRpm)
+        assertEquals(0.0, bms.auxVolts, 0.001)
+    }
 }

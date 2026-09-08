@@ -7,6 +7,15 @@ package com.kirianov.kiasoulevplus2.Data
 data class CanExchange(
     val batteryFrames: CanFrames? = null,
     val cellFrames: CanFrames? = null,
+
+    /**
+     * Відповідь на кадр 21 05: знос комірок і межі температур.
+     *
+     * Окремо від batteryFrames, бо приходить рідко: якби вона лягала в те саме
+     * поле, кожен її прихід виглядав би як новий такт опитування — і збивав би
+     * усе, що рахує такти, від інтеграла рекуперації до сторожового таймера.
+     */
+    val packHealthFrames: CanFrames? = null,
     /** Відповідь на ручний запит з екрана «Експерименти». */
     val probeFrames: CanFrames? = null,
 

@@ -43,6 +43,19 @@ object GeneralData {
 
     // --- Сирий обмін із шиною: пише блок Bluetooth -----------------------------
 
+    /** Сира відповідь на кадр 21 05. Розбирає її блок tools/battery. */
+    fun publishPackHealthFrame(command: String, response: String) =
+        _state.update {
+            it.copy(
+                can = it.can.copy(
+                    packHealthFrames = nextFrames(listOf(command), listOf(response)),
+                ),
+            )
+        }
+
+    /** Розібраний знос батареї: пише блок tools/battery. */
+    fun updatePackHealth(health: PackHealth) = _state.update { it.copy(packHealth = health) }
+
     fun publishBatteryFrames(commands: List<String>, responses: List<String>) =
         _state.update {
             it.copy(can = it.can.copy(batteryFrames = nextFrames(commands, responses)))
