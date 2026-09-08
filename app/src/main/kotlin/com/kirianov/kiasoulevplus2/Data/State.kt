@@ -35,6 +35,15 @@ data class State(
     val cellHistory: CellHistory = CellHistory(),
     val vehicle: VehicleData = VehicleData(),
 
+    /**
+     * Системи авто поза батареєю: колеса, ручник, світло, годинник, запалювання.
+     *
+     * Окремо від [vehicle] навмисно: там формули, на яких стоять розрахунки й
+     * перевірені журналами, тут — числа з чужої програми, які ще перевіряються.
+     * Веде блок tools/vehicle.
+     */
+    val carSystems: CarSystems = CarSystems(),
+
     /** Що відомо про зарядки: рахується за пожиттєвим лічильником BMS. */
     val charge: ChargeLog = ChargeLog(),
 

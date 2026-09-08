@@ -29,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.BmsData
-import com.kirianov.kiasoulevplus2.Data.PackHealth
 import com.kirianov.kiasoulevplus2.Data.CalculatedData
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.GeneralData
@@ -76,12 +75,11 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
             onWindowSelected = mainViewModel::onWindowSelected,
         )
 
-        // ЩО КАЖЕ САМА BMS. Це не наші оцінки, а числа, які батарея виставляє
-        // інвертору й зарядній станції, плюс її власна думка про знос.
-        BmsLimitsCard(bms)
-
-        PackHealthCard(bms, state.packHealth)
-
+        // ЧОМУ ТУТ НЕМАЄ МЕЖ ПОТУЖНОСТІ Й ЗНОСУ ЗА ВЕРСІЄЮ BMS. Вони переїхали в
+        // розділ «Авто → Системи», і не для порядку: перша ж поїздка показала, що
+        // межі читаються як «90 кВт брати, 90 кВт вливати», а знос — як нуль на
+        // всіх дев'яноста шести комірках. Неперевіреному числу не місце поруч із
+        // тими, на яких стоять розрахунки: на головній воно читається як факт.
         LifetimeCountersCard(bms)
 
         ChargeCard(state.charge, onFinish = GeneralData::requestChargeFinish)
@@ -180,166 +178,10 @@ private fun BatteryCard(bms: BmsData, calculated: CalculatedData) {
             MetricRow(
                 // Це температура ПЕРШОГО модуля, а не максимум по пакету: байт 16
                 // кадру 21 01 — початок списку восьми модулів. Справжні межі
-                // стоять у картці «Знос за версією BMS», із кадру 21 05.
+                // по пакету йдуть кадром 21 05 і разом із рештою перенесеного
+                // лежать у розділі «Авто → Системи».
                 label = "Температура модуля 1",
                 value = if (bms.hasData) formatMeasurement(bms.batteryTempC, 1, "°C") else NO_VALUE,
-            )
-        }
-    }
-}
-
-/**
- * МЕЖІ, ЯКІ ВИСТАВЛЯЄ САМА БАТАРЕЯ.
- *
- * Ці числа лежали в тому самому кадрі 21 01, який застосунок читає щосекунди, і
- * досі викидалися. Жодного зайвого запиту в шину тут немає.
- *
- * Чому вони варті окремої картки: «дозволений розряд» об'єднує два спостереження,
- * які без нього не сходяться, — «машина не тягне на морозі» й «батарея сама так
- * вирішила». А «дозволений заряд» і є та причина, через яку швидка зарядка
- * знижує струм ближче до сотні: не станція так хоче, а пакет.
- *
- * І 12-вольтовий акумулятор: найчастіша причина «електромобіль не запускається» —
- * саме він, а не тяговий пакет.
- */
-@Composable
-private fun BmsLimitsCard(bms: BmsData) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(text = "Що дозволяє батарея", fontSize = 18.sp)
-
-            MetricRow(
-                "Дозволений розряд",
-                if (bms.hasData) formatMeasurement(bms.availableDischargeKw, 1, "кВт") else NO_VALUE,
-            )
-            MetricRow(
-                "Дозволений заряд",
-                if (bms.hasData) formatMeasurement(bms.availableChargeKw, 1, "кВт") else NO_VALUE,
-            )
-            MetricRow(
-                "Акумулятор 12 В",
-                if (bms.auxVolts > 0.0) formatMeasurement(bms.auxVolts, 1, "В") else NO_VALUE,
-            )
-            MetricRow(
-                "Вентилятор ВВБ",
-                if (bms.hasData) "крок ${bms.fanStep} · ${bms.fanHz} Гц" else NO_VALUE,
-            )
-            MetricRow(
-                "Обороти мотора",
-                if (bms.hasData) "${bms.motorRpm} об/хв" else NO_VALUE,
-            )
-            MetricRow(
-                "Батарея відпрацювала",
-                if (bms.operatingSeconds > 0L) {
-                    formatMeasurement(bms.operatingHours, 0, "год")
-                } else {
-                    NO_VALUE
-                },
-            )
-
-            val plugs = listOfNotNull(
-                "CHAdeMO".takeIf { bms.chademoPlugged },
-                "Type 1".takeIf { bms.j1772Plugged },
-            )
-            if (bms.hasData) {
-                MetricRow(
-                    "Роз'єм",
-                    if (plugs.isEmpty()) "не встромлений" else plugs.joinToString(" + "),
-                )
-            }
-
-            // ТЕМПЕРАТУРИ ВОСЬМИ МОДУЛІВ ОКРЕМО. На перепакованій батареї це
-            // найкорисніше з усього кадру: одне число «максимум» не каже, який бік
-            // пакета гріється, а вісім — кажуть.
-            if (bms.moduleTempsC.isNotEmpty()) {
-                Text(
-                    text = "Модулі, °C: " +
-                        bms.moduleTempsC.joinToString(" · ") { formatDecimal(it, 0) },
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        }
-    }
-}
-
-/**
- * ДУМКА БАТАРЕЇ ПРО ВЛАСНИЙ ЗНОС — кадр 21 05, раз на кілька хвилин.
- *
- * Другий незалежний прилад на те саме питання, на яке відповідає наш тест під
- * навантаженням. Абсолютне число тут під підозрою: BMS рахує знос проти РІДНОЇ
- * хімії, як і відсотки заряду. А от РОЗКИД між найгіршою й найкращою коміркою від
- * паспорта не залежить — він каже, чи розходяться комірки на думку самої батареї.
- */
-@Composable
-private fun PackHealthCard(bms: BmsData, health: PackHealth) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(text = "Знос за версією BMS", fontSize = 18.sp)
-
-            MetricRow(
-                "Найгірша комірка",
-                if (health.known) {
-                    "${formatDecimal(health.maxDeteriorationPercent, 1)} % · " +
-                        "№${health.maxDeteriorationCell}"
-                } else {
-                    NO_VALUE
-                },
-            )
-            MetricRow(
-                "Найкраща комірка",
-                if (health.known) {
-                    "${formatDecimal(health.minDeteriorationPercent, 1)} % · " +
-                        "№${health.minDeteriorationCell}"
-                } else {
-                    NO_VALUE
-                },
-            )
-            MetricRow(
-                "Розкид зносу",
-                if (health.known) formatMeasurement(health.deteriorationSpread, 1, "п.п.") else NO_VALUE,
-            )
-            MetricRow(
-                "Температура пакета",
-                if (health.known) {
-                    "${formatDecimal(health.minTempC, 0)}…" +
-                        "${formatDecimal(health.maxTempC, 0)} °C"
-                } else {
-                    NO_VALUE
-                },
-            )
-            MetricRow(
-                "Вхід охолодження",
-                if (health.known) formatMeasurement(health.inletTempC, 0, "°C") else NO_VALUE,
-            )
-
-            // Найвища й найнижча комірка за версією BMS — поруч із нашими. Коли ці
-            // дві пари розходяться, винен хтось один, і знати, хто саме, корисніше
-            // за будь-яке з двох чисел окремо.
-            if (bms.maxCellVolts > 0.0) {
-                MetricRow(
-                    "Комірки за BMS",
-                    "${formatDecimal(bms.minCellVolts, 2)}–" +
-                        "${formatDecimal(bms.maxCellVolts, 2)} В · " +
-                        "№${bms.minCellNumber} і №${bms.maxCellNumber}",
-                )
-            }
-
-            Text(
-                text = if (health.known) {
-                    "Сто відсотків означає «як нова». Абсолютне число BMS рахує " +
-                        "проти рідної хімії, тож на перепакованому пакеті дивіться " +
-                        "на розкид, а не на саме значення."
-                } else {
-                    "Кадр 21 05 питається раз на кілька хвилин — знос міряється " +
-                        "місяцями. Числа з'являться після кількох хвилин зв'язку."
-                },
-                style = MaterialTheme.typography.bodySmall,
             )
         }
     }

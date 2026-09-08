@@ -155,6 +155,8 @@ object JournalFormat {
                 "socD=${num(healthAfter.displaySoc)}"
         }
 
+        out += carSystems(before, after, at)
+
         // СИРА ВІДПОВІДЬ КОЖНОГО БЛОКА, по рядку на блок.
         //
         // Підсумковий рядок нижче каже «озвалося шість із дев'яти» — і на цьому
@@ -295,6 +297,53 @@ object JournalFormat {
      * Разом зі знімком пишеться й різниця, якщо є з чим порівнювати: саме вона й
      * потрібна, а рахувати її вдруге по рядках журналу — марна робота.
      */
+    /**
+     * НОВІ КАДРИ, ЯКІ ЩЕ ПЕРЕВІРЯЮТЬСЯ: колеса, ручник, світло, годинник, ключ.
+     *
+     * Формули взяті з SoulEVSpy, писаної під рідну батарею, і одна з них уже
+     * підвела: їхня швидкість із кадру 4F2 давала 128 км/год на місці. Тому кожне
+     * число тут іде в журнал ЗІ СВОГО КАДРУ ОКРЕМИМ РЯДКОМ — не для краси, а щоб
+     * після поїздки було з чим звірити: колеса проти пробігу, ключ проти того, що
+     * дев'ять кадрів існують лише при запалюванні, секунди годинника — самі
+     * проти себе.
+     *
+     * Рядок пишеться лише на ЗМІНУ: кадр 050 приходить раз на три хвилини й
+     * здебільшого несе те саме.
+     */
+    private fun carSystems(before: State, after: State, at: String): List<String> {
+        val out = mutableListOf<String>()
+        val was = before.carSystems
+        val now = after.carSystems
+
+        if (now.wheels.known && now.wheels != was.wheels) {
+            val w = now.wheels
+            out += "$at wheel fl=${num(w.frontLeftKmh)} fr=${num(w.frontRightKmh)} " +
+                "rl=${num(w.rearLeftKmh)} rr=${num(w.rearRightKmh)} " +
+                "spread=${num(w.spreadKmh)} v4F0=${num(after.vehicle.speedKmh.takeIf { after.vehicle.hasSpeed })}"
+        }
+
+        if (now.drive.known && now.drive != was.drive) {
+            out += "$at key ign=${flag(now.drive.ignitionOn)} v4F2=${num(now.drive.speedKmh)} " +
+                "v4F0=${num(after.vehicle.speedKmh.takeIf { after.vehicle.hasSpeed })}"
+        }
+
+        if (now.brake.known && now.brake != was.brake) {
+            out += "$at brake hand=${flag(now.brake.parkingBrakeOn)}"
+        }
+
+        if (now.cabin.known && now.cabin != was.cabin) {
+            val c = now.cabin
+            out += "$at cabin light=${c.lights} turn=${c.turnSignal} " +
+                "wipe=${c.wipers}/${c.wiperStep}"
+        }
+
+        if (now.clock.known && now.clock != was.clock) {
+            out += "$at clock car=${now.clock.text}"
+        }
+
+        return out
+    }
+
     private fun busSnapshots(before: State, after: State, at: String): List<String> {
         val out = mutableListOf<String>()
 

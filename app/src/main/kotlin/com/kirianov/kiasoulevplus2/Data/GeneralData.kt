@@ -153,6 +153,13 @@ object GeneralData {
 
     fun updateVehicle(vehicle: VehicleData) = _state.update { it.copy(vehicle = vehicle) }
 
+    /**
+     * Системи авто з широкомовних кадрів: колеса, ручник, світло, годинник,
+     * запалювання. Окремий вхід, а не частина [updateVehicle], бо це поки
+     * неперевірені числа й вони не мають права опинитися в розрахунках.
+     */
+    fun updateCarSystems(systems: CarSystems) = _state.update { it.copy(carSystems = systems) }
+
     // --- Помилки блоків авто -----------------------------------------------------
 
     fun updateFaults(transform: (FaultState) -> FaultState) =

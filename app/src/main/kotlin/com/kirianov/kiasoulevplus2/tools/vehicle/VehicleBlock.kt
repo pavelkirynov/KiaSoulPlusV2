@@ -7,6 +7,10 @@
 // Тут же живе висновок «авто заряджається», якого на шині може не бути зовсім:
 // кадр 581 належить бортовому зарядному й на швидкій зарядці мовчить. Див.
 // [ChargeSense].
+//
+// Кадрів слухається два набори: перевірені величини для розрахунків
+// ([BroadcastDecoder]) і системи авто, які ще перевіряються ([CarSystemsDecoder]).
+// Один потік рядків, два місця для результату — див. коментар у самому потоці.
 // ====================================================================================
 
 package com.kirianov.kiasoulevplus2.tools.vehicle
@@ -34,12 +38,23 @@ class VehicleBlock(
             .onEach { capture ->
                 val frames = capture.lines
                     .mapNotNull { MonitorLineParser.parse(it, capture.filterId) }
-                    .filter { it.id in BroadcastDecoder.KNOWN_IDS }
 
-                if (frames.isEmpty()) return@onEach
-                GeneralData.updateVehicle(
-                    BroadcastDecoder.merge(GeneralData.state.value.vehicle, frames),
-                )
+                // ДВА ДЕКОДЕРИ НА ОДИН ПОТІК КАДРІВ. Розбір той самий, а місця для
+                // результату два: перевірені величини йдуть у розрахунки, кадри
+                // систем авто — в окреме поле стану, звідки їх ніхто не рахує.
+                val known = frames.filter { it.id in BroadcastDecoder.KNOWN_IDS }
+                if (known.isNotEmpty()) {
+                    GeneralData.updateVehicle(
+                        BroadcastDecoder.merge(GeneralData.state.value.vehicle, known),
+                    )
+                }
+
+                val systems = frames.filter { it.id in CarSystemsDecoder.KNOWN_IDS }
+                if (systems.isNotEmpty()) {
+                    GeneralData.updateCarSystems(
+                        CarSystemsDecoder.merge(GeneralData.state.value.carSystems, systems),
+                    )
+                }
             }
             .launchIn(scope)
     }

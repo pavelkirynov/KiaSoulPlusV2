@@ -37,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.car.screens.CarFaultsScreen
 import com.kirianov.kiasoulevplus2.car.screens.CarOverviewScreen
+import com.kirianov.kiasoulevplus2.car.screens.CarSystemsScreen
 import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsScreen
 import com.kirianov.kiasoulevplus2.Interface.screens.cells.CellsViewModel
 import com.kirianov.kiasoulevplus2.Interface.screens.experiments.ProbeScreen
@@ -127,6 +128,7 @@ fun AppNavigation() {
                                 PredictionScreen(predictionViewModel = viewModel<PredictionViewModel>())
                             AppPage.CELLS -> CellsScreen(cellsViewModel = viewModel<CellsViewModel>())
                             AppPage.CAR_OVERVIEW -> CarOverviewScreen()
+                            AppPage.CAR_SYSTEMS -> CarSystemsScreen()
                             AppPage.CAR_FAULTS -> CarFaultsScreen()
                             AppPage.PROBE -> ProbeScreen(probeViewModel = viewModel<ProbeViewModel>())
                             AppPage.SETTINGS ->

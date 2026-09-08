@@ -1,5 +1,7 @@
 package com.kirianov.kiasoulevplus2.services.bluetooth
 
+import com.kirianov.kiasoulevplus2.tools.vehicle.BroadcastDecoder
+import com.kirianov.kiasoulevplus2.tools.vehicle.CarSystemsDecoder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,11 +15,28 @@ class MonitorRotationTest {
 
     private val rotation = BluetoothBlock.MONITOR_ROTATION
 
+    /**
+     * Кожен кадр, який застосунок УМІЄ розібрати, мусить і питатися.
+     *
+     * Список навмисно не переписаний тут руками, а взятий із самих декодерів:
+     * додати декодер і забути дописати ID у чергу — помилка, яку інакше не видно
+     * взагалі. Кадр не приходить, поле стоїть прочерком, і причина «його ніхто не
+     * замовляв» виглядає точно так само, як «машина його не передає».
+     */
     @Test
-    fun `every frame the app decodes is asked for`() {
+    fun `every frame either decoder knows is asked for`() {
         val asked = rotation.toSet()
-        listOf("4F0", "594", "598", "200", "653", "581").forEach { id ->
+        (BroadcastDecoder.KNOWN_IDS + CarSystemsDecoder.KNOWN_IDS).forEach { id ->
             assertTrue("кадр $id мусить питатися: $asked", id in asked)
+        }
+    }
+
+    /** І навпаки: у черзі не має бути ID, який нікому розбирати. */
+    @Test
+    fun `nothing is asked for in vain`() {
+        val decoded = BroadcastDecoder.KNOWN_IDS + CarSystemsDecoder.KNOWN_IDS
+        rotation.toSet().forEach { id ->
+            assertTrue("кадр $id ніхто не розбирає", id in decoded)
         }
     }
 

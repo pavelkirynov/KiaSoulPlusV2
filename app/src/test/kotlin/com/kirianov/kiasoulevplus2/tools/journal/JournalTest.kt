@@ -1,14 +1,19 @@
 package com.kirianov.kiasoulevplus2.tools.journal
 
 import com.kirianov.kiasoulevplus2.Data.BmsData
+import com.kirianov.kiasoulevplus2.Data.BrakeState
+import com.kirianov.kiasoulevplus2.Data.CarClock
+import com.kirianov.kiasoulevplus2.Data.CarSystems
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ChargingState
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
+import com.kirianov.kiasoulevplus2.Data.DriveState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.MlData
 import com.kirianov.kiasoulevplus2.Data.MlModelInfo
 import com.kirianov.kiasoulevplus2.Data.State
 import com.kirianov.kiasoulevplus2.Data.VehicleData
+import com.kirianov.kiasoulevplus2.Data.WheelSpeeds
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +87,53 @@ class JournalTest {
 
         assertTrue(line, line.contains("odo=-"))
         assertTrue(line, line.contains("v=-"))
+    }
+
+    /**
+     * НОВІ КАДРИ ПИШУТЬСЯ ЗІ СВОЄЮ ЗВІРКОЮ. Швидкість колес нічого не варта сама
+     * по собі: перевіряє її саме те, що поруч у рядку стоїть швидкість із кадру
+     * 4F0, який працює давно.
+     */
+    @Test
+    fun `the new frames are written with what they are checked against`() {
+        val before = State()
+        val after = State(
+            vehicle = VehicleData(speedKmh = 50.0),
+            carSystems = CarSystems(
+                wheels = WheelSpeeds(
+                    known = true,
+                    frontLeftKmh = 49.0,
+                    frontRightKmh = 51.0,
+                    rearLeftKmh = 49.5,
+                    rearRightKmh = 50.5,
+                ),
+                drive = DriveState(known = true, speedKmh = 50.0, ignitionOn = true),
+                brake = BrakeState(known = true, parkingBrakeOn = true),
+                clock = CarClock(known = true, hour = 14, minute = 35, second = 7),
+            ),
+        )
+
+        val lines = JournalFormat.events(before, after, 0L)
+
+        val wheels = lines.first { it.contains(" wheel ") }
+        assertTrue(wheels, wheels.contains("fl=49 "))
+        assertTrue(wheels, wheels.contains("spread=2 "))
+        assertTrue(wheels, wheels.contains("v4F0=50"))
+
+        val key = lines.first { it.contains(" key ") }
+        assertTrue(key, key.contains("ign=1"))
+        assertTrue(key, key.contains("v4F2=50 "))
+
+        assertTrue(lines.toString(), lines.any { it.contains("brake hand=1") })
+        assertTrue(lines.toString(), lines.any { it.contains("clock car=14:35:07") })
+    }
+
+    /** Кадр, який не приходив, рядка не дає: тиша в журналі теж свідчення. */
+    @Test
+    fun `a frame that never arrived writes no line`() {
+        val lines = JournalFormat.events(State(), State(carSystems = CarSystems()), 0L)
+
+        assertEquals(emptyList<String>(), lines)
     }
 
     @Test

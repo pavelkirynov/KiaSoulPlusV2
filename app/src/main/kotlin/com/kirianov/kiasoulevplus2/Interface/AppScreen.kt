@@ -22,6 +22,7 @@ enum class AppPage(val title: String) {
     PREDICTION("Прогноз"),
     CELLS("Комірки"),
     CAR_OVERVIEW("Огляд"),
+    CAR_SYSTEMS("Системи"),
     CAR_FAULTS("Помилки"),
     PROBE("Запити"),
     SETTINGS("Налаштування"),
@@ -34,7 +35,7 @@ enum class AppPage(val title: String) {
  */
 enum class AppSection(val title: String, val pages: List<AppPage>) {
     BATTERY("Батарея", listOf(AppPage.MAIN, AppPage.PREDICTION, AppPage.CELLS)),
-    CAR("Авто", listOf(AppPage.CAR_OVERVIEW, AppPage.CAR_FAULTS)),
+    CAR("Авто", listOf(AppPage.CAR_OVERVIEW, AppPage.CAR_SYSTEMS, AppPage.CAR_FAULTS)),
     EXPERIMENTS("Експерименти", listOf(AppPage.PROBE)),
     SETTINGS("Налаштування", listOf(AppPage.SETTINGS)),
 }
