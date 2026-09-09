@@ -37,8 +37,14 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
     /**
      * Виставляє CAN-заголовок і надсилає команду.
      * Кидає IOException, якщо адаптер не ініціалізувався або зв'язок обірвався.
+     *
+     * @param patient дати блоку більше часу на відповідь, ніж дає адаптер сам.
      */
-    suspend fun sendCANCommand(header: String, command: String): String = busMutex.withLock {
+    suspend fun sendCANCommand(
+        header: String,
+        command: String,
+        patient: Boolean = false,
+    ): String = busMutex.withLock {
         if (!isInitialized) initUnlocked()
 
         try {
@@ -49,7 +55,21 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
             }
             delay(INTER_COMMAND_DELAY_MS)
 
-            val response = adapter.sendCommand(command)
+            if (patient) {
+                adapter.sendCommand("AT ST $PATIENT_TIMEOUT_STEP")
+                delay(SHORT_DELAY_MS)
+            }
+            val response = try {
+                adapter.sendCommand(command)
+            } finally {
+                // Стеля часу повертається НАВІТЬ ПІСЛЯ ПОМИЛКИ. Забути її означало
+                // б, що кожен мовчазний блок відтепер коштує секунду замість
+                // двохсот мілісекунд, — а мовчазних блоків у нас пів списку, і
+                // опитування помилок розтягнулося б у хвилини.
+                if (patient) {
+                    runCatching { adapter.sendCommand("AT ST $DEFAULT_TIMEOUT_STEP") }
+                }
+            }
             if (LINK_LOST_MARKERS.any { response.uppercase().contains(it) }) {
                 isInitialized = false
                 throw IOException("Втрачено зв'язок із шиною: $response")
@@ -220,6 +240,24 @@ class ElmCANBridge(private val adapter: ElmAdapter) {
         const val SHORT_DELAY_MS = 120L
         const val RESET_DELAY_MS = 1000L
         const val PROTOCOL_DELAY_MS = 200L
+
+        /**
+         * Стеля часу очікування відповіді, «AT ST», кроками по 4 мс.
+         *
+         * ЗВІДКИ ВЗЯЛАСЯ ПОТРЕБА. Блок тиску в шинах відповідає «7F 22 78» —
+         * «прийняв, готую відповідь», — а справжня відповідь приходить пізніше,
+         * ніж адаптер згоден чекати за замовчуванням (двісті мілісекунд). Тому на
+         * повторі ми бачили не тиск, а «NO DATA»: блок відповів, просто нікому.
+         *
+         * FF — це близько секунди, тобто вдесятеро більше, ніж треба самій шині,
+         * і саме тому воно вмикається лише на один запит. Загальна стеля тут не
+         * годиться: половина блоків у списку помилок узагалі не відповідає, і
+         * кожен із них коштував би секунду замість двохсот мілісекунд.
+         */
+        const val PATIENT_TIMEOUT_STEP = "FF"
+
+        /** Заводська стеля ELM327: 0x32 × 4 мс ≈ 200 мс. */
+        const val DEFAULT_TIMEOUT_STEP = "32"
 
         /** Пауза між читаннями буфера, коли адаптер мовчить. */
         const val MONITOR_POLL_MS = 20L

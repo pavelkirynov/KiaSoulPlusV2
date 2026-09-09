@@ -29,6 +29,9 @@ import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
 
 object TirePressureDecoder {
 
+    /** Позитивна відповідь саме на `22 C0 0B`: службовий байт плюс той самий DID. */
+    private val ANSWER_HEADER = listOf(0x62, 0xC0, 0x0B)
+
     /** Перший байт тиску; далі кожні чотири байти — наступне колесо. */
     private const val FIRST_PRESSURE_INDEX = 3
     private const val BYTES_PER_WHEEL = 4
@@ -49,6 +52,14 @@ object TirePressureDecoder {
         val bytes = FrameParser.parse(response)
         val last = FIRST_PRESSURE_INDEX + BYTES_PER_WHEEL * (TireData.WHEELS - 1) + TEMP_OFFSET
         if (bytes.size <= last) return TireData()
+
+        // РОЗБИРАЄМО ЛИШЕ ВІДПОВІДЬ НА `22 C0 0B`, і перевірка тут не формальна.
+        // Блок питається двома мовами — другий кандидат `21 01`, — а зміщення
+        // нижче відомі рівно для однієї з них. Розбирати чужу відповідь тими
+        // самими зміщеннями означало б отримати правдоподібні числа з нізвідки.
+        if (!ANSWER_HEADER.indices.all { bytes.getOrNull(it) == ANSWER_HEADER[it] }) {
+            return TireData()
+        }
 
         val pressures = (0 until TireData.WHEELS).map { wheel ->
             bytes[FIRST_PRESSURE_INDEX + wheel * BYTES_PER_WHEEL] *

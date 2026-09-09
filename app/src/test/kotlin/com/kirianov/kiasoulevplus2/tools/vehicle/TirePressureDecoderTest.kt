@@ -54,6 +54,22 @@ class TirePressureDecoderTest {
         assertFalse(TirePressureDecoder.decode("62 C0 0B A7 4B 00 00").known)
     }
 
+    /**
+     * ВІДПОВІДЬ ЧУЖОЮ МОВОЮ НЕ РОЗБИРАЄТЬСЯ ЦИМИ ЗМІЩЕННЯМИ.
+     *
+     * Блок питається двома кандидатами — `22 C0 0B` і `21 01`, — бо котрий із них
+     * його, ще не з'ясовано. Зміщення нижче відомі рівно для першого; розбирати
+     * ними відповідь на другий означало б отримати правдоподібні числа з нізвідки.
+     */
+    @Test
+    fun `refuses an answer to another request`() {
+        val result = TirePressureDecoder.decode(
+            "61 01 A7 4B 00 00 A8 4B 00 00 A6 4C 00 00 A7 4B 00 00",
+        )
+
+        assertFalse(result.known)
+    }
+
     /** Розкид — те, за чим дивляться на цей екран: одне колесо нижче за решту. */
     @Test
     fun `reports the spread between the wheels`() {

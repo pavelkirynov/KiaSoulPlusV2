@@ -172,7 +172,8 @@ object JournalFormat {
                 .takeIf { after.tires.known }
                 ?.joinToString("/") { num(it) }
                 ?: "-"
-            out += "$at tpms? «${raw.replace('\r', ' ').replace('\n', ' ')}» bar=$bars"
+            val asked = tireFrames.commands.firstOrNull() ?: "?"
+            out += "$at tpms? $asked «${raw.replace('\r', ' ').replace('\n', ' ')}» bar=$bars"
         }
 
         // СИРА ВІДПОВІДЬ КОЖНОГО БЛОКА, по рядку на блок.

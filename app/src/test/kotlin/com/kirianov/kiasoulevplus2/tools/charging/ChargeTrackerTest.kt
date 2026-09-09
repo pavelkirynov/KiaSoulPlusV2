@@ -603,6 +603,37 @@ class ChargeTrackerTest {
     }
 
     /**
+     * ПОРОЖНЯ СЕСІЯ НЕ СМІЄ ЗАТЕРТИ «ОСТАННЮ ЗАРЯДКУ», і це не вигаданий випадок.
+     *
+     * У живому журналі: водій увімкнув зарядку, застосунок побачив роз'єм і відкрив
+     * сесію — а за сорок секунд адаптер обірвався. Обрив знімає ознаку заряджання,
+     * сесія закрилася з нулем, і той нуль ліг у «остання зарядка» на місце
+     * справжніх 2.3 кВт·год.
+     */
+    @Test
+    fun `a session that saw nothing does not erase the last one`() {
+        // Попередня зарядка скінчилася давно — інакше нова сесія просто продовжила
+        // б її, і затирати було б нічого. У журналі так і було: остання зарядка о
+        // першій дня, нова спроба після півночі.
+        val longAgo = HOUR
+        val now = longAgo + 12 * HOUR
+        var log = observe(ChargeLog(), counter = 27_000.0, charging = false, nowMs = longAgo)
+        log = log.copy(lastSessionKwh = 2.3, lastSessionEndedAtMs = longAgo)
+
+        // Зарядка почалася на наших очах, але жодного приросту ми не побачили.
+        log = observe(log, counter = 27_000.0, charging = true, nowMs = now)
+        assertTrue(log.charging)
+        assertEquals(0.0, log.sessionKwh, 0.001)
+
+        // Обрив зв'язку: ознака заряджання зникла разом із ним.
+        val after = observe(log, counter = 27_000.0, charging = false, nowMs = now + MINUTE)
+
+        assertFalse(after.charging)
+        assertEquals(2.3, after.lastSessionKwh, 0.001)
+        assertEquals(longAgo, after.lastSessionEndedAtMs)
+    }
+
+    /**
      * ВИТЯГНУТИЙ РОЗ'ЄМ — НАЙТОЧНІШИЙ КІНЕЦЬ ЗАРЯДКИ З УСІХ, ЩО В НАС Є.
      *
      * До нього сесію закривало ввімкнене авто або пауза з порогами, тобто здогад

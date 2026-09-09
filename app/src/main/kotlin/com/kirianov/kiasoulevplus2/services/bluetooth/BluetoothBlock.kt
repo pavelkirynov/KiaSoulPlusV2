@@ -162,14 +162,50 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
      * «готую відповідь» на кожен перший запит, і з одним повтором тиску ми так і
      * не побачили (див. TIRE_BUSY_RETRIES).
      */
-    private suspend fun ask(header: String, request: String, retries: Int = 1): String {
-        var response = runCatching { canBridge.sendCANCommand(header, request) }.getOrDefault("")
+    private suspend fun ask(
+        header: String,
+        request: String,
+        retries: Int = 1,
+        patient: Boolean = false,
+    ): String {
+        suspend fun send(fallback: String) =
+            runCatching { canBridge.sendCANCommand(header, request, patient) }
+                .getOrDefault(fallback)
+
+        var response = send("")
         repeat(retries) {
             if (!NegativeResponse.busy(response, request)) return response
             delay(BUSY_RETRY_DELAY_MS)
-            response = runCatching { canBridge.sendCANCommand(header, request) }.getOrDefault(response)
+            response = send(response)
         }
         return response
+    }
+
+    /**
+     * Спитати блок тиску — терпляче й усіма мовами, які в нас є.
+     *
+     * ТЕРПЛЯЧЕ, бо цей блок відповідає «7F 22 78» («готую відповідь») і не
+     * встигає в заводські двісті мілісекунд: на повторі ми бачили «NO DATA», хоч
+     * блок відповідав — просто вже нікому.
+     *
+     * УСІМА МОВАМИ, бо котра з них його — ще не з'ясовано. Публікується перша
+     * відповідь по суті; якщо по суті не відповів ніхто, публікується остання, і
+     * вона піде в журнал сирою. Порожні відповіді не публікуються взагалі: у полі
+     * стану має лежати або свідчення, або нічого.
+     */
+    private suspend fun askTires() {
+        var last: Pair<String, String>? = null
+        for (request in TireCommands.REQUESTS) {
+            val response = ask(
+                TireCommands.HEADER,
+                request,
+                retries = TIRE_BUSY_RETRIES,
+                patient = true,
+            )
+            if (response.isNotBlank()) last = request to response
+            if (NegativeResponse.answeredWithData(response, request)) break
+        }
+        last?.let { (request, response) -> GeneralData.publishTireFrame(request, response) }
     }
 
     /**
@@ -395,10 +431,7 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
                 // «ні», це «спитай ще раз», і саме тому запит іде через ask, який
                 // перепитує. Трьох спроб досить: блок відповідає за десятки
                 // мілісекунд, просто не з першого разу.
-                GeneralData.publishTireFrame(
-                    TireCommands.REQUEST,
-                    ask(TireCommands.HEADER, TireCommands.REQUEST, retries = TIRE_BUSY_RETRIES),
-                )
+                askTires()
             }
 
             // Пробіг і швидкість приходять широкомовними кадрами, а не на запит,
