@@ -31,6 +31,7 @@ class VehicleBlock(
 
     fun start(scope: CoroutineScope) {
         senseCharging(scope)
+        readTires(scope)
         GeneralData.state
             .map { it.can.monitor }
             .filterNotNull()
@@ -81,6 +82,11 @@ class VehicleBlock(
                     sequence = state.can.batteryFrames?.sequence ?: -1L,
                     currentA = state.bms.batteryCurrent,
                     moving = state.vehicle.hasSpeed && state.vehicle.speedKmh > 0.0,
+                    // Роз'єм і слово BMS — з кадру 21 01, того самого, що й струм.
+                    // Вони не «висновок», а свідчення, тож проходять наскрізь.
+                    plugged = state.bms.hasData &&
+                        (state.bms.chademoPlugged || state.bms.j1772Plugged),
+                    bmsSaysCharging = state.bms.hasData && state.bms.bmsCharging,
                 )
             }
             .distinctUntilChanged()
@@ -94,12 +100,41 @@ class VehicleBlock(
 
                 val vehicle = GeneralData.state.value.vehicle
                 val charging = vehicle.charging
-                val updated = when {
-                    !tick.connected -> charging.copy(reported = false, sensed = false)
-                    charging.sensed != sensed -> charging.copy(sensed = sensed)
-                    else -> charging
+                val updated = if (tick.connected) {
+                    charging.copy(
+                        sensed = sensed,
+                        plugged = tick.plugged,
+                        bmsSaysCharging = tick.bmsSaysCharging,
+                    )
+                } else {
+                    // РОЗРИВ ЗВ'ЯЗКУ СКИДАЄ ВСЕ, включно з роз'ємом: без шини ми не
+                    // знаємо навіть того, чи він досі вставлений.
+                    charging.copy(
+                        reported = false,
+                        sensed = false,
+                        plugged = false,
+                        bmsSaysCharging = false,
+                    )
                 }
                 if (updated != charging) GeneralData.updateVehicle(vehicle.copy(charging = updated))
+            }
+            .launchIn(scope)
+    }
+
+    /**
+     * Тиск у шинах: відповідь чужого блока, тож і потік окремий.
+     *
+     * Розбирається тут, а не в блоці батареї: до батареї цей блок не має жодного
+     * стосунку, крім того, що обидва живуть на одній шині.
+     */
+    private fun readTires(scope: CoroutineScope) {
+        GeneralData.state
+            .map { it.can.tireFrames }
+            .filterNotNull()
+            .distinctUntilChanged()
+            .onEach { frames ->
+                val tires = TirePressureDecoder.decode(frames.responses.firstOrNull() ?: "")
+                if (tires.known) GeneralData.updateTires(tires)
             }
             .launchIn(scope)
     }
@@ -109,5 +144,7 @@ class VehicleBlock(
         val sequence: Long,
         val currentA: Double,
         val moving: Boolean,
+        val plugged: Boolean,
+        val bmsSaysCharging: Boolean,
     )
 }

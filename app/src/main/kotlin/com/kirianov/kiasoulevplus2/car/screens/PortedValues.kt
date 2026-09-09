@@ -31,6 +31,7 @@ import com.kirianov.kiasoulevplus2.Data.CabinControls
 import com.kirianov.kiasoulevplus2.Data.CarSystems
 import com.kirianov.kiasoulevplus2.Data.PackHealth
 import com.kirianov.kiasoulevplus2.Data.State
+import com.kirianov.kiasoulevplus2.Data.TireData
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.Data.WiperSpeed
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
@@ -71,17 +72,68 @@ object PortedValues {
         cellsByBms(state.bms, state.packHealth),
         service(state.bms),
         systems(state.carSystems, state.vehicle),
+        tires(state.tires),
     )
+
+    /**
+     * Тиск у шинах — те, чого в SoulEVSpy немає взагалі.
+     *
+     * Там читаються лише швидкості обертання коліс; тиск лежить у власному блоці
+     * 7A0, який на цій машині озивається. Розкладка байтів узята з наборів Torque
+     * та Car Scanner для Hyundai/Kia того ж покоління й НЕ ПЕРЕВІРЕНА: якщо тут
+     * прочерк, дивитися треба в журнал — сира відповідь блока лежить там цілком.
+     */
+    private fun tires(tires: TireData): PortedGroup {
+        val values = buildList {
+            add(
+                PortedValue(
+                    label = "Тиск, бар",
+                    text = if (tires.hasPressures) {
+                        tires.pressuresBar.joinToString(" / ") { formatDecimal(it, 2) }
+                    } else {
+                        DASH
+                    },
+                    state = verdict(tires.hasPressures, true),
+                    note = if (tires.hasPressures) {
+                        "розкид ${formatDecimal(tires.spreadBar, 2)} бар; порядок колес " +
+                            "(перед лівий, перед правий, зад лівий, зад правий) — здогад"
+                    } else {
+                        "блок 7A0 ще не відповів або відповів не тим: сира відповідь у журналі"
+                    },
+                ),
+            )
+            add(
+                PortedValue(
+                    label = "Температура датчиків",
+                    text = if (tires.known && tires.tempsC.size == TireData.WHEELS) {
+                        tires.tempsC.joinToString(" / ") { formatDecimal(it, 0) } + " °C"
+                    } else {
+                        DASH
+                    },
+                    state = verdict(tires.known && tires.tempsC.isNotEmpty(), true),
+                    note = "мусить бути близько до температури за бортом на стоянці й вище " +
+                        "за неї після їзди",
+                ),
+            )
+        }
+        return PortedGroup("Тиск у шинах", "блок 7A0, запит 22 C0 0B", values)
+    }
 
     // --- Кадр 21 01: межі, які виставляє сама BMS ------------------------------
 
     /**
      * Дві межі потужності й прапорці роз'ємів.
      *
-     * ГОЛОВНА ПЕРЕВІРКА ТУТ — РІВНІСТЬ. «Дозволено брати» й «дозволено вливати» —
-     * різні за природою обмеження: перше падає на низькому заряді, друге на
-     * високому. Однакові числа означають, що читаються не ті байти, і саме це
-     * показала перша поїздка: 90 і 90.
+     * ЦЯ ГРУПА ВЖЕ ОДИН РАЗ ЗБИЛА НАС ІЗ ПАНТЕЛИКУ, і виправлення варте того, щоб
+     * лежати тут. Перший журнал показав «брати 90, вливати 90», і рівність двох
+     * різних за природою обмежень виглядала як доказ не тих байтів. Насправді це
+     * СТАН СПОКОЮ: поки нічого не відбувається, обидві межі стоять на стелі
+     * дев'яноста кіловат. На живій зарядці той самий байт дав 65-78 кВт на прийом
+     * при 88-90 на віддачу — тобто байти правильні, а рівність нічого не значила.
+     *
+     * Мораль ширша за цей рядок: «два числа однакові» саме по собі не суперечність.
+     * Суперечністю воно стає лише тоді, коли ми знаємо, що вони МУСЯТЬ різнитися, —
+     * а в спокої вони не мусять.
      */
     private fun limits(bms: BmsData): PortedGroup {
         val values = buildList {
@@ -95,14 +147,9 @@ object PortedValues {
                 PortedValue(
                     label = "Дозволено брати",
                     text = kw(out.takeIf { bothKnown }),
-                    state = when {
-                        !bothKnown -> PortedState.Missing
-                        equal || tooBig -> PortedState.Suspect
-                        else -> PortedState.Working
-                    },
+                    state = verdict(bothKnown, !tooBig),
                     note = when {
                         !bothKnown -> "поле в кадрі 21 01 порожнє"
-                        equal -> "рівно стільки ж, скільки «вливати» — не ті байти"
                         tooBig -> "більше за все, на що здатен цей привід"
                         else -> ""
                     },
@@ -112,12 +159,13 @@ object PortedValues {
                 PortedValue(
                     label = "Дозволено вливати",
                     text = kw(into.takeIf { bothKnown }),
-                    state = when {
-                        !bothKnown -> PortedState.Missing
-                        equal || tooBig -> PortedState.Suspect
-                        else -> PortedState.Working
+                    state = verdict(bothKnown, !tooBig),
+                    note = if (equal) {
+                        "обидві межі на стелі 90 кВт — так виглядає спокій; на зарядці " +
+                            "ця падає (в журналі 65-78 кВт)"
+                    } else {
+                        ""
                     },
-                    note = if (equal) "звірити на зарядці: там ця межа мусить падати" else "",
                 ),
             )
 
@@ -162,10 +210,16 @@ object PortedValues {
      */
     private fun temperatures(bms: BmsData, health: PackHealth): PortedGroup {
         val modules = bms.moduleTempsC
-        val flatModules = modules.isNotEmpty() && modules.min() == modules.max()
+        val moduleSpread = if (modules.isEmpty()) 0.0 else modules.max() - modules.min()
+        val flatModules = modules.isNotEmpty() && moduleSpread == 0.0
         val flatPack = health.known && health.tempSpreadC == 0.0
-        val allFlat = flatModules && flatPack && modules.isNotEmpty() &&
-            modules.first() == health.maxTempC
+
+        // СПРАВЖНЯ СУПЕРЕЧНІСТЬ ТУТ ОДНА: пакет не може бути рівним, поки його ж
+        // модулі різняться. Перший журнал дав саме це — «максимум 29, мінімум 29»
+        // при восьми модулях від 24 до 28. Отже, ці два байти з кадру 21 05 не є
+        // межами пакета, хоч температура входу поруч із ними ходить окремо й
+        // правдоподібно.
+        val allFlat = flatPack && moduleSpread > MIN_REAL_SPREAD_C
 
         val values = buildList {
             add(
@@ -180,16 +234,11 @@ object PortedValues {
                 PortedValue(
                     label = "Вісім модулів",
                     text = if (modules.isEmpty()) DASH else modules.joinToString(" / ") { temp(it) },
-                    state = when {
-                        modules.isEmpty() -> PortedState.Missing
-                        allFlat -> PortedState.Suspect
-                        else -> PortedState.Working
-                    },
+                    state = verdict(modules.isNotEmpty(), true),
                     note = when {
                         modules.isEmpty() -> "кадр коротший за місце, де вони лежать"
-                        allFlat -> "усі однакові разом із межами пакета — схоже на один байт"
                         flatModules -> "усі однакові: можливо, пакет справді вирівняний"
-                        else -> "розкид ${temp(modules.max() - modules.min())}"
+                        else -> "розкид ${temp(moduleSpread)}"
                     },
                 ),
             )
@@ -198,7 +247,12 @@ object PortedValues {
                     label = "Максимум по пакету",
                     text = temp(health.maxTempC.takeIf { health.known }),
                     state = verdict(health.known, !allFlat),
-                    note = if (allFlat) "не відрізняється ні від мінімуму, ні від модулів" else "",
+                    note = if (allFlat) {
+                        "дорівнює мінімуму, хоч самі модулі різняться на " +
+                            "${temp(moduleSpread)} — це не межа пакета"
+                    } else {
+                        ""
+                    },
                 ),
             )
             add(
@@ -217,7 +271,10 @@ object PortedValues {
                 PortedValue(
                     label = "Вхід контуру",
                     text = temp(health.inletTempC.takeIf { health.known }),
-                    state = verdict(health.known, !allFlat),
+                    // Цей байт ходить окремо від пари «максимум-мінімум»: у журналі
+                    // стояло tMax=29 tMin=29 tIn=30. Отже, зміщення саме його
+                    // правильне, і в чужі підозри його тягнути нема за що.
+                    state = verdict(health.known, true),
                 ),
             )
             add(
@@ -407,10 +464,16 @@ object PortedValues {
                     state = verdict(wheels.known, wheelGap == null || wheelGap < MAX_SPEED_GAP),
                     note = when {
                         !wheels.known -> "кадр 4B0 ще не приходив"
-                        wheelGap == null -> "звірити з кадром 4F0 можна лише на ходу"
-                        wheelGap >= MAX_SPEED_GAP -> "середнє розходиться з кадром 4F0 на " +
-                            "${formatDecimal(wheelGap, 1)} км/год"
-                        else -> "розбіг колес ${formatDecimal(wheels.spreadKmh, 1)} км/год"
+                        wheelGap == null || busSpeed == null || busSpeed < MIN_SPEED_TO_COMPARE ->
+                            "звірити з кадром 4F0 можна лише на ходу"
+                        // ВІДНОШЕННЯ, А НЕ РІЗНИЦЯ, бо саме воно викриває хибний
+                        // дільник. У журналі колеса стояли на 11-14 % вище за 4F0
+                        // двічі підряд: якщо це не різниця в часі зняття двох вікон,
+                        // то дільник має бути 33.6, а не 30. Ділити треба на рівній
+                        // швидкості — тоді два вікна поспіль показують одне й те саме.
+                        else -> "×${formatDecimal(wheels.averageKmh / busSpeed, 2)} до кадру 4F0 " +
+                            "(${formatDecimal(busSpeed, 1)} км/год), розбіг колес " +
+                            "${formatDecimal(wheels.spreadKmh, 1)} км/год"
                     },
                 ),
             )
@@ -419,10 +482,17 @@ object PortedValues {
             val driveGap = busSpeed?.let { abs(drive.speedKmh - it) }
             add(
                 PortedValue(
-                    label = "Запалювання",
-                    text = if (drive.known) yesNo(drive.ignitionOn) else DASH,
-                    state = verdict(drive.known, true),
-                    note = "біти 6-7 байта 2 кадру 4F2: саме вони змінюються з 00 на C0",
+                    label = "Біти 6-7 байта 2 (4F2)",
+                    text = if (drive.known) drive.counterBits.toString() else DASH,
+                    // ПІДОЗРА ТУТ ПОСТІЙНА, І ЦЕ НЕ ПОМИЛКА ЧИТАННЯ, А ЧЕСНА
+                    // ПОЗНАЧКА: ми вважали ці біти запалюванням, бо при повороті
+                    // ключа вони змінюються з 00 на C0. Журнал це заперечив — нуль
+                    // на 91.5 км/год і одиниця на нерухомій машині. Поки не
+                    // з'ясовано, що це таке, поле не має права виглядати робочим.
+                    state = verdict(drive.known, false),
+                    note = "малося за запалювання, але в журналі нуль на 91.5 км/год і " +
+                        "одиниця на місці — ключ так не поводиться. Якщо перебирає 0-1-2-3, " +
+                        "це лічильник кадру",
                 ),
             )
             add(
@@ -442,10 +512,12 @@ object PortedValues {
 
             add(
                 PortedValue(
-                    label = "Ручник",
-                    text = if (systems.brake.known) yesNo(systems.brake.parkingBrakeOn) else DASH,
+                    label = "Гальмо: біт 3 байта 2 (433)",
+                    text = if (systems.brake.known) yesNo(systems.brake.brakeBit) else DASH,
                     state = verdict(systems.brake.known, true),
-                    note = "перевіряється просто: підняти й опустити",
+                    note = "SoulEVSpy зве це ручником; у нас він стояв на нулі на стоянці й " +
+                        "піднявся рівно перед рухом — схоже радше на педаль. Перевірка: " +
+                        "підняти ручник на місці й подивитися, чи змінився",
                 ),
             )
 
@@ -541,4 +613,20 @@ object PortedValues {
 
     /** Наскільки два джерела швидкості можуть розійтися, км/год. */
     private const val MAX_SPEED_GAP = 10.0
+
+    /**
+     * Нижче цієї швидкості звіряти джерела нема сенсу, км/год.
+     *
+     * На малому ходу відношення двох чисел злітає в небо від будь-якої різниці в
+     * часі зняття: 2 км/год проти 1 це «×2», хоч насправді це та сама мить.
+     */
+    private const val MIN_SPEED_TO_COMPARE = 20.0
+
+    /**
+     * Розкид температур, який уже точно не похибка округлення, °C.
+     *
+     * Модулі приходять цілими градусами, тож один градус різниці буває просто
+     * округленням двох близьких чисел у різні боки.
+     */
+    private const val MIN_REAL_SPREAD_C = 1.0
 }

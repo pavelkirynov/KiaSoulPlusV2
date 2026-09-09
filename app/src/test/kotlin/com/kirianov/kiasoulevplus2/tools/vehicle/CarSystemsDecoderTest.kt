@@ -50,10 +50,15 @@ class CarSystemsDecoderTest {
         assertFalse(result.wheels.known)
     }
 
+    /**
+     * Біт 3 байта 2. SoulEVSpy зве його ручником; на цій машині він піднявся рівно
+     * перед рухом, тобто радше під педаллю. Тест стежить за БІТОМ, а не за назвою:
+     * що він означає — питання до машини, а не до декодера.
+     */
     @Test
-    fun `reads the parking brake from bit three of byte two`() {
-        assertTrue(decode(frame("433", 0x00, 0x00, 0x08)).brake.parkingBrakeOn)
-        assertFalse(decode(frame("433", 0x00, 0x00, 0x00)).brake.parkingBrakeOn)
+    fun `reads the brake bit from bit three of byte two`() {
+        assertTrue(decode(frame("433", 0x00, 0x00, 0x08)).brake.brakeBit)
+        assertFalse(decode(frame("433", 0x00, 0x00, 0x00)).brake.brakeBit)
         assertTrue(decode(frame("433", 0x00, 0x00, 0x00)).brake.known)
     }
 
@@ -108,16 +113,26 @@ class CarSystemsDecoderTest {
 
     /**
      * ГОЛОВНЕ ВИПРАВЛЕННЯ ДО SoulEVSpy. Їхня формула складає в швидкість старший
-     * біт байта 2 і на нерухомій машині з увімкненим запалюванням дає рівно
-     * 128 км/год. Ми читаємо швидкість самим байтом 1, а ті біти — як запалювання.
+     * біт байта 2 і на нерухомій машині дає рівно 128 км/год. Ми читаємо швидкість
+     * самим байтом 1, а пару бітів зберігаємо окремо — значенням, бо що вона
+     * означає, досі не з'ясовано.
      */
     @Test
-    fun `does not fold the ignition bit into the speed`() {
+    fun `does not fold the high bits into the speed`() {
         val result = decode(frame("4F2", 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0xB0))
 
         assertTrue(result.drive.known)
         assertEquals(0.0, result.drive.speedKmh, 0.001)
-        assertTrue(result.drive.ignitionOn)
+        assertEquals(3, result.drive.counterBits)
+    }
+
+    /** Пара бітів читається значенням 0-3: лічильник кадру видно лише так. */
+    @Test
+    fun `keeps the two high bits as a number`() {
+        assertEquals(0, decode(frame("4F2", 0, 0, 0x00, 0, 0, 0, 0, 0)).drive.counterBits)
+        assertEquals(1, decode(frame("4F2", 0, 0, 0x40, 0, 0, 0, 0, 0)).drive.counterBits)
+        assertEquals(2, decode(frame("4F2", 0, 0, 0x80, 0, 0, 0, 0, 0)).drive.counterBits)
+        assertEquals(3, decode(frame("4F2", 0, 0, 0xC0, 0, 0, 0, 0, 0)).drive.counterBits)
     }
 
     @Test
@@ -125,7 +140,7 @@ class CarSystemsDecoderTest {
         val result = decode(frame("4F2", 0x00, 100, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00))
 
         assertEquals(50.0, result.drive.speedKmh, 0.001)
-        assertFalse(result.drive.ignitionOn)
+        assertEquals(0, result.drive.counterBits)
     }
 
     /** Кадри приходять різними вікнами, тож нове домішується до старого. */
@@ -137,7 +152,7 @@ class CarSystemsDecoderTest {
             listOf(frame("567", 0x00, 1, 2, 3, 0x00, 0x00, 0x00, 0x00)),
         )
 
-        assertTrue(second.brake.parkingBrakeOn)
+        assertTrue(second.brake.brakeBit)
         assertEquals("01:02:03", second.clock.text)
     }
 

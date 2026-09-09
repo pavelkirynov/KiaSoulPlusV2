@@ -44,6 +44,11 @@ data class State(
      */
     val carSystems: CarSystems = CarSystems(),
 
+    /**
+     * Тиск у шинах: окремий блок 7A0, окремий рідкий запит. Веде tools/vehicle.
+     */
+    val tires: TireData = TireData(),
+
     /** Що відомо про зарядки: рахується за пожиттєвим лічильником BMS. */
     val charge: ChargeLog = ChargeLog(),
 

@@ -603,6 +603,104 @@ class ChargeTrackerTest {
     }
 
     /**
+     * ВИТЯГНУТИЙ РОЗ'ЄМ — НАЙТОЧНІШИЙ КІНЕЦЬ ЗАРЯДКИ З УСІХ, ЩО В НАС Є.
+     *
+     * До нього сесію закривало ввімкнене авто або пауза з порогами, тобто здогад
+     * про подію, якої ніхто не бачив. А байт роз'єму з кадру 21 01 приходить
+     * щосекунди й однаково працює на змінному й на постійному струмі — це та сама
+     * дія, яку зробила людина, коли вийняла пістолет.
+     */
+    @Test
+    fun `pulling the plug closes an open charge`() {
+        var log = observe(ChargeLog(), counter = 27_089.2, charging = true, nowMs = HOUR,
+            dischargedKwh = 26_041.4, socPercent = 80.0)
+        log = observe(log, counter = 27_089.5, charging = true, nowMs = HOUR + MINUTE,
+            dischargedKwh = 26_041.4, socPercent = 80.0)
+
+        val after = ChargeTracker.observe(
+            log = log,
+            counterKwh = 27_094.0,
+            dischargedKwh = 26_042.6,
+            socPercent = 79.0,
+            isCharging = false,
+            nowMs = HOUR + 12 * HOUR,
+            dayKey = day,
+            plugged = false,
+        )
+
+        assertFalse(after.charging)
+        assertEquals(4.8, after.lastSessionKwh, 0.001)
+        assertTrue(after.lastDecision, after.lastDecision.contains("роз'єм"))
+    }
+
+    /**
+     * ЩО САМЕ ДОДАЄ РОЗ'ЄМ — видно лише в порівнянні з «не знаю».
+     *
+     * Обидва випадки закривають сесію: ознака зарядки зникла. Різниця в тому,
+     * СКІЛЬКИ в неї зараховано. Без роз'єму зараховується тільки те, що ми
+     * бачили живцем (0.3), бо пауза закоротка, щоб шукати пропущену зарядку за
+     * порогами. З витягнутим роз'ємом зараховується вся різниця лічильника (4.8):
+     * зарядка почалася на наших очах, авто відтоді стояло, і зрости лічильник
+     * прийнятої міг лише від неї.
+     *
+     * «Не знаю» тут не менш важливе за «немає»: роз'єм невідомий рівно тоді, коли
+     * немає зв'язку, — тобто саме тоді, коли авто й стоїть на зарядці без
+     * телефона. Вигадувати за нього кінець зарядки не можна.
+     */
+    @Test
+    fun `an unknown plug credits only what we saw, the missing plug credits it all`() {
+        var log = observe(ChargeLog(), counter = 27_089.2, charging = true, nowMs = HOUR,
+            dischargedKwh = 26_041.4, socPercent = 80.0)
+        log = observe(log, counter = 27_089.5, charging = true, nowMs = HOUR + MINUTE,
+            dischargedKwh = 26_041.4, socPercent = 80.0)
+
+        fun close(plugged: Boolean?) = ChargeTracker.observe(
+            log = log,
+            counterKwh = 27_094.0,
+            dischargedKwh = 26_042.6,
+            socPercent = 79.0,
+            isCharging = false,
+            nowMs = HOUR + 2 * MINUTE,
+            dayKey = day,
+            plugged = plugged,
+        )
+
+        assertEquals(0.3, close(null).lastSessionKwh, 0.001)
+        assertEquals(4.8, close(false).lastSessionKwh, 0.001)
+    }
+
+    /**
+     * А ось поїздку витягнутий роз'єм зарядкою не робить.
+     *
+     * Це не вигаданий випадок: телефон під'єднується вже в дорозі, роз'єму справді
+     * немає, а приріст лічильника прийнятої встиг набігти від рекуперації. Ловить
+     * це та сама перевірка, що й для запалювання, — обвал заряду.
+     */
+    @Test
+    fun `pulling the plug does not turn a trip into a charge`() {
+        var log = observe(ChargeLog(), counter = 27_000.0, charging = true, nowMs = HOUR,
+            dischargedKwh = 26_000.0, socPercent = 80.0)
+        log = observe(log, counter = 27_000.3, charging = true, nowMs = HOUR + MINUTE,
+            dischargedKwh = 26_000.0, socPercent = 80.0)
+
+        val after = ChargeTracker.observe(
+            log = log,
+            counterKwh = 27_006.7,
+            dischargedKwh = 26_012.0,
+            socPercent = 43.0,
+            isCharging = false,
+            nowMs = HOUR + 2 * HOUR,
+            dayKey = day,
+            plugged = false,
+        )
+
+        // У сесію пішло тільке те, що ми бачили живцем; шість кіловат-годин
+        // рекуперації в неї не потрапили.
+        assertEquals(0.3, after.lastSessionKwh, 0.001)
+        assertTrue("Причина відмови має бути записана", after.lastDecision.isNotEmpty())
+    }
+
+    /**
      * Кінець зарядки — це стан «авто ввімкнене», а не мить, коли його ввімкнули.
      * Тут заряд навіть трохи просів за ніч простою, і це не привід не рахувати.
      */

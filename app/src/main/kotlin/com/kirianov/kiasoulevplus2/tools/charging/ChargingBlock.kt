@@ -56,6 +56,16 @@ class ChargingBlock(
                         socPercent = it.bms.displaySoc,
                         isCharging = it.vehicle.charging.isCharging,
                         ignitionOn = ignitionOn(it.vehicle),
+                        // ТРИ СТАНИ, А НЕ ДВА. «Роз'єму немає» закриває сесію, а
+                        // «не знаю» мусить лишати її відкритою: без зв'язку або без
+                        // кадру батареї ми не знаємо навіть того, чи авто ще стоїть
+                        // на зарядці, і закривати її на цій підставі — та сама
+                        // помилка, через яку колись пропала ціла ніч.
+                        plugged = if (it.isConnected && it.bms.hasData) {
+                            it.vehicle.charging.plugged
+                        } else {
+                            null
+                        },
                         request = it.charge.request,
                         carKnown = it.carAccounting,
                     )
@@ -107,6 +117,7 @@ class ChargingBlock(
                         nowMs = now,
                         dayKey = day,
                         ignitionOn = reading.ignitionOn,
+                        plugged = reading.plugged,
                     )
                     if (updated == log) return@collect
 
@@ -123,6 +134,9 @@ class ChargingBlock(
         val socPercent: Double,
         val isCharging: Boolean,
         val ignitionOn: Boolean,
+
+        /** Чи вставлений роз'єм; null — не знаємо. */
+        val plugged: Boolean?,
         val request: ChargeRequest,
 
         /** Чи підтверджено, що числа дає саме активне авто. */

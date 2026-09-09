@@ -2,8 +2,8 @@
 // ДЕКОДЕР КАДРІВ СИСТЕМ АВТО (CarSystemsDecoder)
 //
 // Розкладає п'ять кадрів, які знайшлися у вихідниках SoulEVSpy і яких у нас не було:
-// 4B0 (колеса), 433 (ручник), 050 (світло, склоочисники, поворотники), 567
-// (годинник) і 4F2 (швидкість із бітом запалювання).
+// 4B0 (колеса), 433 (гальмо), 050 (світло, склоочисники, поворотники), 567
+// (годинник) і 4F2 (швидкість плюс пара бітів, які ми хибно вважали запалюванням).
 //
 // ЧОМУ ОКРЕМИЙ ДЕКОДЕР, А НЕ ДОПИСАТИ ДО BroadcastDecoder. Той декодер живить
 // розрахунки — пробіг, SOC, запас ходу; його формули перевірені на цій машині
@@ -75,7 +75,7 @@ object CarSystemsDecoder {
 
     private fun brake(b: List<Int>): BrakeState? {
         if (b.size < 3) return null
-        return BrakeState(known = true, parkingBrakeOn = b[2] and PARKING_BRAKE_BIT != 0)
+        return BrakeState(known = true, brakeBit = b[2] and BRAKE_BIT != 0)
     }
 
     private fun cabin(b: List<Int>): CabinControls? {
@@ -139,18 +139,22 @@ object CarSystemsDecoder {
     }
 
     /**
-     * Швидкість і запалювання з одного кадру.
+     * Швидкість і пара непояснених бітів з одного кадру.
      *
      * Швидкість — самим байтом 1, без старшого біта байта 2, який SoulEVSpy до неї
-     * додає. На цій машині той біт означає запалювання, і його додавання давало
-     * 128 км/год на місці.
+     * додає: з тим бітом виходило 128 км/год на нерухомій машині, а без нього —
+     * рівно те саме, що в кадрі 4F0.
+     *
+     * Біти 6-7 байта 2 зберігаються ЗНАЧЕННЯМ, а не прапорцем. Ми вважали їх
+     * запалюванням, і журнал це заперечив: нуль на 91.5 км/год, одиниця на місці.
+     * Якщо це лічильник кадру, він переберає 0-1-2-3, і саме це тепер видно.
      */
     private fun drive(b: List<Int>): DriveState? {
         if (b.size < 8) return null
         return DriveState(
             known = true,
             speedKmh = b[1] / 2.0,
-            ignitionOn = b[2] and MASK_IGNITION != 0,
+            counterBits = (b[2] and MASK_COUNTER_BITS) shr COUNTER_BITS_SHIFT,
         )
     }
 
@@ -167,15 +171,19 @@ object CarSystemsDecoder {
      */
     private const val MAX_PLAUSIBLE_SPEED_KMH = 300.0
 
-    private const val PARKING_BRAKE_BIT = 0x08
+    private const val BRAKE_BIT = 0x08
 
     private const val MASK_LIGHTS = 0x03
     private const val MASK_WIPERS_STEP = 0xF0
     private const val MASK_WIPERS = 0x07
     private const val MASK_TURN_SIGNAL = 0x30
 
-    /** Біти 6-7 байта 2: саме вони змінюються з 00 на C0 при повороті ключа. */
-    private const val MASK_IGNITION = 0xC0
+    /**
+     * Біти 6-7 байта 2. При повороті ключа вони справді змінюються з 00 на C0 —
+     * тому ми й вважали їх запалюванням, — але в дорозі поводяться не як ключ.
+     */
+    private const val MASK_COUNTER_BITS = 0xC0
+    private const val COUNTER_BITS_SHIFT = 6
 
     private const val MAX_HOUR = 23
     private const val MAX_MINUTE = 59

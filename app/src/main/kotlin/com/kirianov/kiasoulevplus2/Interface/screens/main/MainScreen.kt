@@ -31,6 +31,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.CalculatedData
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
+import com.kirianov.kiasoulevplus2.Data.ChargingState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
 import com.kirianov.kiasoulevplus2.Data.ConsumptionWindow
@@ -82,7 +83,11 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
         // тими, на яких стоять розрахунки: на головній воно читається як факт.
         LifetimeCountersCard(bms)
 
-        ChargeCard(state.charge, onFinish = GeneralData::requestChargeFinish)
+        ChargeCard(
+            charge = state.charge,
+            charging = state.vehicle.charging,
+            onFinish = GeneralData::requestChargeFinish,
+        )
 
         VehicleCard(state.vehicle)
 
@@ -245,7 +250,7 @@ private fun CellsCard(calculated: CalculatedData) {
  * і головне — лічильник враховує те, що сталося без телефона.
  */
 @Composable
-private fun ChargeCard(charge: ChargeLog, onFinish: () -> Unit) {
+private fun ChargeCard(charge: ChargeLog, charging: ChargingState, onFinish: () -> Unit) {
     if (!charge.hasBaseline && !charge.hasLastSession && !charge.hasToday) return
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -254,6 +259,20 @@ private fun ChargeCard(charge: ChargeLog, onFinish: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(text = "Зарядка", fontSize = 18.sp)
+
+            // РОЗ'ЄМ — тепер головна межа зарядки, тож він і стоїть першим рядком.
+            // Кадр 21 01 повідомляє про нього щосекунди й однаково на змінному та
+            // постійному струмі, тобто це те саме свідчення, яке має людина, коли
+            // вставляє пістолет. Прочерк тут означає, що кадр батареї ще не
+            // прийшов, а не що роз'єму немає.
+            MetricRow(
+                "Роз'єм",
+                when {
+                    charging.plugCharging -> "вставлений, іде зарядка"
+                    charging.plugged -> "вставлений, зарядка не йде"
+                    else -> "не вставлений"
+                },
+            )
 
             if (charge.charging) {
                 MetricRow(

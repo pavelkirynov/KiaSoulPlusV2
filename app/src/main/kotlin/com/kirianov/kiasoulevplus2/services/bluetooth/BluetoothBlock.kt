@@ -22,6 +22,7 @@ import com.kirianov.kiasoulevplus2.Data.Ecus
 import com.kirianov.kiasoulevplus2.Data.FaultScanRequest
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.PairedDevice
+import com.kirianov.kiasoulevplus2.Data.TireCommands
 import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
 import com.kirianov.kiasoulevplus2.tools.frames.NegativeResponse
 import com.kirianov.kiasoulevplus2.tools.frames.VinDecoder
@@ -380,6 +381,16 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
                 )
             }
 
+            // ТИСК У ШИНАХ — ЧУЖИЙ БЛОК, а не батарея: свій заголовок, свій запит.
+            // Зсунутий на пів кроку від зносу навмисно, щоб два рідких запити не
+            // ставали в один і той самий такт і не робили його вдвічі довшим.
+            if (pollTick % TIRES_EVERY_N_POLLS == TIRES_OFFSET_POLLS) {
+                GeneralData.publishTireFrame(
+                    TireCommands.REQUEST,
+                    canBridge.sendCANCommand(TireCommands.HEADER, TireCommands.REQUEST),
+                )
+            }
+
             // Пробіг і швидкість приходять широкомовними кадрами, а не на запит,
             // тому раз на кілька циклів слухаємо шину в режимі монітора.
             if (pollTick++ % MONITOR_EVERY_N_POLLS == 0L) captureBroadcast()
@@ -545,11 +556,25 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
         /**
          * Один запит зносу комірок на кожні стільки циклів опитування.
          *
-         * Двісті циклів — це кілька хвилин ходу. Знос комірок міряється місяцями,
-         * межі температур — хвилинами; частіше питати нема за чим, а шина в нас
-         * одна й на ній уже й так черга.
+         * Було двісті — близько п'яти хвилин, — і на живому екрані це виявилося
+         * задовго: людина під'єднується, дивиться на розділ «Системи», а половина
+         * рядків там стоїть прочерком просто тому, що кадр іще не встиг прийти.
+         * Сто циклів — це близько двох хвилин, і за них екран заповнюється; знос
+         * від цього не змінюється, але видно його тепер одразу.
          */
-        const val HEALTH_EVERY_N_POLLS = 200L
+        const val HEALTH_EVERY_N_POLLS = 100L
+
+        /** Один запит тиску в шинах на кожні стільки циклів опитування. */
+        const val TIRES_EVERY_N_POLLS = 100L
+
+        /**
+         * Зсув запиту тиску відносно запиту зносу, у циклах.
+         *
+         * Обидва рідкі, обидва довгі, і в один такт їм ставати ні до чого: такт і
+         * так має бюджет часу, а два зайвих обміни поспіль з'їдають його вдвічі
+         * швидше.
+         */
+        const val TIRES_OFFSET_POLLS = 50L
 
         /**
          * Вікно вільного прослуховування, без фільтра. Коротке навмисно: адаптер

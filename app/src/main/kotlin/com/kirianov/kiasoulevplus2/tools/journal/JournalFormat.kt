@@ -58,6 +58,11 @@ object JournalFormat {
             add("U=${num(bms.batteryVoltage)}")
             add("I=${num(bms.batteryCurrent)}")
             add("chg=${flag(vehicle.charging.isCharging)}")
+            // РОЗ'ЄМ І СЛОВО BMS. Саме за ними тепер закривається сесія зарядки,
+            // тож у журналі вони мусять стояти поруч із самою ознакою: інакше
+            // «чому зарядку закрито» знову доведеться вгадувати.
+            add("plug=${flag(vehicle.charging.plugged)}")
+            add("bmsChg=${flag(vehicle.charging.bmsSaysCharging)}")
             // МЕЖІ, ЯКІ ВИСТАВЛЯЄ САМА BMS, і 12-вольтовий акумулятор. Перше
             // об'єднує «машина не тягне» з «батарея не дозволяє», друге —
             // найчастіша причина «не запускається» в електромобілі.
@@ -156,6 +161,19 @@ object JournalFormat {
         }
 
         out += carSystems(before, after, at)
+
+        // СИРА ВІДПОВІДЬ БЛОКА ТИСКУ, ЦІЛКОМ. Розкладка байтів у ній — здогад із
+        // чужих наборів, і якщо тиск на екрані стоїть прочерком, відповідь на «де
+        // ж він лежить» мусить бути в журналі, а не в наступній поїздці.
+        val tireFrames = after.can.tireFrames
+        if (tireFrames != null && tireFrames.sequence != before.can.tireFrames?.sequence) {
+            val raw = tireFrames.responses.firstOrNull()?.trim()?.ifEmpty { "тиша" } ?: "тиша"
+            val bars = after.tires.pressuresBar
+                .takeIf { after.tires.known }
+                ?.joinToString("/") { num(it) }
+                ?: "-"
+            out += "$at tpms? «${raw.replace('\r', ' ').replace('\n', ' ')}» bar=$bars"
+        }
 
         // СИРА ВІДПОВІДЬ КОЖНОГО БЛОКА, по рядку на блок.
         //
@@ -317,18 +335,22 @@ object JournalFormat {
 
         if (now.wheels.known && now.wheels != was.wheels) {
             val w = now.wheels
+            val busSpeed = after.vehicle.speedKmh.takeIf { after.vehicle.hasSpeed && it > 0.0 }
             out += "$at wheel fl=${num(w.frontLeftKmh)} fr=${num(w.frontRightKmh)} " +
                 "rl=${num(w.rearLeftKmh)} rr=${num(w.rearRightKmh)} " +
-                "spread=${num(w.spreadKmh)} v4F0=${num(after.vehicle.speedKmh.takeIf { after.vehicle.hasSpeed })}"
+                "spread=${num(w.spreadKmh)} v4F0=${num(busSpeed)} " +
+                // ВІДНОШЕННЯ, А НЕ РІЗНИЦЯ: різниця росте зі швидкістю й нічого не
+                // каже, а відношення просто дорівнює хибному дільнику, якщо він хибний.
+                "x=${num(busSpeed?.let { w.averageKmh / it })}"
         }
 
         if (now.drive.known && now.drive != was.drive) {
-            out += "$at key ign=${flag(now.drive.ignitionOn)} v4F2=${num(now.drive.speedKmh)} " +
+            out += "$at f4F2 bits=${now.drive.counterBits} v4F2=${num(now.drive.speedKmh)} " +
                 "v4F0=${num(after.vehicle.speedKmh.takeIf { after.vehicle.hasSpeed })}"
         }
 
         if (now.brake.known && now.brake != was.brake) {
-            out += "$at brake hand=${flag(now.brake.parkingBrakeOn)}"
+            out += "$at brake bit=${flag(now.brake.brakeBit)} v=${num(after.vehicle.speedKmh.takeIf { after.vehicle.hasSpeed })}"
         }
 
         if (now.cabin.known && now.cabin != was.cabin) {

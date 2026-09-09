@@ -56,6 +56,17 @@ object GeneralData {
     /** Розібраний знос батареї: пише блок tools/battery. */
     fun updatePackHealth(health: PackHealth) = _state.update { it.copy(packHealth = health) }
 
+    /** Сира відповідь блока тиску в шинах. Розбирає її блок tools/vehicle. */
+    fun publishTireFrame(command: String, response: String) =
+        _state.update {
+            it.copy(
+                can = it.can.copy(tireFrames = nextFrames(listOf(command), listOf(response))),
+            )
+        }
+
+    /** Розібраний тиск у шинах: пише блок tools/vehicle. */
+    fun updateTires(tires: TireData) = _state.update { it.copy(tires = tires) }
+
     fun publishBatteryFrames(commands: List<String>, responses: List<String>) =
         _state.update {
             it.copy(can = it.can.copy(batteryFrames = nextFrames(commands, responses)))

@@ -107,8 +107,8 @@ class JournalTest {
                     rearLeftKmh = 49.5,
                     rearRightKmh = 50.5,
                 ),
-                drive = DriveState(known = true, speedKmh = 50.0, ignitionOn = true),
-                brake = BrakeState(known = true, parkingBrakeOn = true),
+                drive = DriveState(known = true, speedKmh = 50.0, counterBits = 3),
+                brake = BrakeState(known = true, brakeBit = true),
                 clock = CarClock(known = true, hour = 14, minute = 35, second = 7),
             ),
         )
@@ -119,12 +119,14 @@ class JournalTest {
         assertTrue(wheels, wheels.contains("fl=49 "))
         assertTrue(wheels, wheels.contains("spread=2 "))
         assertTrue(wheels, wheels.contains("v4F0=50"))
+        // Відношення до кадру 4F0: саме воно викриває хибний дільник.
+        assertTrue(wheels, wheels.contains("x=1"))
 
-        val key = lines.first { it.contains(" key ") }
-        assertTrue(key, key.contains("ign=1"))
-        assertTrue(key, key.contains("v4F2=50 "))
+        val f4F2 = lines.first { it.contains(" f4F2 ") }
+        assertTrue(f4F2, f4F2.contains("bits=3"))
+        assertTrue(f4F2, f4F2.contains("v4F2=50 "))
 
-        assertTrue(lines.toString(), lines.any { it.contains("brake hand=1") })
+        assertTrue(lines.toString(), lines.any { it.contains("brake bit=1") })
         assertTrue(lines.toString(), lines.any { it.contains("clock car=14:35:07") })
     }
 
