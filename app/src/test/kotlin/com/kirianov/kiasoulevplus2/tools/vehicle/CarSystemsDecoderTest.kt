@@ -123,16 +123,18 @@ class CarSystemsDecoderTest {
 
         assertTrue(result.drive.known)
         assertEquals(0.0, result.drive.speedKmh, 0.001)
-        assertEquals(3, result.drive.counterBits)
     }
 
-    /** Пара бітів читається значенням 0-3: лічильник кадру видно лише так. */
+    /**
+     * Старші біти байта 2 на швидкість не впливають ЖОДНИМ значенням: саме там і
+     * жив той злополучний біт, який SoulEVSpy додає до швидкості.
+     */
     @Test
-    fun `keeps the two high bits as a number`() {
-        assertEquals(0, decode(frame("4F2", 0, 0, 0x00, 0, 0, 0, 0, 0)).drive.counterBits)
-        assertEquals(1, decode(frame("4F2", 0, 0, 0x40, 0, 0, 0, 0, 0)).drive.counterBits)
-        assertEquals(2, decode(frame("4F2", 0, 0, 0x80, 0, 0, 0, 0, 0)).drive.counterBits)
-        assertEquals(3, decode(frame("4F2", 0, 0, 0xC0, 0, 0, 0, 0, 0)).drive.counterBits)
+    fun `the high bits never leak into the speed`() {
+        listOf(0x00, 0x40, 0x80, 0xC0).forEach { byte2 ->
+            val result = decode(frame("4F2", 0, 100, byte2, 0, 0, 0, 0, 0))
+            assertEquals(50.0, result.drive.speedKmh, 0.001)
+        }
     }
 
     @Test
@@ -140,7 +142,6 @@ class CarSystemsDecoderTest {
         val result = decode(frame("4F2", 0x00, 100, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00))
 
         assertEquals(50.0, result.drive.speedKmh, 0.001)
-        assertEquals(0, result.drive.counterBits)
     }
 
     /** Кадри приходять різними вікнами, тож нове домішується до старого. */

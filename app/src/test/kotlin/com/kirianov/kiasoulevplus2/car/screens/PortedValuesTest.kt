@@ -161,23 +161,49 @@ class PortedValuesTest {
         assertEquals(PortedState.Working, valueOf(state, "Максимум по пакету").state)
     }
 
-    /** Швидкість приходить трьома шляхами, і всі три мусять сходитися. */
+    /**
+     * ГРУБИЙ перекіс — ознака хибного дільника, і його треба ловити.
+     *
+     * А от помірна розбіжність ознакою НЕ Є: два вікна монітора знімаються за
+     * п'ять-десять секунд одне від одного, і за цей час швидкість на розгоні
+     * справді змінюється. Живий журнал дав двадцять три пари з відношенням від
+     * 0.56 до 1.61 при правильному дільнику — див. наступний тест.
+     */
     @Test
-    fun `wheel speeds that disagree with frame 4F0 are suspect`() {
+    fun `wheel speeds that are wildly off frame 4F0 are suspect`() {
         val state = stateOf(
             systems = CarSystems(
                 wheels = WheelSpeeds(
                     known = true,
-                    frontLeftKmh = 90.0,
-                    frontRightKmh = 90.0,
-                    rearLeftKmh = 90.0,
-                    rearRightKmh = 90.0,
+                    frontLeftKmh = 300.0,
+                    frontRightKmh = 300.0,
+                    rearLeftKmh = 300.0,
+                    rearRightKmh = 300.0,
                 ),
             ),
             vehicle = VehicleData(speedKmh = 50.0),
         )
 
         assertEquals(PortedState.Suspect, valueOf(state, "Чотири колеса").state)
+    }
+
+    /** Розбіжність від часу зняття двох вікон вироком не є. */
+    @Test
+    fun `a moderate disagreement with frame 4F0 is not a verdict`() {
+        val state = stateOf(
+            systems = CarSystems(
+                wheels = WheelSpeeds(
+                    known = true,
+                    frontLeftKmh = 82.0,
+                    frontRightKmh = 82.5,
+                    rearLeftKmh = 82.3,
+                    rearRightKmh = 82.4,
+                ),
+            ),
+            vehicle = VehicleData(speedKmh = 62.0),
+        )
+
+        assertEquals(PortedState.Working, valueOf(state, "Чотири колеса").state)
     }
 
     @Test
@@ -199,28 +225,13 @@ class PortedValuesTest {
     }
 
     /**
-     * Пара бітів, яку ми вважали запалюванням, мусить лишатися позначеною, поки
-     * не з'ясовано, що це: журнал дав нуль на 91.5 км/год і одиницю на місці.
-     */
-    @Test
-    fun `the two bits of frame 4F2 stay marked as unexplained`() {
-        val state = stateOf(
-            systems = CarSystems(drive = DriveState(known = true, counterBits = 3)),
-        )
-
-        val value = valueOf(state, "Біти 6-7 байта 2 (4F2)")
-        assertEquals(PortedState.Suspect, value.state)
-        assertEquals("3", value.text)
-    }
-
-    /**
      * На місці звіряти нічого: без швидкості з кадру 4F0 вердикт мусить лишатися
      * «працює» з поясненням, а не ставати «підозріло».
      */
     @Test
     fun `speed of frame 4F2 is not blamed while the car stands still`() {
         val state = stateOf(
-            systems = CarSystems(drive = DriveState(known = true, speedKmh = 0.0, counterBits = 3)),
+            systems = CarSystems(drive = DriveState(known = true, speedKmh = 0.0)),
         )
 
         val value = valueOf(state, "Швидкість із кадру 4F2")

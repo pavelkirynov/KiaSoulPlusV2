@@ -345,7 +345,7 @@ object JournalFormat {
         }
 
         if (now.drive.known && now.drive != was.drive) {
-            out += "$at f4F2 bits=${now.drive.counterBits} v4F2=${num(now.drive.speedKmh)} " +
+            out += "$at f4F2 v4F2=${num(now.drive.speedKmh)} " +
                 "v4F0=${num(after.vehicle.speedKmh.takeIf { after.vehicle.hasSpeed })}"
         }
 

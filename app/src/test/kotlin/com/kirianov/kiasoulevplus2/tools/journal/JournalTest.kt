@@ -107,7 +107,7 @@ class JournalTest {
                     rearLeftKmh = 49.5,
                     rearRightKmh = 50.5,
                 ),
-                drive = DriveState(known = true, speedKmh = 50.0, counterBits = 3),
+                drive = DriveState(known = true, speedKmh = 50.0),
                 brake = BrakeState(known = true, brakeBit = true),
                 clock = CarClock(known = true, hour = 14, minute = 35, second = 7),
             ),
@@ -123,7 +123,6 @@ class JournalTest {
         assertTrue(wheels, wheels.contains("x=1"))
 
         val f4F2 = lines.first { it.contains(" f4F2 ") }
-        assertTrue(f4F2, f4F2.contains("bits=3"))
         assertTrue(f4F2, f4F2.contains("v4F2=50 "))
 
         assertTrue(lines.toString(), lines.any { it.contains("brake bit=1") })

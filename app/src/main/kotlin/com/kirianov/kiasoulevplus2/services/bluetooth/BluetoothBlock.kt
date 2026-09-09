@@ -156,12 +156,16 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
      * «готую відповідь», — і перше ж опитування живої машини принесло обидві. Тоді
      * вони пішли в звіт як відмова, хоча блок просто просив дати йому секунду.
      *
-     * Повтор рівно один: якщо блок зайнятий і після паузи, далі стукати в нього
-     * означає розтягувати опитування на хвилини заради того самого результату.
+     * Скільки разів перепитувати, вирішує той, хто питає. Опитуванню помилок
+     * досить одного разу: там дев'ять блоків, і зайвий стукіт у кожен розтягує
+     * все на хвилини. А блокові тиску одного разу НЕ досить — він відповідає
+     * «готую відповідь» на кожен перший запит, і з одним повтором тиску ми так і
+     * не побачили (див. TIRE_BUSY_RETRIES).
      */
-    private suspend fun ask(header: String, request: String): String {
+    private suspend fun ask(header: String, request: String, retries: Int = 1): String {
         var response = runCatching { canBridge.sendCANCommand(header, request) }.getOrDefault("")
-        if (NegativeResponse.busy(response, request)) {
+        repeat(retries) {
+            if (!NegativeResponse.busy(response, request)) return response
             delay(BUSY_RETRY_DELAY_MS)
             response = runCatching { canBridge.sendCANCommand(header, request) }.getOrDefault(response)
         }
@@ -385,9 +389,15 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
             // Зсунутий на пів кроку від зносу навмисно, щоб два рідких запити не
             // ставали в один і той самий такт і не робили його вдвічі довшим.
             if (pollTick % TIRES_EVERY_N_POLLS == TIRES_OFFSET_POLLS) {
+                // ЧОМУ ТУТ ask, А НЕ ПРЯМИЙ ЗАПИТ. Блок тиску відповідає «7F 22 78»
+                // — «прийняв, готую відповідь», — і робить це щоразу: перший
+                // журнал із цим запитом складався з таких відмов цілком. Це не
+                // «ні», це «спитай ще раз», і саме тому запит іде через ask, який
+                // перепитує. Трьох спроб досить: блок відповідає за десятки
+                // мілісекунд, просто не з першого разу.
                 GeneralData.publishTireFrame(
                     TireCommands.REQUEST,
-                    canBridge.sendCANCommand(TireCommands.HEADER, TireCommands.REQUEST),
+                    ask(TireCommands.HEADER, TireCommands.REQUEST, retries = TIRE_BUSY_RETRIES),
                 )
             }
 
@@ -575,6 +585,15 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
          * швидше.
          */
         const val TIRES_OFFSET_POLLS = 50L
+
+        /**
+         * Скільки разів перепитати блок тиску, поки він каже «готую відповідь».
+         *
+         * Три, а не одна, як усім іншим: цей блок відповів «7F 22 78» на КОЖЕН
+         * запит за цілий журнал. Він живий і запит приймає — просто ніколи не
+         * встигає з першого разу.
+         */
+        const val TIRE_BUSY_RETRIES = 3
 
         /**
          * Вікно вільного прослуховування, без фільтра. Коротке навмисно: адаптер
