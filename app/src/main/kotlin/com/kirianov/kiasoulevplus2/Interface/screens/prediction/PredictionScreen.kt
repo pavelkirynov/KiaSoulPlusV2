@@ -7,6 +7,7 @@ package com.kirianov.kiasoulevplus2.Interface.screens.prediction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -29,6 +30,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,6 +39,7 @@ import androidx.compose.material3.TextButton
 import com.kirianov.kiasoulevplus2.Data.Garage
 import com.kirianov.kiasoulevplus2.Data.Pack
 import com.kirianov.kiasoulevplus2.Data.RangeAccuracy
+import com.kirianov.kiasoulevplus2.Data.RangeScenario
 import com.kirianov.kiasoulevplus2.Data.MlConfidence
 import com.kirianov.kiasoulevplus2.Data.PredictionBasis
 import com.kirianov.kiasoulevplus2.Data.MlModelInfo
@@ -68,12 +72,11 @@ fun PredictionScreen(predictionViewModel: PredictionViewModel = viewModel()) {
 
         RangeAccuracyCard(state.rangeAccuracy, predictionViewModel::onResetAccuracy)
 
-        ml.prediction?.let { ScenarioCard(it) }
-
         ml.prediction?.let { prediction ->
-            TripCard(
+            SpeedTableCard(
                 prediction = prediction,
                 trip = state.settings.trip,
+                packKwh = state.garage.active.effectivePackKwh,
                 onTripChanged = predictionViewModel::onTripChanged,
             )
         }
@@ -134,9 +137,20 @@ private fun RangeAccuracyCard(accuracy: RangeAccuracy, onReset: () -> Unit) {
 
             if (!accuracy.started) {
                 Text(
-                    text = "Відлік почнеться, коли з'являться і прогноз, і пробіг. " +
-                        "Обнуляється сам після зарядки — після неї початкова обіцянка " +
-                        "означає вже інше.",
+                    text = if (accuracy.waitingToSettle) {
+                        // ЧОМУ НЕ БЕРЕМО ПЕРШЕ Ж ЧИСЛО. Перший прогноз після
+                        // під'єднання приходить занижений: точний SOC іще старий,
+                        // умов цієї поїздки модель іще не знає. Через сотню метрів
+                        // він перераховується вгору — і якби відлік почався з
+                        // першого, ті кілометри пішли б у похибку з нічого.
+                        "Прогноз щойно з'явився (${formatDecimal(accuracy.pendingRangeKm, 0)} км) " +
+                            "і поки стрибає. Відлік почнеться з першого числа, яке " +
+                            "підтвердить себе наступним читанням."
+                    } else {
+                        "Відлік почнеться, коли з'являться і прогноз, і пробіг. " +
+                            "Обнуляється сам після зарядки — після неї початкова обіцянка " +
+                            "означає вже інше."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                 )
                 return@Column
@@ -266,62 +280,44 @@ private fun RangeCard(
 }
 
 /** Той самий залишок, якби всю дорогу їхати з однією швидкістю. */
-@Composable
-private fun ScenarioCard(prediction: MlPrediction) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(text = "А якщо їхати рівно", fontSize = 18.sp)
-
-            prediction.scenarios.forEach { scenario ->
-                MetricRow(
-                    label = "${formatDecimal(scenario.speedKmh, 0)} км/год",
-                    value = "${formatDecimal(scenario.rangeKm, 0)} км  ·  " +
-                        formatMeasurement(scenario.whPerKm, 0, "Вт·год/км"),
-                )
-            }
-        }
-    }
-}
-
-/** Що модель вивчила про саму батарею. */
 /**
- * ДАЛЕКА ДОРОГА: ЯКА ШВИДКІСТЬ ВИГРАЄ.
+ * ОДНА ТАБЛИЦЯ НА ВСЕ ПРО ШВИДКІСТЬ.
  *
- * Питання не в тому, як швидко їхати, а в тому, ЩО З ЦЬОГО ВИЙДЕ ЗАГАЛОМ. Швидша
- * їзда скорочує час у дорозі й водночас додає час на зарядці: опір повітря росте
- * як квадрат швидкості, тож на 130 витрата майже вдвічі більша, ніж на 80. Де
- * саме сходяться ці дві криві, на око не скажеш — а тут видно.
+ * Спершу їх було дві: «а якщо їхати рівно» з запасом ходу й «далека дорога» з
+ * часом і грошима. Але питання в них одне — що буде, якщо тримати цю швидкість, —
+ * і читати відповідь двома окремими списками означало щоразу зводити рядки очима.
  *
- * Три числа вводить людина, бо їх ніде взяти: відстань, ціна кіловат-години й
- * потужність станції, на яку вона розраховує. Вони зберігаються в налаштуваннях —
- * ціну електрики набирати щоразу заново було б знущанням.
+ * ОДИНИЦІ СТОЯТЬ У ГОЛОВІ, а не в кожній клітинці: у таблиці з шести колонок
+ * підпис «км/год» шість разів на рядок з'їдає більше місця, ніж самі числа.
+ *
+ * Три останні колонки з'являються лише тоді, коли задано дорогу: без відстані
+ * рахувати час і гроші нема з чого, а прочерки на пів таблиці нічого не кажуть.
  */
 @Composable
-private fun TripCard(
+private fun SpeedTableCard(
     prediction: MlPrediction,
     trip: TripConditions,
+    packKwh: Double,
     onTripChanged: (TripConditions) -> Unit,
 ) {
     val options = TripPlanner.options(
         scenarios = prediction.scenarios,
-        availableKwh = prediction.usableEnergyRemainingKwh,
+        capacityKwh = packKwh,
+        socPercent = prediction.realPercent,
         conditions = trip,
-    )
-    val fastest = TripPlanner.fastest(options)
+    ).associateBy { it.speedKmh }
+    val fastest = TripPlanner.fastest(options.values.toList())
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(text = "Далека дорога", fontSize = 18.sp)
+            Text(text = "А якщо їхати рівно", fontSize = 18.sp)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 TripField(
-                    label = "км",
+                    label = "км дороги",
                     value = trip.distanceKm,
                     modifier = Modifier.weight(1f),
                     onChange = { onTripChanged(trip.copy(distanceKm = it)) },
@@ -332,69 +328,140 @@ private fun TripCard(
                     modifier = Modifier.weight(1f),
                     onChange = { onTripChanged(trip.copy(priceUahPerKwh = it)) },
                 )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 TripField(
                     label = "кВт станції",
                     value = trip.chargerKw,
                     modifier = Modifier.weight(1f),
                     onChange = { onTripChanged(trip.copy(chargerKw = it)) },
                 )
+                TripField(
+                    label = "% розряду",
+                    value = trip.arrivalSocPercent,
+                    modifier = Modifier.weight(1f),
+                    onChange = { onTripChanged(trip.copy(arrivalSocPercent = it)) },
+                )
             }
 
-            if (options.isEmpty()) {
+            val withTrip = options.isNotEmpty()
+            SpeedTableHeader(withTrip)
+
+            prediction.scenarios.forEach { scenario ->
+                val option = options[scenario.speedKmh]
+                SpeedTableRow(
+                    scenario = scenario,
+                    option = option,
+                    best = fastest != null && option != null &&
+                        option.speedKmh == fastest.speedKmh,
+                    withTrip = withTrip,
+                )
+            }
+
+            if (!withTrip) {
                 Text(
-                    text = "Введіть відстань і потужність станції — і буде видно, яка " +
-                        "швидкість дає найменший час у дорозі разом із зарядкою.",
+                    text = "Задайте відстань і потужність станції — і поруч стане час у " +
+                        "дорозі разом із зарядкою, кількість зупинок і гроші.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 return@Column
             }
 
-            options.forEach { option ->
-                val best = fastest != null && option.speedKmh == fastest.speedKmh
-                MetricRow(
-                    label = (if (best) "★ " else "") + "${formatDecimal(option.speedKmh, 0)} км/год",
-                    value = tripLine(option),
-                )
-            }
-
             fastest?.let { best ->
                 Text(
-                    text = "Найшвидше загалом — ${formatDecimal(best.speedKmh, 0)} км/год: " +
+                    text = "★ найменший загальний час — ${formatDecimal(best.speedKmh, 0)} км/год: " +
                         "${hoursText(best.drivingHours)} за кермом" +
-                        if (best.stops > 0) {
-                            " плюс ${hoursText(best.chargingHours)} на ${best.stops} зупинку " +
-                                "(${formatDecimal(best.chargedKwh, 1)} кВт·год, " +
-                                "${formatDecimal(best.costUah, 0)} ₴)"
-                        } else {
-                            " і жодної зупинки"
-                        },
+                        if (best.stops > 0) " і ${hoursText(best.chargingHours)} на зарядці" else "",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
 
             Text(
-                text = "Витрата на кожній швидкості — вивчена на цій машині. Час на " +
-                    "зарядці рахується за рівною потужністю, а справжня станція ближче до " +
-                    "80 % починає гальмувати, тож насправді стояти доведеться довше. " +
-                    "Кожна зупинка — це ще " +
-                    "${formatDecimal(TripPlanner.STOP_OVERHEAD_MINUTES, 0)} хв на заїхати, " +
-                    "знайти пост і поговорити з терміналом.",
+                text = "Витрата на кожній швидкості вивчена на цій машині. Долив рахується " +
+                    "від заданого розряду до 85 % — вище швидка зарядка не йде, — а " +
+                    "потужність станції взята рівною, хоч насправді вона падає ближче до " +
+                    "тих 85 %. Кожна зупинка додає " +
+                    "${formatDecimal(TripPlanner.STOP_OVERHEAD_MINUTES, 0)} хв на під'єднатися " +
+                    "й поговорити з терміналом.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
     }
 }
 
-/** Один рядок таблиці: час, зупинки, гроші. */
-private fun tripLine(option: TripOption): String {
-    val time = hoursText(option.totalHours)
-    if (option.reachableWithoutCharging) return "$time  ·  без зупинок"
-    return "$time  ·  ${option.stops} зуп.  ·  ${formatDecimal(option.costUah, 0)} ₴"
+/** Голова таблиці: тут живуть усі одиниці виміру. */
+@Composable
+private fun SpeedTableHeader(withTrip: Boolean) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        TableCell("км/год", SPEED_WEIGHT, header = true)
+        TableCell("км", RANGE_WEIGHT, header = true)
+        TableCell("Вт·год/км", CONSUMPTION_WEIGHT, header = true)
+        if (withTrip) {
+            TableCell("год:хв", TIME_WEIGHT, header = true)
+            TableCell("зуп", STOPS_WEIGHT, header = true)
+            TableCell("₴", COST_WEIGHT, header = true)
+        }
+    }
 }
 
+@Composable
+private fun SpeedTableRow(
+    scenario: RangeScenario,
+    option: TripOption?,
+    best: Boolean,
+    withTrip: Boolean,
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        TableCell(
+            text = (if (best) "★" else "") + formatDecimal(scenario.speedKmh, 0),
+            weight = SPEED_WEIGHT,
+            strong = best,
+        )
+        TableCell(formatDecimal(scenario.rangeKm, 0), RANGE_WEIGHT, strong = best)
+        TableCell(formatDecimal(scenario.whPerKm, 0), CONSUMPTION_WEIGHT, strong = best)
+        if (withTrip) {
+            TableCell(option?.let { hoursText(it.totalHours) } ?: DASH, TIME_WEIGHT, strong = best)
+            TableCell(option?.stops?.toString() ?: DASH, STOPS_WEIGHT, strong = best)
+            TableCell(
+                text = option?.let { formatDecimal(it.costUah, 0) } ?: DASH,
+                weight = COST_WEIGHT,
+                strong = best,
+            )
+        }
+    }
+}
+
+/**
+ * Клітинка таблиці.
+ *
+ * Числа притиснуті праворуч, підписи голови — так само: інакше колонка з
+ * трицифрових і двоцифрових чисел іде драбинкою й не читається стовпчиком.
+ */
+@Composable
+private fun RowScope.TableCell(
+    text: String,
+    weight: Float,
+    header: Boolean = false,
+    strong: Boolean = false,
+) {
+    Text(
+        text = text,
+        modifier = Modifier.weight(weight),
+        textAlign = TextAlign.End,
+        maxLines = 1,
+        style = if (header) {
+            MaterialTheme.typography.labelSmall
+        } else {
+            MaterialTheme.typography.bodyMedium
+        },
+        fontWeight = if (strong) FontWeight.Bold else null,
+    )
+}
+
+/** Час у вигляді «27:52»: у колонці шириною в п'ять знаків «год» не вміщається. */
 private fun hoursText(hours: Double): String {
     val total = (hours * 60.0).toInt()
-    return if (total >= 60) "${total / 60} год ${total % 60} хв" else "$total хв"
+    return "${total / 60}:${(total % 60).toString().padStart(2, '0')}"
 }
 
 /**
@@ -418,12 +485,23 @@ private fun TripField(
             text = entered.filter { it.isDigit() || it == '.' || it == ',' }
             onChange(parseDecimalInput(text) ?: 0.0)
         },
-        label = { Text(label, style = MaterialTheme.typography.bodySmall) },
+        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         modifier = modifier,
     )
 }
+
+private const val DASH = "—"
+
+// Ширини колонок. «Вт·год/км» у голові найдовше, тож його колонка найширша;
+// зупинок ніколи не буває двоцифрових, тож найвужча — їхня.
+private const val SPEED_WEIGHT = 0.9f
+private const val RANGE_WEIGHT = 0.7f
+private const val CONSUMPTION_WEIGHT = 1.2f
+private const val TIME_WEIGHT = 0.9f
+private const val STOPS_WEIGHT = 0.5f
+private const val COST_WEIGHT = 0.9f
 
 @Composable
 private fun BatteryCard(model: MlModelInfo, prediction: MlPrediction?) {

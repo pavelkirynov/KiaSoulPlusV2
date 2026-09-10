@@ -55,6 +55,8 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                                 ?: defaults.trip.priceUahPerKwh,
                             chargerKw = values["tripChargerKw"] as? Double
                                 ?: defaults.trip.chargerKw,
+                            arrivalSocPercent = values["tripArrivalSoc"] as? Double
+                                ?: defaults.trip.arrivalSocPercent,
                         ),
                     )
                 }
@@ -78,6 +80,7 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                         "tripKm" to settings.trip.distanceKm,
                         "tripPrice" to settings.trip.priceUahPerKwh,
                         "tripChargerKw" to settings.trip.chargerKw,
+                        "tripArrivalSoc" to settings.trip.arrivalSocPercent,
                     ).also { fields ->
                         // Пороги пишуться плоскими ключами, а не вкладеним
                         // об'єктом: MiniJson навмисно вміє лише плоскі карти, і

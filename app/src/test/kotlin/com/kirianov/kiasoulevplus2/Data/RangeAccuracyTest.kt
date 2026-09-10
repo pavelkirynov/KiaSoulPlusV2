@@ -14,7 +14,7 @@ class RangeAccuracyTest {
      */
     @Test
     fun `an optimistic forecast shows how much it overpromised`() {
-        var accuracy = RangeAccuracy().observe(rangeKm = 200.0, odometerKm = 1_000.0)
+        var accuracy = anchored(rangeKm = 200.0, odometerKm = 1_000.0)
         accuracy = accuracy.observe(rangeKm = 135.0, odometerKm = 1_050.0)
 
         assertEquals(65.0, accuracy.predictedDropKm, 0.001)
@@ -26,7 +26,7 @@ class RangeAccuracyTest {
     /** Точний прогноз: запас падає рівно на стільько, скільки проїхано. */
     @Test
     fun `an exact forecast shows no error`() {
-        var accuracy = RangeAccuracy().observe(rangeKm = 200.0, odometerKm = 1_000.0)
+        var accuracy = anchored(rangeKm = 200.0, odometerKm = 1_000.0)
         accuracy = accuracy.observe(rangeKm = 150.0, odometerKm = 1_050.0)
 
         assertEquals(0.0, accuracy.errorKm, 0.001)
@@ -36,7 +36,7 @@ class RangeAccuracyTest {
     /** Перестраховка читається від'ємною помилкою: проїдете більше за обіцяне. */
     @Test
     fun `a cautious forecast shows a negative error`() {
-        var accuracy = RangeAccuracy().observe(rangeKm = 200.0, odometerKm = 1_000.0)
+        var accuracy = anchored(rangeKm = 200.0, odometerKm = 1_000.0)
         accuracy = accuracy.observe(rangeKm = 165.0, odometerKm = 1_050.0)
 
         assertEquals(-15.0, accuracy.errorKm, 0.001)
@@ -51,13 +51,59 @@ class RangeAccuracyTest {
     fun `the count does not start without both numbers`() {
         assertFalse(RangeAccuracy().observe(rangeKm = 200.0, odometerKm = 0.0).started)
         assertFalse(RangeAccuracy().observe(rangeKm = 0.0, odometerKm = 1_000.0).started)
-        assertTrue(RangeAccuracy().observe(rangeKm = 200.0, odometerKm = 1_000.0).started)
+        assertTrue(anchored(rangeKm = 200.0, odometerKm = 1_000.0).started)
     }
+
+    /**
+     * ПЕРШЕ ЧИСЛО НЕ БЕРЕТЬСЯ ЗА ТОЧКУ ВІДЛІКУ — саме через це на екрані
+     * з'являлася помилка з нічого.
+     *
+     * Живий приклад: під'єднались, прогноз сказав 245, за сотню метрів
+     * перерахувався на 261. Відлік від 245 давав шістнадцять кілометрів помилки
+     * на пройдених ста метрах.
+     */
+    @Test
+    fun `the first jumpy forecast is not taken as the start`() {
+        var accuracy = RangeAccuracy().observe(rangeKm = 245.0, odometerKm = 1_000.0)
+        assertFalse("перше число ще нічого не вирішує", accuracy.started)
+        assertTrue(accuracy.waitingToSettle)
+
+        // Другий прогноз відрізняється на 6.5 % — це ще стрибок, а не відлік.
+        accuracy = accuracy.observe(rangeKm = 261.0, odometerKm = 1_000.1)
+        assertFalse("стрибок 245 -> 261 не є устоянням", accuracy.started)
+
+        // А ось третій підтвердив другий: 0.4 % різниці. Відлік іде від НЬОГО.
+        accuracy = accuracy.observe(rangeKm = 260.0, odometerKm = 1_000.2)
+        assertTrue(accuracy.started)
+        assertEquals(260.0, accuracy.startRangeKm, 0.001)
+        assertEquals(1_000.2, accuracy.startOdometerKm, 0.001)
+        assertEquals(0.0, accuracy.drivenKm, 0.001)
+    }
+
+    /** Устояння міряється часткою від прогнозу, а не кілометрами. */
+    @Test
+    fun `two close forecasts anchor the count at once`() {
+        var accuracy = RangeAccuracy().observe(rangeKm = 250.0, odometerKm = 500.0)
+        accuracy = accuracy.observe(rangeKm = 252.0, odometerKm = 500.0)
+
+        assertTrue("2 км із 250 це 0.8 % — устоялося", accuracy.started)
+        assertEquals(252.0, accuracy.startRangeKm, 0.001)
+    }
+
+    /**
+     * Прив'язує відлік ДРУГЕ читання, тобто перше, яке підтвердило попереднє.
+     * Хелпер тримає це в одному місці: інакше кожен тест починався б із двох
+     * однакових рядків, і при зміні правила довелося б правити всі.
+     */
+    private fun anchored(rangeKm: Double, odometerKm: Double): RangeAccuracy =
+        RangeAccuracy()
+            .observe(rangeKm, odometerKm)
+            .observe(rangeKm, odometerKm)
 
     /** На першому кілометрі похибка одометра важить більше за якість прогнозу. */
     @Test
     fun `a percent is withheld until enough distance is covered`() {
-        var accuracy = RangeAccuracy().observe(rangeKm = 200.0, odometerKm = 1_000.0)
+        var accuracy = anchored(rangeKm = 200.0, odometerKm = 1_000.0)
         accuracy = accuracy.observe(rangeKm = 199.0, odometerKm = 1_000.5)
 
         assertNull(accuracy.errorPercent)
@@ -70,7 +116,7 @@ class RangeAccuracyTest {
     /** Початкову обіцянку не переписуємо: саме її ми й перевіряємо. */
     @Test
     fun `the opening promise is not overwritten by later ones`() {
-        var accuracy = RangeAccuracy().observe(rangeKm = 200.0, odometerKm = 1_000.0)
+        var accuracy = anchored(rangeKm = 200.0, odometerKm = 1_000.0)
         accuracy = accuracy.observe(rangeKm = 150.0, odometerKm = 1_040.0)
         accuracy = accuracy.observe(rangeKm = 120.0, odometerKm = 1_070.0)
 
@@ -82,7 +128,7 @@ class RangeAccuracyTest {
     /** Одометр не може йти назад: хибне читання не має дати від'ємний шлях. */
     @Test
     fun `an odometer going backwards gives no negative distance`() {
-        var accuracy = RangeAccuracy().observe(rangeKm = 200.0, odometerKm = 1_000.0)
+        var accuracy = anchored(rangeKm = 200.0, odometerKm = 1_000.0)
         accuracy = accuracy.observe(rangeKm = 190.0, odometerKm = 900.0)
 
         assertEquals(0.0, accuracy.drivenKm, 0.001)
@@ -91,7 +137,7 @@ class RangeAccuracyTest {
     /** Пропущений прогноз не має зіпсувати відлік: беремо, що є. */
     @Test
     fun `a missing reading leaves the count untouched`() {
-        val started = RangeAccuracy().observe(rangeKm = 200.0, odometerKm = 1_000.0)
+        val started = anchored(rangeKm = 200.0, odometerKm = 1_000.0)
 
         assertEquals(started, started.observe(rangeKm = 0.0, odometerKm = 1_020.0))
         assertEquals(started, started.observe(rangeKm = 180.0, odometerKm = 0.0))

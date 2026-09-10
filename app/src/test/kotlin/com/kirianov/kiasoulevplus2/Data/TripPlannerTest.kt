@@ -16,10 +16,19 @@ class TripPlannerTest {
     private fun optionAt(speed: Double, options: List<TripOption>) =
         options.first { it.speedKmh == speed }
 
+    /** Пакет цієї машини й повний заряд: 44 кВт·год, 100 %. */
+    private fun options(conditions: TripConditions, socPercent: Double = 100.0) =
+        TripPlanner.options(
+            scenarios = scenarios,
+            capacityKwh = 44.0,
+            socPercent = socPercent,
+            conditions = conditions,
+        )
+
     /** Без відстані рахувати нічого: екран мусить просити числа, а не вигадувати їх. */
     @Test
     fun `no distance means no options`() {
-        assertTrue(TripPlanner.options(scenarios, 40.0, TripConditions()).isEmpty())
+        assertTrue(options(TripConditions()).isEmpty())
     }
 
     /**
@@ -28,10 +37,8 @@ class TripPlannerTest {
      */
     @Test
     fun `a short trip needs no stops and the fastest speed wins`() {
-        val options = TripPlanner.options(
-            scenarios = scenarios,
-            availableKwh = 40.0,
-            conditions = TripConditions(distanceKm = 100.0, priceUahPerKwh = 8.0, chargerKw = 50.0),
+        val options = options(
+            TripConditions(distanceKm = 100.0, priceUahPerKwh = 8.0, chargerKw = 50.0),
         )
 
         assertTrue(options.all { it.reachableWithoutCharging })
@@ -48,10 +55,8 @@ class TripPlannerTest {
      */
     @Test
     fun `a long trip pays for speed with charging time`() {
-        val options = TripPlanner.options(
-            scenarios = scenarios,
-            availableKwh = 40.0,
-            conditions = TripConditions(distanceKm = 500.0, priceUahPerKwh = 8.0, chargerKw = 50.0),
+        val options = options(
+            TripConditions(distanceKm = 500.0, priceUahPerKwh = 8.0, chargerKw = 50.0),
         )
 
         val slow = optionAt(60.0, options)
@@ -66,47 +71,69 @@ class TripPlannerTest {
         assertTrue(fast.costUah > slow.costUah)
     }
 
-    /** Долив рахується від того, чого не вистачає, з поправкою на резерв. */
+    /**
+     * НИЖЧЕ ЗАДАНОГО РІВНЯ ПАКЕТ НЕ ВИТРАЧАЄМО, і це не «резерв на всяк випадок»:
+     * під тридцятьма відсотками батарея вже не бере від станції ту потужність, на
+     * яку розрахунок сподівається.
+     */
     @Test
-    fun `the reserve is never counted as available`() {
+    fun `the pack is never spent below the level set by the driver`() {
         val options = TripPlanner.options(
             scenarios = listOf(RangeScenario(60.0, 0.0, 100.0)),
-            availableKwh = 12.0,
-            conditions = TripConditions(distanceKm = 100.0, priceUahPerKwh = 10.0, chargerKw = 50.0),
+            capacityKwh = 44.0,
+            socPercent = 50.0,
+            conditions = TripConditions(
+                distanceKm = 100.0,
+                priceUahPerKwh = 10.0,
+                chargerKw = 50.0,
+                arrivalSocPercent = 30.0,
+            ),
         )
 
-        // Треба 10 кВт·год, у пакеті 12, але 2 недоторканні — отже, доливати нічого
-        // не треба й рівно нічого не лишається на запас.
+        // Від 50 % до 30 % це 20 % пакета, тобто 8.8 кВт·год. Дорога просить 10 —
+        // отже, 1.2 доведеться долити.
         val option = options.single()
         assertEquals(10.0, option.neededKwh, 0.001)
-        assertEquals(0.0, option.chargedKwh, 0.001)
+        assertEquals(1.2, option.chargedKwh, 0.01)
+        assertEquals(1, option.stops)
     }
 
-    /** Кожна зупинка додає свої накладні хвилини, і їх видно окремо. */
+    /**
+     * ОДИН ДОЛИВ — ЦЕ ВІД ЗАДАНОГО РІВНЯ ДО МЕЖІ ШВИДКОЇ ЗАРЯДКИ, а не «скільки
+     * влізе»: вище 85 % CHAdeMO на цій машині просто не йде.
+     *
+     * 85 − 30 = 55 % від 44 кВт·год, тобто 24.2 за зупинку.
+     */
     @Test
-    fun `stops are counted and each one costs its overhead`() {
+    fun `one stop adds only what fast charging allows`() {
         val options = TripPlanner.options(
             scenarios = listOf(RangeScenario(90.0, 0.0, 200.0)),
-            availableKwh = 2.0,
-            conditions = TripConditions(distanceKm = 450.0, priceUahPerKwh = 10.0, chargerKw = 50.0),
+            capacityKwh = 44.0,
+            socPercent = 30.0,
+            conditions = TripConditions(
+                distanceKm = 450.0,
+                priceUahPerKwh = 10.0,
+                chargerKw = 50.0,
+                arrivalSocPercent = 30.0,
+            ),
         )
 
         val option = options.single()
         assertEquals(90.0, option.neededKwh, 0.001)
+        // У пакеті нічого доступного: заряд рівно на рівні, нижче якого не сідаємо.
         assertEquals(90.0, option.chargedKwh, 0.001)
-        assertEquals(3, option.stops)
-        // 90 кВт·год на 50 кВт це 1.8 години плюс три зупинки по 15 хвилин.
-        assertEquals(1.8 + 0.75, option.chargingHours, 0.001)
+        // 90 / 24.2 = 3.7 -> чотири зупинки.
+        assertEquals(4, option.stops)
+        // 90 кВт·год на 50 кВт це 1.8 години плюс чотири зупинки по п'ять хвилин.
+        assertEquals(1.8 + 4 * 5.0 / 60.0, option.chargingHours, 0.001)
         assertEquals(900.0, option.costUah, 0.001)
     }
 
     /** Різниця рахується від обраного: додатне означає «довше й дорожче». */
     @Test
     fun `the difference is signed from the chosen speed`() {
-        val options = TripPlanner.options(
-            scenarios = scenarios,
-            availableKwh = 40.0,
-            conditions = TripConditions(distanceKm = 500.0, priceUahPerKwh = 8.0, chargerKw = 50.0),
+        val options = options(
+            TripConditions(distanceKm = 500.0, priceUahPerKwh = 8.0, chargerKw = 50.0),
         )
         val difference = TripPlanner.compare(
             chosen = optionAt(110.0, options),

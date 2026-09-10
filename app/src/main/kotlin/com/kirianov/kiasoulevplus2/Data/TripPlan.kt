@@ -17,7 +17,9 @@
 //  • зустрічний вітер, гори й дощ у витраті не враховані — модель вивчена на
 //    тому, як їздять тут;
 //  • пошук станції, черга й розмова з терміналом — це [STOP_OVERHEAD_MINUTES] на
-//    кожну зупинку, і це найгрубше припущення в усьому розрахунку.
+//    кожну зупинку, і це найгрубше припущення в усьому розрахунку;
+//  • долив вважається від рівня, нижче якого не сідаємо, до межі швидкої зарядки
+//    (85 %) — вище неї CHAdeMO на цій машині просто не йде.
 //
 // Чистий об'єкт без стану: перевіряється тестами.
 // ====================================================================================
@@ -56,6 +58,16 @@ data class TripConditions(
     val distanceKm: Double = 0.0,
     val priceUahPerKwh: Double = 0.0,
     val chargerKw: Double = 50.0,
+
+    /**
+     * До якого заряду розряджаємось у дорозі, %.
+     *
+     * Не нуль, і не з обережності «на всяк випадок»: під тридцятьма відсотками
+     * батарея вже не бере від станції ту потужність, на яку розрахунок сподівається,
+     * а прогноз має право помилятися. Поле, а не константа, бо запас обережності в
+     * кожного свій — комусь двадцять, комусь тридцять п'ять.
+     */
+    val arrivalSocPercent: Double = 30.0,
 ) {
     val ready: Boolean get() = distanceKm > 0.0 && chargerKw > 0.0
 }
@@ -65,59 +77,67 @@ object TripPlanner {
     /**
      * Скільки хвилин з'їдає кожна зупинка, крім самої зарядки.
      *
-     * Заїхати, знайти вільний пост, поговорити з терміналом, від'єднатися. П'ятнадцять
-     * хвилин — це оптимістично для однієї станції й реалістично в середньому.
+     * Заїхати, під'єднатися, поговорити з терміналом, від'єднатися. П'ять хвилин —
+     * стільки це займає в того, хто робить це не вперше; було п'ятнадцять, і це
+     * виявилося вигадкою людини, яка на трасі не заряджалася.
      */
-    const val STOP_OVERHEAD_MINUTES = 15.0
+    const val STOP_OVERHEAD_MINUTES = 5.0
 
     /**
-     * Скільком кВт·год у пакеті не дозволяємо піти в розрахунок.
+     * До якого заряду веде швидка зарядка, %.
      *
-     * Приїхати на нулі не можна: під нуль батарея не віддає паспортну потужність,
-     * а прогноз має право помилятися. Дві кіловат-години — це близько десятка
-     * кілометрів запасу.
+     * Вище цього CHAdeMO на цій машині просто не йде — не «невигідно», а не йде.
+     * Разом із [TripConditions.arrivalSocPercent] це й задає розмір одного доливу:
+     * від того, з чим приїхав, до цих вісімдесяти п'яти.
      */
-    const val RESERVE_KWH = 2.0
-
-    /**
-     * Скільки енергії доливають за одну зупинку, кВт·год.
-     *
-     * Не «скільки треба», а скільки доцільно: заряджатися вище вісімдесяти
-     * відсотків на трасі невигідно — саме там станція й починає гальмувати. Тому
-     * зупинок може бути кілька, і кожна додає свої накладні хвилини.
-     */
-    const val KWH_PER_STOP = 30.0
+    const val CHARGE_LIMIT_PERCENT = 85.0
 
     /**
      * Порахувати всі швидкості, які модель уміє оцінити.
      *
      * [scenarios] беруться з прогнозу як є: у них уже лежить витрата на кожній
-     * швидкості, вивчена на цій машині. [availableKwh] — скільки в пакеті зараз.
+     * швидкості, вивчена на цій машині. [capacityKwh] — корисна ємність пакета,
+     * [socPercent] — реальний заряд просто зараз.
      */
     fun options(
         scenarios: List<RangeScenario>,
-        availableKwh: Double,
+        capacityKwh: Double,
+        socPercent: Double,
         conditions: TripConditions,
     ): List<TripOption> {
-        if (!conditions.ready) return emptyList()
+        if (!conditions.ready || capacityKwh <= 0.0) return emptyList()
+
+        // Скільки з пакета можна витратити: від того, що є, до рівня, нижче якого
+        // не сідаємо. Скільки доливають за одну зупинку: від того самого рівня до
+        // межі швидкої зарядки.
+        val availableKwh = share(socPercent - conditions.arrivalSocPercent) * capacityKwh
+        val perStopKwh = share(CHARGE_LIMIT_PERCENT - conditions.arrivalSocPercent) * capacityKwh
 
         return scenarios
             .filter { it.speedKmh > 0.0 && it.whPerKm > 0.0 }
-            .map { scenario -> option(scenario, availableKwh, conditions) }
+            .map { scenario -> option(scenario, availableKwh, perStopKwh, conditions) }
     }
+
+    private fun share(percent: Double): Double = percent.coerceAtLeast(0.0) / 100.0
 
     private fun option(
         scenario: RangeScenario,
         availableKwh: Double,
+        perStopKwh: Double,
         conditions: TripConditions,
     ): TripOption {
         val neededKwh = conditions.distanceKm * scenario.whPerKm / 1000.0
-        val usableNow = (availableKwh - RESERVE_KWH).coerceAtLeast(0.0)
-        val chargedKwh = (neededKwh - usableNow).coerceAtLeast(0.0)
+        val chargedKwh = (neededKwh - availableKwh).coerceAtLeast(0.0)
 
-        // Зупинок стільки, скільки разів треба долити по KWH_PER_STOP. Округлення
-        // вгору: половини зупинки не буває.
-        val stops = if (chargedKwh <= 0.0) 0 else ((chargedKwh - 0.01) / KWH_PER_STOP).toInt() + 1
+        // Зупинок стільки, скільки разів треба долити по одному доливу. Округлення
+        // вгору: половини зупинки не буває. Якщо долив нульовий (заряд у дорозі
+        // заданий вище за межу швидкої зарядки), зупинок не рахуємо взагалі —
+        // інакше вийшло б ділення на нуль замість числа.
+        val stops = when {
+            chargedKwh <= 0.0 -> 0
+            perStopKwh <= 0.0 -> 0
+            else -> ((chargedKwh - 0.01) / perStopKwh).toInt() + 1
+        }
 
         return TripOption(
             speedKmh = scenario.speedKmh,

@@ -173,6 +173,21 @@ class CalculationBlockTest {
         assertEquals(10.0, trip.averagePowerKw!!, 0.0001)
     }
 
+    /**
+     * Прив'язує відлік точності до прогнозу [km] на пробігу [odometerKm].
+     *
+     * Читань потрібно ДВА: відлік починається не з першого прогнозу, а з першого
+     * підтвердженого — див. RangeAccuracy. Перше читання йде на десяту кілометра
+     * раніше, щоб потік побачив два різні спостереження, а прив'язка сталася рівно
+     * на потрібному пробігу.
+     */
+    private fun anchorRange(km: Double, odometerKm: Double) {
+        GeneralData.updateVehicle(VehicleData(odometerKm = odometerKm - 0.1))
+        predictRange(km)
+        GeneralData.updateVehicle(VehicleData(odometerKm = odometerKm))
+        predictRange(km)
+    }
+
     private fun predictRange(km: Double) =
         GeneralData.updateMl { it.copy(prediction = MlPrediction(
             rangeKm = km,
@@ -187,8 +202,7 @@ class CalculationBlockTest {
     @Test
     fun `the forecast is checked against what was actually driven`() {
         GeneralData.updateConnection(ConnectionState.Connected, "")
-        GeneralData.updateVehicle(VehicleData(odometerKm = 1_000.0))
-        predictRange(200.0)
+        anchorRange(200.0, odometerKm = 1_000.0)
 
         GeneralData.updateVehicle(VehicleData(odometerKm = 1_050.0))
         predictRange(135.0)
@@ -228,8 +242,7 @@ class CalculationBlockTest {
     @Test
     fun `a dropped link does not start the check over`() {
         GeneralData.updateConnection(ConnectionState.Connected, "")
-        GeneralData.updateVehicle(VehicleData(odometerKm = 1_000.0))
-        predictRange(200.0)
+        anchorRange(200.0, odometerKm = 1_000.0)
         assertTrue(GeneralData.state.value.rangeAccuracy.started)
 
         GeneralData.updateConnection(ConnectionState.Disconnected, "")
