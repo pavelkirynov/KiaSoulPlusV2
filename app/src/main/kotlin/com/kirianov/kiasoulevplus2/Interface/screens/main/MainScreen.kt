@@ -86,6 +86,7 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
         ChargeCard(
             charge = state.charge,
             charging = state.vehicle.charging,
+            packKwh = state.garage.active.effectivePackKwh,
             onFinish = GeneralData::requestChargeFinish,
         )
 
@@ -250,7 +251,12 @@ private fun CellsCard(calculated: CalculatedData) {
  * і головне — лічильник враховує те, що сталося без телефона.
  */
 @Composable
-private fun ChargeCard(charge: ChargeLog, charging: ChargingState, onFinish: () -> Unit) {
+private fun ChargeCard(
+    charge: ChargeLog,
+    charging: ChargingState,
+    packKwh: Double,
+    onFinish: () -> Unit,
+) {
     if (!charge.hasBaseline && !charge.hasLastSession && !charge.hasToday) return
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -277,18 +283,36 @@ private fun ChargeCard(charge: ChargeLog, charging: ChargingState, onFinish: () 
             if (charge.charging) {
                 MetricRow(
                     "Зараз прийнято",
-                    formatMeasurement(charge.sessionKwh, 1, "кВт·год"),
+                    formatMeasurement(charge.sessionEnergyKwh(packKwh), 1, "кВт·год"),
                 )
             }
 
             MetricRow(
                 "Остання зарядка",
                 if (charge.hasLastSession) {
-                    formatMeasurement(charge.lastSessionKwh, 1, "кВт·год")
+                    formatMeasurement(charge.lastSessionEnergyKwh(packKwh), 1, "кВт·год")
                 } else {
                     NO_VALUE
                 },
             )
+            // ДВА ЧИСЛА НА ОДНУ ЗАРЯДКУ, і це не надмірність. Головне рахується
+            // приростом заряду на корисну ємність — тією самою міркою, якою
+            // рахується запас ходу, і саме воно зійшлося з настінником: 77.8 % ×
+            // 44 кВт·год = 34.2 при 37.87 на розетці, тобто різниця рівно на
+            // втрати зарядного. Лічильник BMS на цій машині дає 22.3 за ту саму
+            // зарядку: він прив'язаний до РІДНОГО пакета й про заміну не знає.
+            // Прибрати його не можна — він єдиний працює, коли шкала заряду не
+            // зрушила, — але й вірити йому як головному теж не можна.
+            if (charge.hasLastSession && charge.lastSessionSocRise > 0.0) {
+                MetricRow(
+                    "Заряд піднявся на",
+                    "${formatDecimal(charge.lastSessionSocRise, 1)} %",
+                )
+                MetricRow(
+                    "За лічильником BMS",
+                    formatMeasurement(charge.lastSessionKwh, 1, "кВт·год"),
+                )
+            }
             if (charge.hasLastSession && charge.lastSessionEndedAtMs > 0L) {
                 MetricRow(
                     "Закінчилася",
@@ -296,16 +320,18 @@ private fun ChargeCard(charge: ChargeLog, charging: ChargingState, onFinish: () 
                 )
             }
 
-            MetricRow("За добу", formatMeasurement(charge.todayKwh, 1, "кВт·год"))
+            MetricRow("За добу", formatMeasurement(charge.todayEnergyKwh(packKwh), 1, "кВт·год"))
 
             if (charge.lastDecision.isNotEmpty()) {
                 MetricRow("Рішення", charge.lastDecision)
             }
 
             Text(
-                text = "Рахується за лічильником BMS, тому враховує й ті зарядки, " +
-                    "що пройшли без телефона: якщо лічильник виріс, заряд піднявся, " +
-                    "а віддано нічого не було — це зарядка.",
+                text = "Головне число — приріст заряду на корисну ємність пакета: саме " +
+                    "воно зійшлося з настінником. Лічильник BMS показано поруч, і він " +
+                    "занижує майже вдвічі, бо рахує проти рідного пакета. Зарядки без " +
+                    "телефона теж потрапляють в облік: якщо пробіг не зріс, а заряд " +
+                    "піднявся — авто стояло на зарядці.",
                 style = MaterialTheme.typography.bodySmall,
             )
 

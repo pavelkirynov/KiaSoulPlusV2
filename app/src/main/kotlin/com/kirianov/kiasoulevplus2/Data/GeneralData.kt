@@ -221,6 +221,10 @@ object GeneralData {
     fun setWakeOnDevice(address: String) =
         _state.update { it.copy(settings = it.settings.copy(wakeOnDeviceAddress = address)) }
 
+    /** Умови далекої дороги з екрана прогнозу: відстань, ціна, потужність станції. */
+    fun setTripConditions(trip: TripConditions) =
+        _state.update { it.copy(settings = it.settings.copy(trip = trip)) }
+
     // --- Гараж: які авто відомі й за яке рахуємо ---------------------------------
 
     fun updateGarage(transform: (Garage) -> Garage) =

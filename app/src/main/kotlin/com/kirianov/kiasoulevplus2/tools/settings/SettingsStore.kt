@@ -7,6 +7,7 @@
 package com.kirianov.kiasoulevplus2.tools.settings
 
 import com.kirianov.kiasoulevplus2.Data.Settings
+import com.kirianov.kiasoulevplus2.Data.TripConditions
 import com.kirianov.kiasoulevplus2.Data.CellPalette
 import com.kirianov.kiasoulevplus2.Data.CellPalettes
 import com.kirianov.kiasoulevplus2.Data.CellValueMode
@@ -47,6 +48,14 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                         wakeOnDeviceAddress = values["wakeOnDevice"] as? String
                             ?: defaults.wakeOnDeviceAddress,
                         cellPalettes = palettesOf(values, defaults.cellPalettes),
+                        trip = TripConditions(
+                            distanceKm = values["tripKm"] as? Double
+                                ?: defaults.trip.distanceKm,
+                            priceUahPerKwh = values["tripPrice"] as? Double
+                                ?: defaults.trip.priceUahPerKwh,
+                            chargerKw = values["tripChargerKw"] as? Double
+                                ?: defaults.trip.chargerKw,
+                        ),
                     )
                 }
             }
@@ -66,6 +75,9 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                         "autoConnect" to settings.autoConnect,
                         "journal" to settings.journal,
                         "wakeOnDevice" to settings.wakeOnDeviceAddress,
+                        "tripKm" to settings.trip.distanceKm,
+                        "tripPrice" to settings.trip.priceUahPerKwh,
+                        "tripChargerKw" to settings.trip.chargerKw,
                     ).also { fields ->
                         // Пороги пишуться плоскими ключами, а не вкладеним
                         // об'єктом: MiniJson навмисно вміє лише плоскі карти, і

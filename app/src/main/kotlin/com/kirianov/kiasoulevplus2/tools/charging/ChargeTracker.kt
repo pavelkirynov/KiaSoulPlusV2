@@ -139,6 +139,15 @@ object ChargeTracker {
     const val MAX_STANDBY_SOC_DROP = 3.0
 
     /**
+     * Наскільки може «зрости» пробіг у нерухомого авто, км.
+     *
+     * Не нуль: пробіг приходить із роздільністю 0.1 км, і маневр на подвір'ї до
+     * розетки — це законні кілька десятих. Півкілометра ще не поїздка, а поїздки
+     * починаються з кілометрів.
+     */
+    const val MOVED_KM = 0.5
+
+    /**
      * @param counterKwh пожиттєвий лічильник прийнятої енергії, кВт·год.
      * @param dischargedKwh пожиттєвий лічильник ВІДДАНОЇ енергії з того самого кадру.
      * @param socPercent заряд із того самого кадру, %.
@@ -169,6 +178,22 @@ object ChargeTracker {
          * рівно та помилка, через яку колись пропала ніч.
          */
         plugged: Boolean? = null,
+        /**
+         * Пробіг, км; null — не знаємо (кадр 4F0 ще не приходив).
+         *
+         * ТРЕТІЙ СВІДОК, а не заміна двом іншим. Зарядка й поїздка розрізняються
+         * тим, чи авто стояло, і одометр каже про це прямо — але з ним є пастка,
+         * на якій ми вже горіли: він приходить широкомовним кадром, а лічильники
+         * запитом, і після перепідключення одометр ще показує старе значення. Тоді
+         * застосунок записав поїздку на 51 км як зарядку на 6.7 кВт·год.
+         *
+         * Тому правило несиметричне. ПРОБІГ ЗРІС — це поїздка, і жодна інша умова
+         * її вже не порятує (стале значення такої помилки не дасть: воно ніколи не
+         * буває БІЛЬШИМ за справжнє). ПРОБІГ НЕ ЗРІС — авто стояло, і тоді зайвою
+         * стає вимога «заряд мусить помітно вирости»: за годину простою на розетці
+         * шкала може зрушити менше за поріг, і зарядка все одно була.
+         */
+        odometerKm: Double? = null,
     ): ChargeLog {
         if (counterKwh <= 0.0) return log
 
@@ -196,6 +221,7 @@ object ChargeTracker {
                 counterBaselineKwh = counterKwh,
                 dischargedBaselineKwh = dischargedKwh,
                 socBaselinePercent = socPercent,
+                odometerBaselineKm = odometerKm ?: 0.0,
                 lastSeenAtMs = nowMs,
                 hasBaseline = true,
                 charging = isCharging,
@@ -217,22 +243,26 @@ object ChargeTracker {
                 rolled.charging && ignitionOn ->
                     endedWhileWatching(rolled, step, socPercent, IGNITION)
 
-                else -> missedCharge(rolled, step, dischargedKwh, socPercent, nowMs)
+                else -> missedCharge(rolled, step, dischargedKwh, socPercent, nowMs, odometerKm)
             }
             return notCharging(
                 log = if (verdict.reason.isEmpty()) rolled else rolled.copy(lastDecision = verdict.reason),
                 counterKwh = counterKwh,
                 dischargedKwh = dischargedKwh,
                 socPercent = socPercent,
+                odometerKm = odometerKm,
                 nowMs = nowMs,
                 missedKwh = verdict.kwh ?: 0.0,
+                missedSocRise = verdict.socRise,
                 dayKey = dayKey,
             )
         }
 
         // Щойно почалася зарядка: беремо новий базовий показ і НЕ нараховуємо цю
         // різницю — у ній сидить рекуперація за поїздку до зарядки.
-        if (!rolled.charging) return started(rolled, counterKwh, dischargedKwh, socPercent, nowMs)
+        if (!rolled.charging) {
+            return started(rolled, counterKwh, dischargedKwh, socPercent, nowMs, odometerKm)
+        }
 
         // Лічильник не може зменшитись. Якщо зменшився — перед нами інша батарея
         // або хибне читання: беремо новий базовий показ, нічого не нараховуючи.
@@ -249,13 +279,22 @@ object ChargeTracker {
         }
         if (step == 0.0) return rolled.copy(lastSeenAtMs = nowMs)
 
+        // ПРИРІСТ ЗАРЯДУ НАБИРАЄТЬСЯ ПОРУЧ ІЗ ЛІЧИЛЬНИКОМ, крок за кроком. Не
+        // «кінець мінус початок»: базовий показ переставляється щоразу, і різниця
+        // з ним губилася б на кожному кроці. Від'ємні кроки не рахуємо — заряд на
+        // зарядці інколи просідає на десяту, коли BMS перераховує шкалу.
+        val socStep = (socPercent - rolled.socBaselinePercent).coerceAtLeast(0.0)
+
         return rolled.copy(
             counterBaselineKwh = counterKwh,
             dischargedBaselineKwh = dischargedKwh,
             socBaselinePercent = socPercent,
+            odometerBaselineKm = odometerKm ?: rolled.odometerBaselineKm,
             lastSeenAtMs = nowMs,
             sessionKwh = rolled.sessionKwh + step,
+            sessionSocRise = rolled.sessionSocRise + socStep,
             todayKwh = rolled.todayKwh + step,
+            todaySocRise = rolled.todaySocRise + socStep,
             dayKey = dayKey,
         )
     }
@@ -286,6 +325,7 @@ object ChargeTracker {
         dischargedKwh: Double,
         socPercent: Double,
         nowMs: Long,
+        odometerKm: Double?,
     ): Verdict {
         // Звичайний хід опитування, а не рішення: писати про нього причину немає
         // сенсу — вона б затерла справжню.
@@ -302,8 +342,25 @@ object ChargeTracker {
             return Verdict(null, "приріст ${round(step)} кВт·год неправдоподібний")
         }
 
+        // ПРОБІГ — НАЙПРЯМІШЕ СВІДЧЕННЯ, і в обидві сторони.
+        //
+        // Виріс — авто їхало, і жодна інша умова цього вже не переважить: приріст
+        // лічильника прийнятої тут належить рекуперації. Ця перевірка безпечна
+        // навіть при відомій пастці зі старим значенням одометра, бо стале
+        // значення буває МЕНШИМ за справжнє, а не більшим: хибної поїздки з нього
+        // не вийде.
+        //
+        // Не виріс — авто стояло, і тоді вимога «заряд мусить помітно вирости»
+        // стає зайвою: коротка підзарядка на розетці може зрушити шкалу менше за
+        // поріг, а зарядка все одно була. Саме ці зарядки в облік і не потрапляли.
+        val moved = movedSince(log, odometerKm)
+        if (moved != null && moved > MOVED_KM) {
+            return Verdict(null, "пробіг зріс на ${round(moved)} км — це поїздка")
+        }
+        val stood = moved != null && moved <= MOVED_KM
+
         val rise = socPercent - log.socBaselinePercent
-        if (rise < MIN_MISSED_SOC_RISE) {
+        if (rise <= 0.0 || (!stood && rise < MIN_MISSED_SOC_RISE)) {
             return Verdict(null, "заряд не піднявся: ${round(rise)} %")
         }
 
@@ -313,7 +370,20 @@ object ChargeTracker {
             return Verdict(null, "віддано ${round(out)} при дозволених ${round(allowance)} кВт·год")
         }
 
-        return Verdict(step, "зараховано ${round(step)} кВт·год за паузу")
+        val by = if (stood) "за паузу без руху" else "за паузу"
+        return Verdict(step, "зараховано ${round(step)} кВт·год $by, заряд +${round(rise)} %", rise)
+    }
+
+    /**
+     * Скільки авто проїхало від базового показу, або null — сказати нема з чого.
+     *
+     * Нуль у базовому показі означає «не знали тоді»: пробіг цієї машини завжди
+     * більший за нуль.
+     */
+    private fun movedSince(log: ChargeLog, odometerKm: Double?): Double? {
+        val now = odometerKm?.takeIf { it > 0.0 } ?: return null
+        val before = log.odometerBaselineKm.takeIf { it > 0.0 } ?: return null
+        return (now - before).coerceAtLeast(0.0)
     }
 
     /**
@@ -374,16 +444,21 @@ object ChargeTracker {
         val step = (counterKwh - rolled.counterBaselineKwh).coerceAtLeast(0.0)
         val taken = if (step > MAX_PLAUSIBLE_STEP_KWH) 0.0 else step
         val total = rolled.sessionKwh + taken
-        if (total <= 0.0) {
+        val socStep = (socPercent - rolled.socBaselinePercent).coerceAtLeast(0.0)
+        val totalSocRise = rolled.sessionSocRise + socStep
+        if (total <= 0.0 && totalSocRise <= 0.0) {
             return rolled.copy(lastDecision = "вручну: рахувати нема чого")
         }
         return rolled.copy(
             charging = false,
             lastSessionKwh = total,
+            lastSessionSocRise = totalSocRise,
             lastSessionEndedAtMs = nowMs,
             todayKwh = rolled.todayKwh + taken,
+            todaySocRise = rolled.todaySocRise + socStep,
             dayKey = dayKey,
             sessionKwh = 0.0,
+            sessionSocRise = 0.0,
             sessionStartedAtMs = 0L,
             counterBaselineKwh = counterKwh,
             dischargedBaselineKwh = dischargedKwh,
@@ -394,7 +469,19 @@ object ChargeTracker {
     }
 
     /** Рішення про паузу: скільки зарахувати і чому саме так. */
-    private data class Verdict(val kwh: Double?, val reason: String)
+    /**
+     * Скільки набігло за паузу — і за лічильником, і за шкалою заряду.
+     *
+     * Два числа, бо на цій машині вони розходяться вдвічі: лічильник BMS
+     * прив'язаний до рідного пакета, а приріст заряду — до справжнього. Див.
+     * шапку ChargeLog: 22.3 кВт·год за лічильником проти 34.2 за шкалою на одну
+     * й ту саму нічну зарядку, і настінник підтвердив другу цифру.
+     */
+    private data class Verdict(
+        val kwh: Double?,
+        val reason: String,
+        val socRise: Double = 0.0,
+    )
 
     private fun round(value: Double): String = (kotlin.math.round(value * 10.0) / 10.0).toString()
 
@@ -438,6 +525,7 @@ object ChargeTracker {
         dischargedKwh: Double,
         socPercent: Double,
         nowMs: Long,
+        odometerKm: Double?,
     ): ChargeLog {
         val continuing = nowMs - log.lastSessionEndedAtMs < SESSION_GAP_MS && log.lastSessionEndedAtMs > 0L
 
@@ -454,14 +542,17 @@ object ChargeTracker {
         // Добовий підсумок при цьому не постраждає: він накопичується приростами
         // окремо й від відкриття-закриття сесії не залежить.
         val carried = if (continuing) maxOf(log.sessionKwh, log.lastSessionKwh) else 0.0
+        val carriedSoc = if (continuing) maxOf(log.sessionSocRise, log.lastSessionSocRise) else 0.0
 
         return log.copy(
             counterBaselineKwh = counterKwh,
             dischargedBaselineKwh = dischargedKwh,
             socBaselinePercent = socPercent,
+            odometerBaselineKm = odometerKm ?: log.odometerBaselineKm,
             lastSeenAtMs = nowMs,
             charging = true,
             sessionKwh = carried,
+            sessionSocRise = carriedSoc,
             sessionStartedAtMs = if (continuing && log.sessionStartedAtMs > 0L) log.sessionStartedAtMs else nowMs,
         )
     }
@@ -475,11 +566,14 @@ object ChargeTracker {
         counterKwh: Double,
         dischargedKwh: Double,
         socPercent: Double,
+        odometerKm: Double?,
         nowMs: Long,
         missedKwh: Double,
+        missedSocRise: Double,
         dayKey: String,
     ): ChargeLog {
         val total = log.sessionKwh + missedKwh
+        val totalSocRise = log.sessionSocRise + missedSocRise
         val closed = when {
             // ПОРОЖНЯ СЕСІЯ НЕ МАЄ ПРАВА СТАТИ «ОСТАННЬОЮ ЗАРЯДКОЮ», і це
             // виправлення дорогої дурниці, яку видно в живому журналі.
@@ -491,9 +585,10 @@ object ChargeTracker {
             //
             // Сесія, у якій не набігло НІЧОГО, — це не зарядка, а слід нашого
             // власного обриву. Закрити її треба, а затирати нею попередню — ні.
-            log.charging && total <= 0.0 -> log.copy(
+            log.charging && total <= 0.0 && totalSocRise <= 0.0 -> log.copy(
                 charging = false,
                 sessionKwh = 0.0,
+                sessionSocRise = 0.0,
                 sessionStartedAtMs = 0L,
             )
 
@@ -504,10 +599,13 @@ object ChargeTracker {
             log.charging -> log.copy(
                 charging = false,
                 lastSessionKwh = total,
+                lastSessionSocRise = totalSocRise,
                 lastSessionEndedAtMs = nowMs,
                 todayKwh = log.todayKwh + missedKwh,
+                todaySocRise = log.todaySocRise + missedSocRise,
                 dayKey = dayKey,
                 sessionKwh = 0.0,
+                sessionSocRise = 0.0,
                 sessionStartedAtMs = 0L,
             )
             // Зарядка пройшла без нас цілком: записуємо її як завершену. Часу
@@ -515,8 +613,10 @@ object ChargeTracker {
             // ніж ми подивилися знову.
             missedKwh > 0.0 -> log.copy(
                 lastSessionKwh = missedKwh,
+                lastSessionSocRise = missedSocRise,
                 lastSessionEndedAtMs = nowMs,
                 todayKwh = log.todayKwh + missedKwh,
+                todaySocRise = log.todaySocRise + missedSocRise,
                 dayKey = dayKey,
             )
             else -> log
@@ -526,11 +626,12 @@ object ChargeTracker {
             counterBaselineKwh = counterKwh,
             dischargedBaselineKwh = dischargedKwh,
             socBaselinePercent = socPercent,
+            odometerBaselineKm = odometerKm ?: closed.odometerBaselineKm,
             lastSeenAtMs = nowMs,
         )
     }
 
     /** Нова доба — новий добовий підсумок. Решта лічильників доби не знає. */
     private fun rollDay(log: ChargeLog, dayKey: String): ChargeLog =
-        if (log.dayKey == dayKey) log else log.copy(todayKwh = 0.0, dayKey = dayKey)
+        if (log.dayKey == dayKey) log else log.copy(todayKwh = 0.0, todaySocRise = 0.0, dayKey = dayKey)
 }

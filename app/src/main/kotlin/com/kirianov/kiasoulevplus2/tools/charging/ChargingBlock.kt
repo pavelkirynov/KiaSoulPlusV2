@@ -66,6 +66,10 @@ class ChargingBlock(
                         } else {
                             null
                         },
+                        // Пробіг — третій свідок «авто стояло»: див. пояснення в
+                        // ChargeTracker.observe. Тут він передається як є, разом із
+                        // «не знаємо»: жодних припущень замість нього.
+                        odometerKm = it.vehicle.odometerKm.takeIf { km -> km > 0.0 },
                         request = it.charge.request,
                         carKnown = it.carAccounting,
                     )
@@ -118,6 +122,7 @@ class ChargingBlock(
                         dayKey = day,
                         ignitionOn = reading.ignitionOn,
                         plugged = reading.plugged,
+                        odometerKm = reading.odometerKm,
                     )
                     if (updated == log) return@collect
 
@@ -137,6 +142,9 @@ class ChargingBlock(
 
         /** Чи вставлений роз'єм; null — не знаємо. */
         val plugged: Boolean?,
+
+        /** Пробіг, км; null — кадр 4F0 ще не приходив. */
+        val odometerKm: Double?,
         val request: ChargeRequest,
 
         /** Чи підтверджено, що числа дає саме активне авто. */

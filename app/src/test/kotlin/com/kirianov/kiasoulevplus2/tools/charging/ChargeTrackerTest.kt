@@ -603,6 +603,102 @@ class ChargeTrackerTest {
     }
 
     /**
+     * ПРОБІГ ЗРІС — ЦЕ ПОЇЗДКА, і жодні інші умови її вже не порятують.
+     *
+     * Найдорожча помилка цього обліку виглядала саме так: авто за годину проїхало
+     * 51 км, застосунок повернувся, побачив «лічильник +6.7 кВт·год» і записав
+     * зарядку, якої не було. Тоді врятував лічильник відданої; тепер поїздку видно
+     * прямо — одометр.
+     */
+    @Test
+    fun `a grown odometer refuses the charge outright`() {
+        val log = ChargeTracker.observe(
+            log = ChargeLog(),
+            counterKwh = 27_000.0,
+            dischargedKwh = 26_000.0,
+            socPercent = 43.0,
+            isCharging = false,
+            nowMs = HOUR,
+            dayKey = day,
+            odometerKm = 190_000.0,
+        )
+
+        val after = ChargeTracker.observe(
+            log = log,
+            counterKwh = 27_006.7,
+            dischargedKwh = 26_000.1,
+            socPercent = 60.0,
+            isCharging = false,
+            nowMs = HOUR + 2 * HOUR,
+            dayKey = day,
+            odometerKm = 190_051.0,
+        )
+
+        assertFalse(after.hasLastSession)
+        assertTrue(after.lastDecision, after.lastDecision.contains("пробіг зріс"))
+    }
+
+    /**
+     * ПРОБІГ НЕ ЗРІС — АВТО СТОЯЛО, і тоді поріг «заряд мусить помітно вирости»
+     * стає зайвим.
+     *
+     * Саме через цей поріг короткі підзарядки в облік не потрапляли: за годину на
+     * побутовій розетці шкала може зрушити менше за два відсотки, а зарядка все
+     * одно була.
+     */
+    @Test
+    fun `a standing car counts a charge the soc threshold would refuse`() {
+        val log = ChargeTracker.observe(
+            log = ChargeLog(),
+            counterKwh = 27_000.0,
+            dischargedKwh = 26_000.0,
+            socPercent = 50.0,
+            isCharging = false,
+            nowMs = HOUR,
+            dayKey = day,
+            odometerKm = 190_000.0,
+        )
+
+        val after = ChargeTracker.observe(
+            log = log,
+            counterKwh = 27_001.0,
+            dischargedKwh = 26_000.1,
+            socPercent = 51.0,
+            isCharging = false,
+            nowMs = HOUR + 2 * HOUR,
+            dayKey = day,
+            odometerKm = 190_000.2,
+        )
+
+        assertTrue(after.hasLastSession)
+        assertEquals(1.0, after.lastSessionKwh, 0.001)
+        assertEquals(1.0, after.lastSessionSocRise, 0.001)
+    }
+
+    /**
+     * ДВІ МІРКИ НА ОДНУ ЗАРЯДКУ, і на цій машині вони розходяться вдвічі.
+     *
+     * Нічна зарядка від настінника: 37.87 кВт·год на розетці, +22.3 за лічильником
+     * BMS, заряд +77.8 %. Друга мірка — приріст шкали на корисну ємність — дає
+     * 34.2 кВт·год, тобто розетку мінус втрати зарядного. Перша прив'язана до
+     * рідного пакета й занижує.
+     */
+    @Test
+    fun `the session keeps both yardsticks`() {
+        var log = observe(ChargeLog(), counter = 27_325.0, charging = true, nowMs = HOUR,
+            dischargedKwh = 26_298.3, socPercent = 17.1)
+        log = observe(log, counter = 27_347.3, charging = true, nowMs = HOUR + 8 * HOUR,
+            dischargedKwh = 26_300.1, socPercent = 94.9)
+
+        assertEquals(22.3, log.sessionKwh, 0.001)
+        assertEquals(77.8, log.sessionSocRise, 0.001)
+        // Та сама сесія в кіловат-годинах за шкалою заряду: 77.8 % від 44 кВт·год.
+        assertEquals(34.2, log.sessionEnergyKwh(44.0), 0.05)
+        // Без ємності лишається лічильник: заниження краще за прочерк.
+        assertEquals(22.3, log.sessionEnergyKwh(0.0), 0.001)
+    }
+
+    /**
      * ПОРОЖНЯ СЕСІЯ НЕ СМІЄ ЗАТЕРТИ «ОСТАННЮ ЗАРЯДКУ», і це не вигаданий випадок.
      *
      * У живому журналі: водій увімкнув зарядку, застосунок побачив роз'єм і відкрив

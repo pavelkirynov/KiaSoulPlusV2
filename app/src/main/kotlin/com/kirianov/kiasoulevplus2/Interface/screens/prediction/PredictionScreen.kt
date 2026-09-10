@@ -17,11 +17,17 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,11 +40,15 @@ import com.kirianov.kiasoulevplus2.Data.MlConfidence
 import com.kirianov.kiasoulevplus2.Data.PredictionBasis
 import com.kirianov.kiasoulevplus2.Data.MlModelInfo
 import com.kirianov.kiasoulevplus2.Data.MlPrediction
+import com.kirianov.kiasoulevplus2.Data.TripConditions
+import com.kirianov.kiasoulevplus2.Data.TripOption
+import com.kirianov.kiasoulevplus2.Data.TripPlanner
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import com.kirianov.kiasoulevplus2.tools.format.formatDuration
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
 import com.kirianov.kiasoulevplus2.tools.format.formatOrDash
+import com.kirianov.kiasoulevplus2.tools.format.parseDecimalInput
 
 @Composable
 fun PredictionScreen(predictionViewModel: PredictionViewModel = viewModel()) {
@@ -59,6 +69,14 @@ fun PredictionScreen(predictionViewModel: PredictionViewModel = viewModel()) {
         RangeAccuracyCard(state.rangeAccuracy, predictionViewModel::onResetAccuracy)
 
         ml.prediction?.let { ScenarioCard(it) }
+
+        ml.prediction?.let { prediction ->
+            TripCard(
+                prediction = prediction,
+                trip = state.settings.trip,
+                onTripChanged = predictionViewModel::onTripChanged,
+            )
+        }
 
 
 
@@ -269,6 +287,144 @@ private fun ScenarioCard(prediction: MlPrediction) {
 }
 
 /** Що модель вивчила про саму батарею. */
+/**
+ * ДАЛЕКА ДОРОГА: ЯКА ШВИДКІСТЬ ВИГРАЄ.
+ *
+ * Питання не в тому, як швидко їхати, а в тому, ЩО З ЦЬОГО ВИЙДЕ ЗАГАЛОМ. Швидша
+ * їзда скорочує час у дорозі й водночас додає час на зарядці: опір повітря росте
+ * як квадрат швидкості, тож на 130 витрата майже вдвічі більша, ніж на 80. Де
+ * саме сходяться ці дві криві, на око не скажеш — а тут видно.
+ *
+ * Три числа вводить людина, бо їх ніде взяти: відстань, ціна кіловат-години й
+ * потужність станції, на яку вона розраховує. Вони зберігаються в налаштуваннях —
+ * ціну електрики набирати щоразу заново було б знущанням.
+ */
+@Composable
+private fun TripCard(
+    prediction: MlPrediction,
+    trip: TripConditions,
+    onTripChanged: (TripConditions) -> Unit,
+) {
+    val options = TripPlanner.options(
+        scenarios = prediction.scenarios,
+        availableKwh = prediction.usableEnergyRemainingKwh,
+        conditions = trip,
+    )
+    val fastest = TripPlanner.fastest(options)
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(text = "Далека дорога", fontSize = 18.sp)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TripField(
+                    label = "км",
+                    value = trip.distanceKm,
+                    modifier = Modifier.weight(1f),
+                    onChange = { onTripChanged(trip.copy(distanceKm = it)) },
+                )
+                TripField(
+                    label = "₴/кВт·год",
+                    value = trip.priceUahPerKwh,
+                    modifier = Modifier.weight(1f),
+                    onChange = { onTripChanged(trip.copy(priceUahPerKwh = it)) },
+                )
+                TripField(
+                    label = "кВт станції",
+                    value = trip.chargerKw,
+                    modifier = Modifier.weight(1f),
+                    onChange = { onTripChanged(trip.copy(chargerKw = it)) },
+                )
+            }
+
+            if (options.isEmpty()) {
+                Text(
+                    text = "Введіть відстань і потужність станції — і буде видно, яка " +
+                        "швидкість дає найменший час у дорозі разом із зарядкою.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                return@Column
+            }
+
+            options.forEach { option ->
+                val best = fastest != null && option.speedKmh == fastest.speedKmh
+                MetricRow(
+                    label = (if (best) "★ " else "") + "${formatDecimal(option.speedKmh, 0)} км/год",
+                    value = tripLine(option),
+                )
+            }
+
+            fastest?.let { best ->
+                Text(
+                    text = "Найшвидше загалом — ${formatDecimal(best.speedKmh, 0)} км/год: " +
+                        "${hoursText(best.drivingHours)} за кермом" +
+                        if (best.stops > 0) {
+                            " плюс ${hoursText(best.chargingHours)} на ${best.stops} зупинку " +
+                                "(${formatDecimal(best.chargedKwh, 1)} кВт·год, " +
+                                "${formatDecimal(best.costUah, 0)} ₴)"
+                        } else {
+                            " і жодної зупинки"
+                        },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+
+            Text(
+                text = "Витрата на кожній швидкості — вивчена на цій машині. Час на " +
+                    "зарядці рахується за рівною потужністю, а справжня станція ближче до " +
+                    "80 % починає гальмувати, тож насправді стояти доведеться довше. " +
+                    "Кожна зупинка — це ще " +
+                    "${formatDecimal(TripPlanner.STOP_OVERHEAD_MINUTES, 0)} хв на заїхати, " +
+                    "знайти пост і поговорити з терміналом.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+/** Один рядок таблиці: час, зупинки, гроші. */
+private fun tripLine(option: TripOption): String {
+    val time = hoursText(option.totalHours)
+    if (option.reachableWithoutCharging) return "$time  ·  без зупинок"
+    return "$time  ·  ${option.stops} зуп.  ·  ${formatDecimal(option.costUah, 0)} ₴"
+}
+
+private fun hoursText(hours: Double): String {
+    val total = (hours * 60.0).toInt()
+    return if (total >= 60) "${total / 60} год ${total % 60} хв" else "$total хв"
+}
+
+/**
+ * Поле для числа, яке вводить людина.
+ *
+ * Порожній рядок означає нуль, а не «залиште як було»: інакше стерти помилково
+ * набране число було б неможливо.
+ */
+@Composable
+private fun TripField(
+    label: String,
+    value: Double,
+    modifier: Modifier = Modifier,
+    onChange: (Double) -> Unit,
+) {
+    var text by remember(value) { mutableStateOf(if (value > 0.0) formatDecimal(value, 0) else "") }
+
+    OutlinedTextField(
+        value = text,
+        onValueChange = { entered ->
+            text = entered.filter { it.isDigit() || it == '.' || it == ',' }
+            onChange(parseDecimalInput(text) ?: 0.0)
+        },
+        label = { Text(label, style = MaterialTheme.typography.bodySmall) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = modifier,
+    )
+}
+
 @Composable
 private fun BatteryCard(model: MlModelInfo, prediction: MlPrediction?) {
     Card(modifier = Modifier.fillMaxWidth()) {

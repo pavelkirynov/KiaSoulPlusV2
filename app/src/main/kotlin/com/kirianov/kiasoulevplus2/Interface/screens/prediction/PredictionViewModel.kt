@@ -5,6 +5,7 @@ package com.kirianov.kiasoulevplus2.Interface.screens.prediction
 import androidx.lifecycle.ViewModel
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.State
+import com.kirianov.kiasoulevplus2.Data.TripConditions
 import kotlinx.coroutines.flow.StateFlow
 
 class PredictionViewModel : ViewModel() {
@@ -23,4 +24,7 @@ class PredictionViewModel : ViewModel() {
     fun onResetAccuracy() = GeneralData.resetRangeAccuracy()
 
     fun onResetCurve() = GeneralData.requestCurveReset()
+
+    /** Умови далекої дороги: зберігаються в налаштуваннях, а не живуть до виходу. */
+    fun onTripChanged(trip: TripConditions) = GeneralData.setTripConditions(trip)
 }

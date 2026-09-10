@@ -120,11 +120,19 @@ object JournalFormat {
         val chargeAfter = after.charge
         if (chargeBefore.sessionKwh != chargeAfter.sessionKwh ||
             chargeBefore.lastSessionKwh != chargeAfter.lastSessionKwh ||
-            chargeBefore.todayKwh != chargeAfter.todayKwh
+            chargeBefore.todayKwh != chargeAfter.todayKwh ||
+            chargeBefore.sessionSocRise != chargeAfter.sessionSocRise ||
+            chargeBefore.lastSessionSocRise != chargeAfter.lastSessionSocRise
         ) {
+            // ТРИ ЧИСЛА, БО ДВІ МІРКИ РОЗХОДЯТЬСЯ ВДВІЧІ. `session`/`last` — за
+            // лічильником BMS, `soc` — приріст шкали заряду, і саме він, помножений
+            // на корисну ємність, зійшовся з настінником. Пробіг тут же: за ним
+            // тепер вирішується, чи авто стояло, і без нього рішення не перевірити.
             out += "$at charge session=${num(chargeAfter.sessionKwh)} " +
                 "last=${num(chargeAfter.lastSessionKwh)} today=${num(chargeAfter.todayKwh)} " +
-                "base=${num(chargeAfter.counterBaselineKwh)}"
+                "soc=${num(chargeAfter.sessionSocRise)}/${num(chargeAfter.lastSessionSocRise)} " +
+                "base=${num(chargeAfter.counterBaselineKwh)} " +
+                "odo=${num(chargeAfter.odometerBaselineKm.takeIf { it > 0.0 })}"
         }
         if (chargeBefore.lastDecision != chargeAfter.lastDecision && chargeAfter.lastDecision.isNotEmpty()) {
             out += "$at charge? «${chargeAfter.lastDecision}»"
