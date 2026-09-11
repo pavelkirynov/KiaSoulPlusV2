@@ -19,7 +19,7 @@ class SettingsViewModel : ViewModel() {
 
     fun onJournalChange(enabled: Boolean) = GeneralData.setJournalEnabled(enabled)
 
-    fun onWakeDeviceChange(address: String) = GeneralData.setWakeOnDevice(address)
+    fun onWakeDeviceChange(address: String) = GeneralData.toggleWakeOnDevice(address)
 
     /** Правка авто зі списку: назва і ємність разом, за одну дію. */
     fun onCarEdited(vin: String, name: String, packKwh: Double) =

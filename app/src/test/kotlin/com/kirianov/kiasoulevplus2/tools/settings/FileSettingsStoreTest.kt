@@ -23,6 +23,39 @@ class FileSettingsStoreTest {
         assertEquals(Settings(autoConnect = false), store.load())
     }
 
+    /**
+     * Пристроїв для пробудження буває кілька: магнітола з'єднується то одним
+     * профілем, то іншим, і адреси в них різні.
+     */
+    @Test
+    fun `several wake devices read back`() {
+        val store = FileSettingsStore(directory())
+        val devices = setOf("68:84:70:11:A5:B9", "00:1D:A5:00:00:FF")
+
+        store.save(Settings(wakeOnDeviceAddresses = devices))
+
+        assertEquals(devices, store.load()?.wakeOnDeviceAddresses)
+    }
+
+    /**
+     * ФАЙЛ ВІД ПОПЕРЕДНЬОЇ ЗБІРКИ МУСИТЬ ЧИТАТИСЯ, і це не формальність: у ньому
+     * лежить одна адреса під старим ключем. Якби вона загубилася, застосунок після
+     * оновлення мовчки перестав би прокидатися — рівно та поломка, яку ми тут і
+     * лікуємо.
+     */
+    @Test
+    fun `a single device from an older file still wakes the app`() {
+        val dir = directory()
+        File(dir, "settings.json").writeText(
+            """{"autoConnect":true,"journal":true,"wakeOnDevice":"68:84:70:11:A5:B9"}""",
+        )
+
+        val settings = FileSettingsStore(dir).load()
+
+        assertEquals(setOf("68:84:70:11:A5:B9"), settings?.wakeOnDeviceAddresses)
+        assertEquals(true, settings?.wakesOn("68:84:70:11:a5:b9"))
+    }
+
     @Test
     fun `nothing saved reads as nothing`() {
         assertNull(FileSettingsStore(directory()).load())

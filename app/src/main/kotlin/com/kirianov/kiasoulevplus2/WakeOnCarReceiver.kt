@@ -5,6 +5,10 @@
 // — магнітолою авто, — і піднімає службу застосунку. Далі все йде саме: служба
 // створює процес, блоки стартують, автопідключення знаходить адаптер.
 //
+// ПРИСТРОЇВ МОЖЕ БУТИ КІЛЬКА, і це не забаганка: магнітола на частині прошивок
+// з'єднується то профілем A2DP, то гарнітурою, з різними адресами, а буває ще
+// друга машина. Одна адреса означала, що решта приводів відкидається мовчки.
+//
 // ЧОМУ САМЕ МАГНІТОЛА, А НЕ САМ ELM. З'єднання з магнітолою телефон встановлює
 // щоразу, коли ви сіли в авто, — надійнішої ознаки «поїхали» в нього просто немає.
 // Клон ELM так не вміє: він чекає, поки під'єднаються до нього, тобто саме тоді,
@@ -54,19 +58,20 @@ class WakeOnCarReceiver : BroadcastReceiver() {
 
         // Налаштування читаємо просто з файлу. Через блоки не вийде: блоки живуть
         // у процесі, а процесу в цю мить може ще не бути — його ж і піднімаємо.
-        val wanted = runCatching {
-            FileSettingsStore(context.applicationContext.filesDir).load()?.wakeOnDeviceAddress
-        }.getOrNull().orEmpty()
+        val settings = runCatching {
+            FileSettingsStore(context.applicationContext.filesDir).load()
+        }.getOrNull()
 
         val device = deviceOf(intent)
         val address = runCatching { device?.address }.getOrNull().orEmpty()
 
-        if (wanted.isEmpty()) {
+        if (settings == null || !settings.wakesOnAnything) {
             note(context, "спрацював від $address, але пристрій для запуску не обрано")
             return
         }
-        if (device == null || !wanted.equals(address, ignoreCase = true)) {
-            note(context, "спрацював від $address — це не $wanted, пропускаємо")
+        if (device == null || !settings.wakesOn(address)) {
+            val wanted = settings.wakeOnDeviceAddresses.joinToString(", ")
+            note(context, "спрацював від $address — у списку $wanted, пропускаємо")
             return
         }
 

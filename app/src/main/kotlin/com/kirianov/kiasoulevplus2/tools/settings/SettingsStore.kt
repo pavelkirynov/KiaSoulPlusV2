@@ -45,8 +45,7 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                     Settings(
                         autoConnect = autoConnect,
                         journal = values["journal"] as? Boolean ?: defaults.journal,
-                        wakeOnDeviceAddress = values["wakeOnDevice"] as? String
-                            ?: defaults.wakeOnDeviceAddress,
+                        wakeOnDeviceAddresses = wakeDevicesOf(values),
                         cellPalettes = palettesOf(values, defaults.cellPalettes),
                         trip = TripConditions(
                             distanceKm = values["tripKm"] as? Double
@@ -76,7 +75,7 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                     linkedMapOf<String, Any?>(
                         "autoConnect" to settings.autoConnect,
                         "journal" to settings.journal,
-                        "wakeOnDevice" to settings.wakeOnDeviceAddress,
+                        "wakeOnDevices" to settings.wakeOnDeviceAddresses.joinToString(SEPARATOR),
                         "tripKm" to settings.trip.distanceKm,
                         "tripPrice" to settings.trip.priceUahPerKwh,
                         "tripChargerKw" to settings.trip.chargerKw,
@@ -106,6 +105,22 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
      * Так само читаються й файли з двома порогами замість трьох: середній просто
      * візьметься типовим.
      */
+    /**
+     * Адреси будильника з файлу.
+     *
+     * Читається і новий ключ зі списком, і старий з однією адресою: файл із
+     * попередньої збірки не має ставати порожнім налаштуванням, інакше після
+     * оновлення застосунок мовчки перестав би прокидатися.
+     */
+    private fun wakeDevicesOf(values: Map<String, Any?>): Set<String> {
+        val many = (values["wakeOnDevices"] as? String).orEmpty()
+        if (many.isNotEmpty()) {
+            return many.split(SEPARATOR).map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        }
+        val one = (values["wakeOnDevice"] as? String).orEmpty()
+        return if (one.isEmpty()) emptySet() else setOf(one)
+    }
+
     private fun palettesOf(values: Map<String, Any?>, defaults: CellPalettes): CellPalettes {
         var palettes = defaults
         CellValueMode.entries.forEach { mode ->
@@ -124,6 +139,9 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
     private fun keyOf(mode: CellValueMode): String = "cell" + mode.name
 
     private companion object {
+        /** Кома: у MAC-адресі її не буває, тож розділяти безпечно. */
+        const val SEPARATOR = ","
+
         const val FILE_NAME = "settings.json"
     }
 }

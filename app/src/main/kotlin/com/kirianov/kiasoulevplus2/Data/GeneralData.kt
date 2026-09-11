@@ -218,8 +218,22 @@ object GeneralData {
     fun setAutoConnect(enabled: Boolean) =
         _state.update { it.copy(settings = it.settings.copy(autoConnect = enabled)) }
 
-    fun setWakeOnDevice(address: String) =
-        _state.update { it.copy(settings = it.settings.copy(wakeOnDeviceAddress = address)) }
+    /**
+     * Додає або прибирає пристрій зі списку будильника.
+     *
+     * Перемикач, а не присвоєння: екран показує список спарованих пристроїв, і
+     * натискання на рядок означає «цей теж будить» або «цей більше не будить».
+     */
+    fun toggleWakeOnDevice(address: String) =
+        _state.update { state ->
+            val current = state.settings.wakeOnDeviceAddresses
+            val updated = if (current.any { it.equals(address, ignoreCase = true) }) {
+                current.filterNot { it.equals(address, ignoreCase = true) }.toSet()
+            } else {
+                current + address
+            }
+            state.copy(settings = state.settings.copy(wakeOnDeviceAddresses = updated))
+        }
 
     /** Умови далекої дороги з екрана прогнозу: відстань, ціна, потужність станції. */
     fun setTripConditions(trip: TripConditions) =

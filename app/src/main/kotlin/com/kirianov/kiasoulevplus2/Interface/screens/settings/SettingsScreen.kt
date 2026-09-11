@@ -421,7 +421,7 @@ private fun ConnectionCard(
     onWakeDevice: (String) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    val chosen = devices.firstOrNull { it.address == settings.wakeOnDeviceAddress }
+    val chosen = devices.filter { settings.wakesOn(it.address) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -452,7 +452,17 @@ private fun ConnectionCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = chosen?.let { "Будить: ${it.name}" } ?: "Пристрій для запуску не обрано",
+                        text = when {
+                            chosen.isNotEmpty() ->
+                                "Будить: " + chosen.joinToString(", ") { it.name }
+                            // Адреса може лишитися в налаштуваннях і тоді, коли
+                            // пристрою немає в списку спарованих: його прибрали з
+                            // телефона, а будильник про це не знає. Мовчати не
+                            // можна — інакше вийде «не обрано» при обраному.
+                            settings.wakesOnAnything ->
+                                "Будить ${settings.wakeOnDeviceAddresses.size} пристр. (немає серед спарованих)"
+                            else -> "Пристрій для запуску не обрано"
+                        },
                         modifier = Modifier.weight(1f),
                     )
                     Text(
@@ -466,29 +476,25 @@ private fun ConnectionCard(
                     Text(
                         text = "Оберіть магнітолу авто: телефон з'єднується з нею щоразу, " +
                             "коли ви сідаєте за кермо. Це найнадійніша ознака «поїхали» з усіх, " +
-                            "що є в телефона, — сам адаптер так не вміє.",
+                            "що є в телефона, — сам адаптер так не вміє. Пристроїв можна " +
+                            "позначити кілька: на частині прошивок магнітола з'єднується то " +
+                            "одним профілем, то іншим, і адреси в них різні.",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    // Список НЕ згортається після натискання, і це навмисно: коли
+                    // позначають кілька пристроїв, згортання після кожного
+                    // перетворює вибір на боротьбу з екраном.
                     devices.forEach { device ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    onWakeDevice(
-                                        if (device.address == settings.wakeOnDeviceAddress) {
-                                            ""
-                                        } else {
-                                            device.address
-                                        },
-                                    )
-                                    open = false
-                                }
+                                .clickable { onWakeDevice(device.address) }
                                 .padding(vertical = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text(text = device.name)
-                            if (device.address == settings.wakeOnDeviceAddress) {
-                                Text(text = "обрано", color = MaterialTheme.colorScheme.primary)
+                            if (settings.wakesOn(device.address)) {
+                                Text(text = "будить", color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }

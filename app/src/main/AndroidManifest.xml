@@ -31,6 +31,14 @@
         як 634 секунди без жодного зчитування при живому з'єднанні.
     -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!--
+        Дозволяє почути «телефон завантажився». Без нього приймач StartOnBootReceiver
+        не отримає сигналу, і після перезавантаження застосунок чекав би, поки його
+        відкриють руками. На заміну самого пакета дозвіл не потрібен: той сигнал
+        система надсилає застосунку без питань.
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Щоб можна було попросити систему не присипляти застосунок узагалі. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
@@ -118,6 +126,24 @@
                 <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
                 <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            Підняти службу після перезавантаження телефона й після оновлення
+            застосунку. Друге важливіше за перше: Android тримає щойно
+            встановлений застосунок у стані «зупинений», доки його не відкриють
+            руками, і доти до нього не доходить жоден інший широкомовний сигнал —
+            включно з будильником по магнітолі. ACTION_MY_PACKAGE_REPLACED цей
+            стан і знімає.
+        -->
+        <receiver
+            android:name=".StartOnBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
