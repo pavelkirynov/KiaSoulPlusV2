@@ -7,6 +7,7 @@
 
 package com.kirianov.kiasoulevplus2.Interface.screens.experiments
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import com.kirianov.kiasoulevplus2.Data.BusSlot
 import com.kirianov.kiasoulevplus2.Data.GeneralData
@@ -32,6 +33,25 @@ class ProbeViewModel : ViewModel() {
 
     /** Записати шину протягом [seconds]: слухати без фільтра й вести журнал змін. */
     fun onRecord(seconds: Int) = GeneralData.requestBusRecord(seconds)
+
+    /** Мітка під час запису: натискається рівно в мить дії (натиснув пульт). */
+    fun onMark() = GeneralData.markBusRecording(System.currentTimeMillis())
+
+    // --- Тест виводу на магнітолу ------------------------------------------------
+
+    private val mediaTest = MediaTestController()
+
+    val mediaTestRunning: Boolean get() = mediaTest.running
+
+    fun onMediaTestStart(context: Context) = mediaTest.start(context)
+
+    fun onMediaTestStop() = mediaTest.stop()
+
+    /** Екран закрили — тиху доріжку й сесію треба прибрати, інакше грали б далі. */
+    override fun onCleared() {
+        mediaTest.stop()
+        super.onCleared()
+    }
 
     fun onCapture(slot: BusSlot, label: String) =
         GeneralData.captureBusSnapshot(slot, label.trim(), System.currentTimeMillis())

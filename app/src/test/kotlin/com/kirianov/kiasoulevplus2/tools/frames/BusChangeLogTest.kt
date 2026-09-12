@@ -54,6 +54,35 @@ class BusChangeLogTest {
         assertEquals(350L, second.events[0].atMs)
     }
 
+    /**
+     * ОБРІЗОК — НЕ ЗМІНА. Той самий кадр, недочитаний монітором до 2 байтів, не
+     * має рахуватися зміною проти повних 8; а повний після обрізка — теж ні.
+     */
+    @Test
+    fun `a truncated frame is not a change`() {
+        val full = BusChangeLog.fold(emptyMap(), listOf(frame("55D", 0xFF, 0x7F, 0xFF, 0xFF)), 100L)
+        assertEquals(1, full.events.size)
+
+        // Куций префікс тих самих байтів — не подія.
+        val cut = BusChangeLog.fold(full.seen, listOf(frame("55D", 0xFF, 0x7F)), 200L)
+        assertTrue(cut.events.isEmpty())
+        // У памʼяті лишилася ПОВНІША версія.
+        assertEquals(listOf(0xFF, 0x7F, 0xFF, 0xFF), cut.seen["55D"])
+
+        // Повний кадр після куцого — теж не подія: дані ті самі.
+        val backFull = BusChangeLog.fold(cut.seen, listOf(frame("55D", 0xFF, 0x7F, 0xFF, 0xFF)), 300L)
+        assertTrue(backFull.events.isEmpty())
+    }
+
+    /** А ось справжня зміна байта під спільним префіксом — це подія. */
+    @Test
+    fun `a real change under the same length is an event`() {
+        val first = BusChangeLog.fold(emptyMap(), listOf(frame("517", 0x00, 0x00)), 100L)
+        val second = BusChangeLog.fold(first.seen, listOf(frame("517", 0x80, 0x00)), 200L)
+        assertEquals(1, second.events.size)
+        assertEquals(listOf(0x80, 0x00), second.events[0].bytes)
+    }
+
     /** Порожня порція нічого не змінює й повертає той самий стан. */
     @Test
     fun `an empty batch returns the same state`() {

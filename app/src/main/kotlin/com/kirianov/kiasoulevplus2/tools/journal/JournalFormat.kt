@@ -397,9 +397,15 @@ object JournalFormat {
 
         val out = mutableListOf<String>()
         out += "$at rec start сек=${now.seconds} рядків=${now.totalLines} змін=${now.events.size}"
-        now.events.forEach { event ->
-            val bytes = event.bytes.joinToString(" ") { "%02X".format(it) }
-            out += "${stamp(event.atMs)} rec ${event.id} $bytes"
+        // За часом, бо мітка приходить з іншого потоку (натискання людини), і в
+        // списку може лягти не між тими кадрами, між якими сталася насправді.
+        now.events.sortedBy { it.atMs }.forEach { event ->
+            out += if (event.isMark) {
+                "${stamp(event.atMs)} mark ← тут натиснуто"
+            } else {
+                "${stamp(event.atMs)} rec ${event.id} " +
+                    event.bytes.joinToString(" ") { "%02X".format(it) }
+            }
         }
         out += "$at rec end кадрів=${now.distinctIds}"
         return out

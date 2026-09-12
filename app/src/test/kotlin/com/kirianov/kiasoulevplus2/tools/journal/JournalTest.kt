@@ -175,6 +175,38 @@ class JournalTest {
         assertTrue(lines.toString(), lines.any { it.contains("rec end") })
     }
 
+    /** Мітка користувача виходить у журнал окремим рядком і за часом. */
+    @Test
+    fun `a mark lands in the recording as its own line`() {
+        val running = State(
+            probe = ProbeState(
+                recording = BusRecording(startedAtMs = 0L, seconds = 30, running = true),
+            ),
+        )
+        val finished = State(
+            probe = ProbeState(
+                recording = BusRecording(
+                    startedAtMs = 0L,
+                    seconds = 30,
+                    running = false,
+                    totalLines = 10,
+                    events = listOf(
+                        BusEvent(atMs = 1_000L, id = "433", bytes = listOf(0x00)),
+                        BusEvent(atMs = 2_000L, id = BusEvent.MARK_ID, bytes = emptyList()),
+                        BusEvent(atMs = 2_100L, id = "517", bytes = listOf(0x80)),
+                    ),
+                ),
+            ),
+        )
+
+        val lines = JournalFormat.events(running, finished, 0L)
+        val markIndex = lines.indexOfFirst { it.contains(" mark ") }
+        val lockIndex = lines.indexOfFirst { it.contains("rec 517 80") }
+        assertTrue("мітка є", markIndex >= 0)
+        // Кадр, що змінився після мітки, стоїть після неї — саме за цим і шукаємо.
+        assertTrue("кадр після мітки", lockIndex > markIndex)
+    }
+
     @Test
     fun `nothing changed means nothing written`() {
         val state = State()

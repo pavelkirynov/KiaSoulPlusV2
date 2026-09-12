@@ -175,7 +175,10 @@ fun ProbeScreen(probeViewModel: ProbeViewModel) {
             probe = state.probe,
             connected = state.isConnected,
             onRecord = probeViewModel::onRecord,
+            onMark = probeViewModel::onMark,
         )
+
+        MediaTestCard(probeViewModel = probeViewModel)
 
         HuntCard(
             probe = state.probe,
@@ -266,10 +269,56 @@ private fun BroadcastCard(monitor: MonitorCapture?, vehicle: VehicleData) {
  * пам'ять шини: кожен ID запам'ятовується таким, яким його застали востаннє.
  */
 @Composable
+private fun MediaTestCard(probeViewModel: ProbeViewModel) {
+    val context = LocalContext.current
+    var running by remember { mutableStateOf(probeViewModel.mediaTestRunning) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Тест виводу на магнітолу", fontSize = 18.sp)
+            Text(
+                text = "Публікує «зараз грає» з лічильником, що росте щосекунди, показниками " +
+                    "SOC/запас і намальованою обкладинкою. Під'єднай телефон до магнітоли по " +
+                    "Bluetooth (без Android Auto), увімкни тест і дивись на екран магнітоли: " +
+                    "як швидко міняється число й чи зʼявилася картинка.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = "Це забирає екран музики й тримає беззвучну доріжку — грати YouTube Music " +
+                    "одночасно не вийде. У шину нічого не пишеться.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Button(
+                onClick = {
+                    if (running) probeViewModel.onMediaTestStop() else probeViewModel.onMediaTestStart(context)
+                    running = probeViewModel.mediaTestRunning
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (running) "Зупинити тест" else "Запустити тест")
+            }
+
+            if (running) {
+                Text(
+                    text = "Тест іде. На магнітолі має бути «KIA тест N», де N росте щосекунди. " +
+                        "Скажи, з яким лагом магнітола наздоганяє й чи видно картинку.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun RecordCard(
     probe: ProbeState,
     connected: Boolean,
     onRecord: (Int) -> Unit,
+    onMark: () -> Unit,
 ) {
     val recording = probe.recording
     val running = recording?.running == true
@@ -314,11 +363,19 @@ private fun RecordCard(
             }
 
             when {
-                running -> Text(
-                    text = "Йде запис… змін уже ${recording.events.size}. " +
-                        "Тисніть кнопку дверей зараз.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                running -> {
+                    Text(
+                        text = "Йде запис… змін уже ${recording.events.size}. " +
+                            "Тисни «Мітка» рівно в мить, коли натискаєш кнопку авто.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Button(
+                        onClick = onMark,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("МІТКА — натиснув зараз")
+                    }
+                }
                 recording != null -> {
                     Text(
                         text = "Записано: ${recording.events.size} змін, " +
@@ -348,11 +405,15 @@ private fun RecordCard(
 @Composable
 private fun RecordChanges(events: List<com.kirianov.kiasoulevplus2.Data.BusEvent>) {
     if (events.isEmpty()) return
-    val tail = events.takeLast(12)
+    val tail = events.takeLast(14)
     MonoBlock(
         title = "Останні зміни",
         text = tail.joinToString("\n") { event ->
-            event.id + "  " + event.bytes.joinToString(" ") { "%02X".format(it) }
+            if (event.isMark) {
+                "── мітка ──"
+            } else {
+                event.id + "  " + event.bytes.joinToString(" ") { "%02X".format(it) }
+            }
         },
     )
 }

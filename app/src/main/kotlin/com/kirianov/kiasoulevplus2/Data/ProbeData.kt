@@ -87,7 +87,20 @@ data class RecordRequest(val seconds: Int, val sequence: Long)
  * весь час однаковий, дає один рядок; кадр, що смикнувся від кнопки, — рядок саме
  * в ту мить.
  */
-data class BusEvent(val atMs: Long, val id: String, val bytes: List<Int>)
+data class BusEvent(val atMs: Long, val id: String, val bytes: List<Int>) {
+    /** Чи це мітка користувача, а не кадр із шини. */
+    val isMark: Boolean get() = id == MARK_ID
+
+    companion object {
+        /**
+         * Псевдо-ID мітки. Людина тисне «Мітка» рівно в мить дії (натиснув пульт),
+         * і в журналі це стає точкою відліку: кадр, що змінився одразу після
+         * мітки, і є шукана команда. Не сплутається зі справжнім кадром — CAN ID
+         * складається лише з шістнадцяткових цифр.
+         */
+        const val MARK_ID = "MARK"
+    }
+}
 
 /**
  * Результат запису шини: журнал змін за вікно.
@@ -104,7 +117,7 @@ data class BusRecording(
     val running: Boolean = false,
 ) {
     /** Скільки різних кадрів засвітилося за запис. */
-    val distinctIds: Int get() = events.map { it.id }.toSet().size
+    val distinctIds: Int get() = events.filterNot { it.isMark }.map { it.id }.toSet().size
 
     companion object {
         /**

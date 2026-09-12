@@ -13,6 +13,11 @@
 // Стан НЕ ховається всередині: він приходить аргументом і повертається назад, бо
 // запис іде вікнами, і між вікнами останнє значення мусить пережити. Так само й
 // перевіряється — без адаптера, чистими вхідними кадрами.
+//
+// ОБРІЗКИ НЕ РАХУЮТЬСЯ ЗА ЗМІНУ. Монітор без фільтра інколи ріже кадр на межі
+// вікна, і той самий кадр приходить то повним, то куцим. Куций — це не нове
+// значення, а те саме, недочитане: якщо спільний префікс збігається, зміни немає,
+// а в памʼяті лишається повніша версія.
 // ====================================================================================
 
 package com.kirianov.kiasoulevplus2.tools.frames
@@ -40,7 +45,23 @@ object BusChangeLog {
         val known = seen.toMutableMap()
         val events = mutableListOf<BusEvent>()
         for (frame in frames) {
-            if (known[frame.id] == frame.bytes) continue
+            val previous = known[frame.id]
+            if (previous == null) {
+                known[frame.id] = frame.bytes
+                events += BusEvent(atMs = atMs, id = frame.id, bytes = frame.bytes)
+                continue
+            }
+            // ОБРІЗОК — НЕ ЗМІНА. Монітор інколи ріже кадр між вікнами, і той самий
+            // кадр приходить то на 8 байтів, то на 2. Якщо спільний префікс той
+            // самий, дані не змінилися — це просто різна довжина захоплення. Тоді
+            // події немає, а в памʼяті лишаємо ПОВНІШУ версію: інакше наступний
+            // повний кадр знову вважався б зміною проти обрізка.
+            val overlap = minOf(previous.size, frame.bytes.size)
+            val samePrefix = previous.subList(0, overlap) == frame.bytes.subList(0, overlap)
+            if (samePrefix) {
+                if (frame.bytes.size > previous.size) known[frame.id] = frame.bytes
+                continue
+            }
             known[frame.id] = frame.bytes
             events += BusEvent(atMs = atMs, id = frame.id, bytes = frame.bytes)
         }

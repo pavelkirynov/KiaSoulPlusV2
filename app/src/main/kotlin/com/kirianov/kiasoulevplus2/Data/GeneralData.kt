@@ -485,6 +485,27 @@ object GeneralData {
         }
     }
 
+    /**
+     * Ставить мітку в поточний запис: людина натиснула «Мітка» в мить дії.
+     *
+     * Мітка — це подія з часом і без байтів. У журналі вона стає точкою відліку:
+     * кадр, що змінився одразу після неї, і є шукана команда. Поза записом
+     * ігнорується — мітити нема що.
+     */
+    fun markBusRecording(atMs: Long) =
+        _state.update {
+            val current = it.probe.recording ?: return@update it
+            if (!current.running) return@update it
+            it.copy(
+                probe = it.probe.copy(
+                    recording = current.copy(
+                        events = (current.events + BusEvent(atMs, BusEvent.MARK_ID, emptyList()))
+                            .takeLast(BusRecording.MAX_EVENTS),
+                    ),
+                ),
+            )
+        }
+
     /** Закриває запис: далі його зливає в журнал блок журналу. */
     fun finishBusRecording(totalLines: Int) =
         _state.update {
