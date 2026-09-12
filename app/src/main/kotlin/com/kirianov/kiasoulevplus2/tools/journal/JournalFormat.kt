@@ -211,6 +211,7 @@ object JournalFormat {
         }
 
         out += busSnapshots(before, after, at)
+        out += busRecording(before, after, at)
         out += cellTest(before, after, at)
 
         val modelBefore = before.ml.model
@@ -372,6 +373,35 @@ object JournalFormat {
             out += "$at clock car=${now.clock.text}"
         }
 
+        return out
+    }
+
+    /**
+     * ЗАПИС ШИНИ — У ЖУРНАЛ ОДНИМ БЛОКОМ, КОЛИ СКІНЧИВСЯ.
+     *
+     * Запис ведеться, щоб упіймати подію на частку секунди — замок, поворотник,
+     * наближення ключа. У памʼяті він живе до закриття застосунку й нікуди не
+     * надсилається, а знайдене має пережити і те, і те. Тому щойно запис
+     * зупинився (running впало з true), усі його зміни зливаються сюди: рядок
+     * «rec start», по рядку на кожну зміну кадру з міткою часу, і «rec end» із
+     * підсумком. Далі це надсилається тією самою кнопкою, що й решта журналу.
+     *
+     * Пишеться саме на ЗАВЕРШЕННЯ, а не по ходу: інакше кожна порція змін давала б
+     * свій обривок, і зібрати запис докупи було б нічим.
+     */
+    private fun busRecording(before: State, after: State, at: String): List<String> {
+        val was = before.probe.recording
+        val now = after.probe.recording ?: return emptyList()
+        val justFinished = !now.running && (was == null || was.running)
+        if (!justFinished) return emptyList()
+
+        val out = mutableListOf<String>()
+        out += "$at rec start сек=${now.seconds} рядків=${now.totalLines} змін=${now.events.size}"
+        now.events.forEach { event ->
+            val bytes = event.bytes.joinToString(" ") { "%02X".format(it) }
+            out += "${stamp(event.atMs)} rec ${event.id} $bytes"
+        }
+        out += "$at rec end кадрів=${now.distinctIds}"
         return out
     }
 

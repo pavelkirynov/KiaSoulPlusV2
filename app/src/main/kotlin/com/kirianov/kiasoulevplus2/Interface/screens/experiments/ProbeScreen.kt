@@ -171,6 +171,12 @@ fun ProbeScreen(probeViewModel: ProbeViewModel) {
 
         BroadcastCard(monitor = state.can.monitor, vehicle = state.vehicle)
 
+        RecordCard(
+            probe = state.probe,
+            connected = state.isConnected,
+            onRecord = probeViewModel::onRecord,
+        )
+
         HuntCard(
             probe = state.probe,
             connected = state.isConnected,
@@ -259,6 +265,98 @@ private fun BroadcastCard(monitor: MonitorCapture?, vehicle: VehicleData) {
  * натискання дає зріз, а не повну картину. Кілька натискань поспіль накопичують
  * пам'ять шини: кожен ID запам'ятовується таким, яким його застали востаннє.
  */
+@Composable
+private fun RecordCard(
+    probe: ProbeState,
+    connected: Boolean,
+    onRecord: (Int) -> Unit,
+) {
+    val recording = probe.recording
+    val running = recording?.running == true
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Запис шини", fontSize = 18.sp)
+            Text(
+                text = "Слухає шину підряд і пише КОЖНУ зміну кадру. Так ловиться подія на " +
+                    "частку секунди — замок, поворотник, наближення ключа, — якої знімок не " +
+                    "бачить. Нічого в машину не надсилається.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = "Як ловити: авто стоїть, запалювання зняте. Відчиніть двері, щоб шина " +
+                    "прокинулась, увімкніть запис і кілька разів натисніть кнопку — на пульті " +
+                    "чи на дверях. Що зʼявилося саме в ті миті, те й є команда. Повний запис — " +
+                    "у журналі, кнопкою «Поділитися».",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(10, 30, 60).forEach { seconds ->
+                    OutlinedButton(
+                        onClick = { onRecord(seconds) },
+                        enabled = connected && !running,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("$seconds с")
+                    }
+                }
+            }
+
+            if (!connected) {
+                Text(
+                    text = "Спершу підключіться до авто.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            when {
+                running -> Text(
+                    text = "Йде запис… змін уже ${recording.events.size}. " +
+                        "Тисніть кнопку дверей зараз.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                recording != null -> {
+                    Text(
+                        text = "Записано: ${recording.events.size} змін, " +
+                            "${recording.distinctIds} різних кадрів, " +
+                            "${recording.totalLines} рядків за ${recording.seconds} с.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (recording.totalLines == 0) {
+                        Text(
+                            text = "Шина мовчала — жодного рядка. Найімовірніше на роз'ємі " +
+                                "немає живлення (так буває на зарядці) або адаптер завис.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    RecordChanges(recording.events)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Останні зміни запису: який кадр яким став. Показуємо хвіст, а не все, — на екрані
+ * шукають щойно натиснуту кнопку, а повний запис лежить у журналі.
+ */
+@Composable
+private fun RecordChanges(events: List<com.kirianov.kiasoulevplus2.Data.BusEvent>) {
+    if (events.isEmpty()) return
+    val tail = events.takeLast(12)
+    MonoBlock(
+        title = "Останні зміни",
+        text = tail.joinToString("\n") { event ->
+            event.id + "  " + event.bytes.joinToString(" ") { "%02X".format(it) }
+        },
+    )
+}
+
 @Composable
 private fun HuntCard(
     probe: ProbeState,

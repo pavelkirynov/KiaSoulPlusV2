@@ -30,6 +30,9 @@ class ProbeViewModel : ViewModel() {
 
     fun onSweep() = GeneralData.requestBusSweep()
 
+    /** Записати шину протягом [seconds]: слухати без фільтра й вести журнал змін. */
+    fun onRecord(seconds: Int) = GeneralData.requestBusRecord(seconds)
+
     fun onCapture(slot: BusSlot, label: String) =
         GeneralData.captureBusSnapshot(slot, label.trim(), System.currentTimeMillis())
 

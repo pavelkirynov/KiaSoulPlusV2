@@ -68,6 +68,54 @@ data class BusSnapshot(
     val hasFrames: Boolean get() = frames.isNotEmpty()
 }
 
+/**
+ * Прохання записати шину протягом [seconds]: слухати без фільтра довгим вікном і
+ * вести журнал того, що на ній зʼявляється й міняється.
+ *
+ * Знімок ([SweepRequest]) ловить те, що на шині Є ПОСТІЙНО. А натискання кнопки —
+ * замок, поворотник, наближення ключа — це подія на частку секунди: кадр зʼявився
+ * й зник. Щоб її впіймати, треба слухати підряд і записувати КОЖНУ зміну, а не
+ * один зріз.
+ */
+data class RecordRequest(val seconds: Int, val sequence: Long)
+
+/**
+ * Одна зафіксована зміна на шині: кадр [id] став [bytes] о [atMs].
+ *
+ * Записуємо не кожен кадр, а лише КОЛИ ВІН ЗМІНИВСЯ, — інакше за тридцять секунд
+ * набіжали б тисячі однакових рядків, серед яких натискання не знайти. Кадр, що
+ * весь час однаковий, дає один рядок; кадр, що смикнувся від кнопки, — рядок саме
+ * в ту мить.
+ */
+data class BusEvent(val atMs: Long, val id: String, val bytes: List<Int>)
+
+/**
+ * Результат запису шини: журнал змін за вікно.
+ *
+ * [running] — чи запис іще триває: екран показує «йде запис», а журнал зливається
+ * у файл лише коли скінчилось. [totalLines] — скільки сирих рядків загалом
+ * пройшло: за ним видно, чи шина взагалі говорила, чи мовчала.
+ */
+data class BusRecording(
+    val startedAtMs: Long,
+    val seconds: Int,
+    val events: List<BusEvent> = emptyList(),
+    val totalLines: Int = 0,
+    val running: Boolean = false,
+) {
+    /** Скільки різних кадрів засвітилося за запис. */
+    val distinctIds: Int get() = events.map { it.id }.toSet().size
+
+    companion object {
+        /**
+         * Скільки змін тримати в памʼяті. Триста вистачає з запасом: на стоячому
+         * авто зі знятим запалюванням шина майже мовчить, а нам цікаві саме
+         * поодинокі сплески від кнопок.
+         */
+        const val MAX_EVENTS = 300
+    }
+}
+
 /** Прохання послухати шину без фільтра, щоб побачити, які кадри на ній узагалі є. */
 data class SweepRequest(val sequence: Long)
 
@@ -95,6 +143,12 @@ data class ProbeState(
     val snapshotB: BusSnapshot? = null,
 
     val sweep: SweepRequest? = null,
+
+    /** Прохання записати шину; його виконує блок Bluetooth і скидає в null. */
+    val record: RecordRequest? = null,
+
+    /** Останній запис шини: журнал змін за вікно. */
+    val recording: BusRecording? = null,
 ) {
     fun plus(result: ProbeResult) = copy(results = (listOf(result) + results).take(MAX_RESULTS))
 

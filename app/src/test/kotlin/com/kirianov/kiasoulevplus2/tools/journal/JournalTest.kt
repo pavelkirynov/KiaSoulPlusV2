@@ -3,7 +3,10 @@ package com.kirianov.kiasoulevplus2.tools.journal
 import com.kirianov.kiasoulevplus2.Data.BmsData
 import com.kirianov.kiasoulevplus2.Data.BrakeState
 import com.kirianov.kiasoulevplus2.Data.CarClock
+import com.kirianov.kiasoulevplus2.Data.BusEvent
+import com.kirianov.kiasoulevplus2.Data.BusRecording
 import com.kirianov.kiasoulevplus2.Data.CarSystems
+import com.kirianov.kiasoulevplus2.Data.ProbeState
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ChargingState
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
@@ -135,6 +138,41 @@ class JournalTest {
         val lines = JournalFormat.events(State(), State(carSystems = CarSystems()), 0L)
 
         assertEquals(emptyList<String>(), lines)
+    }
+
+    /**
+     * ЗАПИС ШИНИ ЗЛИВАЄТЬСЯ В ЖУРНАЛ САМЕ НА ЗАВЕРШЕННЯ — блоком start/зміни/end.
+     * Поки триває, у файл нічого не йде: інакше запис розсипався б на обривки.
+     */
+    @Test
+    fun `a finished bus recording is written as one block`() {
+        val running = State(
+            probe = ProbeState(
+                recording = BusRecording(startedAtMs = 0L, seconds = 30, running = true),
+            ),
+        )
+        val finished = State(
+            probe = ProbeState(
+                recording = BusRecording(
+                    startedAtMs = 0L,
+                    seconds = 30,
+                    running = false,
+                    totalLines = 42,
+                    events = listOf(
+                        BusEvent(atMs = 0L, id = "433", bytes = listOf(0x00)),
+                        BusEvent(atMs = 0L, id = "433", bytes = listOf(0x08)),
+                    ),
+                ),
+            ),
+        )
+
+        // Поки біжить — жодного рядка.
+        assertEquals(emptyList<String>(), JournalFormat.events(State(), running, 0L))
+
+        val lines = JournalFormat.events(running, finished, 0L)
+        assertTrue(lines.toString(), lines.any { it.contains("rec start") && it.contains("сек=30") })
+        assertTrue(lines.toString(), lines.any { it.contains("rec 433 08") })
+        assertTrue(lines.toString(), lines.any { it.contains("rec end") })
     }
 
     @Test

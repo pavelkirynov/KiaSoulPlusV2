@@ -23,7 +23,9 @@ import com.kirianov.kiasoulevplus2.Data.FaultScanRequest
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.PairedDevice
 import com.kirianov.kiasoulevplus2.Data.TireCommands
+import com.kirianov.kiasoulevplus2.tools.frames.BusChangeLog
 import com.kirianov.kiasoulevplus2.tools.frames.FrameParser
+import com.kirianov.kiasoulevplus2.tools.frames.MonitorLineParser
 import com.kirianov.kiasoulevplus2.tools.frames.NegativeResponse
 import com.kirianov.kiasoulevplus2.tools.frames.VinDecoder
 import java.io.IOException
@@ -92,6 +94,16 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
                 if (request == null) return@onEach
                 GeneralData.clearSweepRequest()
                 runSweep()
+            }
+            .launchIn(scope)
+
+        GeneralData.state
+            .map { it.probe.record }
+            .distinctUntilChanged()
+            .onEach { request ->
+                if (request == null) return@onEach
+                GeneralData.clearRecordRequest()
+                runRecording(request)
             }
             .launchIn(scope)
 
@@ -232,6 +244,58 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
                 return@launch
             }
             GeneralData.publishMonitorLines(lines, filterId = "")
+        }
+    }
+
+    /**
+     * Запис шини: слухати без фільтра довгим вікном і вести журнал змін.
+     *
+     * ЧОМУ ЦИКЛ, А НЕ ОДНЕ ДОВГЕ ВІКНО. Клон ELM без фільтра захлинається за
+     * пів секунди й сам зупиняє монітор («BUFFER FULL»). Тому одне вікно коротке
+     * за визначенням, а тридцять секунд набираються повторним заходом у монітор.
+     * Між заходами є короткий провал — вихід і повторний вхід у режим монітора, —
+     * і в цьому головне обмеження: якщо натиснути кнопку саме в провал, кадр
+     * проскочить повз. Тому кнопку тиснуть НЕ ОДИН РАЗ, і запис беруть довший.
+     *
+     * НА СТОЯЧОМУ АВТО ЦЕ ПРАЦЮЄ НАЙКРАЩЕ: із знятим запалюванням силова шина
+     * майже мовчить, буфер повниться повільно, вікна виходять довші, провали між
+     * ними коротші. Саме тому двері й ключ ловляться легше за все.
+     *
+     * Нічого в машину не пишеться: увесь режим — це той самий пасивний монітор,
+     * що й знімок, тільки довгий і з журналом змін.
+     */
+    private fun runRecording(request: com.kirianov.kiasoulevplus2.Data.RecordRequest) {
+        val scope = scope ?: return
+        if (!GeneralData.state.value.isConnected) {
+            GeneralData.updateDebugInfo("Немає з'єднання з адаптером")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            val startedMs = System.currentTimeMillis()
+            GeneralData.startBusRecording(request.seconds, startedMs)
+            val deadline = startedMs + request.seconds * 1000L
+
+            var seen = emptyMap<String, List<Int>>()
+            var totalLines = 0
+            try {
+                while (isActive && System.currentTimeMillis() < deadline) {
+                    val lines = try {
+                        canBridge.monitorBroadcast(RECORD_WINDOW_MS, filterId = "")
+                    } catch (e: IOException) {
+                        GeneralData.updateDebugInfo(
+                            "Запис перервано: ${e.localizedMessage ?: "немає відповіді"}",
+                        )
+                        break
+                    }
+                    totalLines += lines.size
+                    val frames = lines.mapNotNull { MonitorLineParser.parse(it, null) }
+                    val folded = BusChangeLog.fold(seen, frames, System.currentTimeMillis())
+                    seen = folded.seen
+                    GeneralData.appendBusEvents(folded.events, totalLines)
+                }
+            } finally {
+                GeneralData.finishBusRecording(totalLines)
+            }
         }
     }
 
@@ -634,6 +698,14 @@ class BluetoothBlock(private val bluetoothManager: ElmBluetoothManager) {
          * немає чого.
          */
         const val SWEEP_WINDOW_MS = 500L
+
+        /**
+         * Одне вікно запису шини, мс. Довше за знімок навмисно: на стоячому авто
+         * шина майже мовчить, буфер повниться повільно, тож довге вікно ловить
+         * більше, ніж короткий знімок. Ціле вікно запису набирається повторним
+         * заходом у монітор, поки не спливе замовлений час.
+         */
+        const val RECORD_WINDOW_MS = 2000L
 
         /**
          * Скільки чекати, перш ніж перепитати блок, який сказав «зайнятий», мс.

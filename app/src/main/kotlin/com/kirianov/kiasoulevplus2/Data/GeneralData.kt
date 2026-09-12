@@ -445,6 +445,55 @@ object GeneralData {
 
     fun clearSweepRequest() = _state.update { it.copy(probe = it.probe.copy(sweep = null)) }
 
+    // --- Запис шини -------------------------------------------------------------
+
+    /** Записати шину протягом [seconds]: слухати без фільтра й вести журнал змін. */
+    fun requestBusRecord(seconds: Int) =
+        _state.update { it.copy(probe = it.probe.copy(record = RecordRequest(seconds, ++sequence))) }
+
+    fun clearRecordRequest() = _state.update { it.copy(probe = it.probe.copy(record = null)) }
+
+    /** Відкриває запис: блок Bluetooth кличе це, щойно почав слухати. */
+    fun startBusRecording(seconds: Int, atMs: Long) =
+        _state.update {
+            it.copy(
+                probe = it.probe.copy(
+                    recording = BusRecording(startedAtMs = atMs, seconds = seconds, running = true),
+                ),
+            )
+        }
+
+    /**
+     * Домішує знайдені зміни до поточного запису.
+     *
+     * Старіші зміни витісняються, коли їх понад [BusRecording.MAX_EVENTS]: важливі
+     * саме останні сплески, а не весь потік. Якщо запису немає (його вже закрили
+     * або скинули), порція тихо ігнорується — це не помилка, а перегони закриття.
+     */
+    fun appendBusEvents(events: List<BusEvent>, totalLines: Int) {
+        if (events.isEmpty()) return
+        _state.update {
+            val current = it.probe.recording ?: return@update it
+            it.copy(
+                probe = it.probe.copy(
+                    recording = current.copy(
+                        events = (current.events + events).takeLast(BusRecording.MAX_EVENTS),
+                        totalLines = totalLines,
+                    ),
+                ),
+            )
+        }
+    }
+
+    /** Закриває запис: далі його зливає в журнал блок журналу. */
+    fun finishBusRecording(totalLines: Int) =
+        _state.update {
+            val current = it.probe.recording ?: return@update it
+            it.copy(
+                probe = it.probe.copy(recording = current.copy(running = false, totalLines = totalLines)),
+            )
+        }
+
     /** Домішує щойно побачені кадри до пам'яті шини. Пише блок ручних запитів. */
     fun rememberBusFrames(frames: Map<String, List<Int>>) {
         if (frames.isEmpty()) return
