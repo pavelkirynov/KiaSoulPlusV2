@@ -1,0 +1,345 @@
+package com.kirianov.kiasoulevplus2.tools.charging
+
+import com.kirianov.kiasoulevplus2.Data.BmsData
+import com.kirianov.kiasoulevplus2.Data.CarProfile
+import com.kirianov.kiasoulevplus2.Data.ChargeLog
+import com.kirianov.kiasoulevplus2.Data.ChargingState
+import com.kirianov.kiasoulevplus2.Data.ConnectionState
+import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.Data.VehicleData
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+class ChargingBlockTest {
+
+    private val scope = CoroutineScope(Dispatchers.Unconfined)
+    private var now = 0L
+
+    private class MemoryStore(var saved: ChargeLog? = null) : ChargeStore {
+        var saves = 0
+        override fun load(): ChargeLog? = saved
+        override fun save(log: ChargeLog) {
+            saved = log
+            saves++
+        }
+    }
+
+    private lateinit var store: MemoryStore
+
+    @Before
+    fun setUp() {
+        GeneralData.reset()
+        now = 0L
+        store = MemoryStore()
+    }
+
+    @After
+    fun tearDown() {
+        scope.cancel()
+        GeneralData.reset()
+    }
+
+    private fun start(saved: ChargeLog? = null) {
+        store.saved = saved
+        ChargingBlock(store, nowMs = { now }, dayKey = { "2026-09-01" }).start(scope)
+    }
+
+    /**
+     * Спершу ознака заряджання, потім лічильник — саме в такому порядку це й
+     * приходить з машини: кадр 581 повідомляє про зарядку, а лічильник росте вже
+     * потім. Зворотний порядок створював би стан «лічильник виріс, а про зарядку
+     * ще не знаємо», якого на шині не буває.
+     */
+    private fun publish(counterKwh: Double, charging: Boolean) {
+        GeneralData.updateVehicle(VehicleData(charging = ChargingState(reported = charging)))
+        GeneralData.updateBms(BmsData(displaySoc = 80.0, cumulativeEnergyChargedKwh = counterKwh))
+    }
+
+    @Test
+    fun `charging is tracked from the counter into the hub`() {
+        start()
+        publish(100.0, charging = false)
+        now = 30_000
+        publish(100.0, charging = true)
+        now = 60_000
+        publish(104.5, charging = true)
+
+        val charge = GeneralData.state.value.charge
+        assertTrue(charge.charging)
+        assertEquals(4.5, charge.sessionKwh, 0.001)
+        assertEquals(4.5, charge.todayKwh, 0.001)
+    }
+
+    /**
+     * Головне про перезапуск: базовий показ лічильника мусить приїхати зі сховища.
+     * Інакше перше ж читання після перезапуску нарахувало б усю історію батареї.
+     */
+    @Test
+    fun `a saved baseline survives a restart`() {
+        start(
+            saved = ChargeLog(
+                counterBaselineKwh = 26_900.0,
+                hasBaseline = true,
+                todayKwh = 7.0,
+                dayKey = "2026-09-01",
+                charging = true,
+            ),
+        )
+
+        publish(26_902.5, charging = true)
+
+        val charge = GeneralData.state.value.charge
+        assertEquals("Нараховано мало бути лише прирост", 9.5, charge.todayKwh, 0.001)
+        assertEquals(2.5, charge.sessionKwh, 0.001)
+    }
+
+    /** Перезапуск наступного дня: добовий підсумок починається заново. */
+    @Test
+    fun `a restart on a new day starts the daily total over`() {
+        start(
+            saved = ChargeLog(
+                counterBaselineKwh = 26_900.0,
+                hasBaseline = true,
+                todayKwh = 7.0,
+                dayKey = "2026-08-31",
+                charging = true,
+            ),
+        )
+
+        publish(26_902.5, charging = true)
+
+        assertEquals(2.5, GeneralData.state.value.charge.todayKwh, 0.001)
+    }
+
+    /**
+     * Підсумок за добу з невідомої доби нараховувати не можна: збережений лог без
+     * дати міг лежати місяцями.
+     */
+    @Test
+    fun `a saved total without a day is not carried over`() {
+        start(
+            saved = ChargeLog(
+                counterBaselineKwh = 100.0,
+                hasBaseline = true,
+                todayKwh = 7.0,
+                charging = true,
+            ),
+        )
+
+        publish(102.5, charging = true)
+
+        assertEquals(2.5, GeneralData.state.value.charge.todayKwh, 0.001)
+    }
+
+    @Test
+    fun `the saved log is published before any reading arrives`() {
+        start(saved = ChargeLog(lastSessionKwh = 31.4, hasBaseline = true, counterBaselineKwh = 100.0))
+
+        assertEquals(31.4, GeneralData.state.value.charge.lastSessionKwh, 0.001)
+    }
+
+    @Test
+    fun `every change is written to the store`() {
+        start()
+        publish(100.0, charging = false)
+        now = 30_000
+        publish(100.0, charging = true)
+        now = 60_000
+        publish(103.0, charging = true)
+
+        assertEquals(103.0, store.saved!!.counterBaselineKwh, 0.001)
+        assertEquals(3.0, store.saved!!.sessionKwh, 0.001)
+    }
+
+    /** Однакові читання не мусять молотити диск: опитування йде раз на 800 мс. */
+    @Test
+    fun `an unchanged reading is not written again`() {
+        start()
+        publish(100.0, charging = false)
+        val after = store.saves
+
+        publish(100.0, charging = false)
+        publish(100.0, charging = false)
+
+        assertEquals(after, store.saves)
+    }
+
+    @Test
+    fun `a finished session shows up as the last one`() {
+        start()
+        publish(100.0, charging = false)
+        now = 30_000
+        publish(100.0, charging = true)
+        now = 60_000
+        publish(110.0, charging = true)
+        now = 120_000
+        publish(110.0, charging = false)
+
+        val charge = GeneralData.state.value.charge
+        assertFalse(charge.charging)
+        assertEquals(10.0, charge.lastSessionKwh, 0.001)
+        assertTrue(charge.hasLastSession)
+    }
+
+    /**
+     * Наскрізна перевірка головної пастки: поїздка з рекуперацією не має
+     * потрапити в облік зарядок.
+     */
+    @Test
+    fun `a drive with regen adds nothing to the charge log`() {
+        start()
+        publish(100.0, charging = false)
+        now = 60_000
+        publish(101.5, charging = false)
+        now = 120_000
+        publish(103.2, charging = false)
+
+        val charge = GeneralData.state.value.charge
+        assertEquals(0.0, charge.todayKwh, 0.001)
+        assertEquals(0.0, charge.sessionKwh, 0.001)
+        assertFalse(charge.charging)
+    }
+
+    /**
+     * ПЕРЕСАДКА В ІНШУ МАШИНУ Й НАЗАД. Саме цей сценарій одного разу почав нічну
+     * зарядку з нуля: телефон під'єднався до сусіднього авто, VIN звідти не
+     * відповів, активним лишалося своє — і чужі лічильники пішли в його облік.
+     *
+     * Поки авто не назвалося, читання не зараховуються взагалі, і відкрита сесія
+     * доживає до повернення власної машини недоторканою.
+     */
+    @Test
+    fun `readings from an unconfirmed car are not counted`() {
+        twoCarsInGarage()
+        start(saved = ChargeLog(counterBaselineKwh = 27_000.0, hasBaseline = true, charging = true))
+        connected(vinConfirmed = true)
+
+        now = 30_000
+        publish(27_002.0, charging = true)
+        assertEquals(2.0, GeneralData.state.value.charge.sessionKwh, 0.001)
+
+        // Під'єдналися до чужого авто: VIN ще не відповів, лічильники чужі.
+        connected(vinConfirmed = false)
+        now = 60_000
+        publish(5_905.0, charging = false)
+        now = 90_000
+        publish(5_907.0, charging = false)
+
+        val duringOther = GeneralData.state.value.charge
+        assertTrue("Сесія мала лишитись відкритою", duringOther.charging)
+        assertEquals(27_002.0, duringOther.counterBaselineKwh, 0.001)
+        assertEquals(2.0, duringOther.sessionKwh, 0.001)
+
+        // Повернулися до своєї: облік продовжується з того самого місця.
+        connected(vinConfirmed = true)
+        now = 120_000
+        publish(27_010.0, charging = true)
+
+        assertEquals(10.0, GeneralData.state.value.charge.sessionKwh, 0.001)
+    }
+
+    /** Пропуск не мовчазний: причина лягає в облік, а звідти — в журнал. */
+    @Test
+    fun `the skipped reading says why it was skipped`() {
+        twoCarsInGarage()
+        start(saved = ChargeLog(counterBaselineKwh = 27_000.0, hasBaseline = true))
+        connected(vinConfirmed = false)
+
+        publish(5_905.0, charging = false)
+
+        assertTrue(GeneralData.state.value.charge.lastDecision.contains("VIN"))
+    }
+
+    /**
+     * Одне авто в гаражі — плутати нема з чим, і мовчазний VIN нічого не ламає.
+     * Інакше застосунок на машині, яка сервіс 09 не підтримує, не рахував би нічого.
+     */
+    @Test
+    fun `a single known car needs no confirmation`() {
+        GeneralData.updateGarage {
+            it.copy(cars = listOf(CarProfile(vin = "MINE")), activeVin = "MINE")
+        }
+        start()
+        connected(vinConfirmed = false)
+
+        publish(100.0, charging = false)
+        now = 30_000
+        publish(100.0, charging = true)
+        now = 60_000
+        publish(104.0, charging = true)
+
+        assertEquals(4.0, GeneralData.state.value.charge.sessionKwh, 0.001)
+    }
+
+    /**
+     * ОЗНАКА ЗАРЯДЖАННЯ БЛИМАЄ — СЕСІЯ МУСИТЬ ВИЖИТИ.
+     *
+     * Уночі кадр 581 то приходить, то ні, а адаптер устигає перепідключитися по
+     * кілька разів. Кожне таке блимання закриває сесію й одразу відкриває нову, і
+     * поки продовження бралося з обнуленої sessionKwh, за ніч набігало двадцять
+     * три кіловат-години дрібними шматками, а на екрані стояло «остання зарядка
+     * 0.6».
+     */
+    @Test
+    fun `a blinking charging flag does not restart the session from zero`() {
+        start()
+        publish(100.0, charging = false)
+        now = 30_000
+        publish(100.0, charging = true)
+        now = 60_000
+        publish(105.0, charging = true)
+
+        // Ознака зникла на дві хвилини й повернулася — зарядка та сама.
+        now = 120_000
+        publish(105.0, charging = false)
+        now = 240_000
+        publish(105.0, charging = true)
+        now = 300_000
+        publish(108.0, charging = true)
+
+        val charge = GeneralData.state.value.charge
+        assertEquals("Сесія мала продовжитись, а не початися з нуля", 8.0, charge.sessionKwh, 0.001)
+        assertEquals(8.0, charge.todayKwh, 0.001)
+    }
+
+    private fun twoCarsInGarage() = GeneralData.updateGarage {
+        it.copy(
+            cars = listOf(CarProfile(vin = "MINE"), CarProfile(vin = "OTHER")),
+            activeVin = "MINE",
+        )
+    }
+
+    /**
+     * Мовчання VIN не спиняє облік НАЗАВЖДИ: авто на зарядці вимкнене, а вимкнене
+     * авто подеколи VIN не віддає взагалі. Коли питати перестали, читання йдуть —
+     * далі за чужі числа відповідає сторож пожиттєвих лічильників.
+     */
+    @Test
+    fun `giving up on the vin lets the readings through again`() {
+        twoCarsInGarage()
+        start()
+        connected(vinConfirmed = false)
+        publish(100.0, charging = false)
+        assertFalse(GeneralData.state.value.charge.hasBaseline)
+
+        GeneralData.noteVinFailure("шина не відповіла на запит VIN")
+        now = 30_000
+        publish(100.0, charging = false)
+
+        assertTrue(GeneralData.state.value.charge.hasBaseline)
+    }
+
+    private fun connected(vinConfirmed: Boolean) {
+        GeneralData.updateConnection(ConnectionState.Connected, "тест")
+        GeneralData.updateGarage {
+            it.copy(vinConfirmed = vinConfirmed, vinPending = !vinConfirmed)
+        }
+    }
+}
