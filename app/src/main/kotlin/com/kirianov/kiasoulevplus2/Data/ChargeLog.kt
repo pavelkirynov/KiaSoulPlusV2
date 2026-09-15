@@ -56,6 +56,12 @@ data class ChargeSession(
     val endedAtMs: Long,
     val cause: String,
     val connector: ChargeConnector = ChargeConnector.UNKNOWN,
+    /**
+     * Ціна цієї сесії, грн/кВт·год — записана в момент закриття (дефолт за
+     * роз'ємом або ручне коригування «зараз») і далі змінна лише руками з
+     * журналу через [withPrice]. 0.0 означає «ціна невідома», а не «безкоштовно».
+     */
+    val pricePerKwh: Double = 0.0,
 ) {
     /** Чи знаємо, коли зарядка почалася: без цього тривалість і середню не порахувати. */
     val hasStart: Boolean get() = startedAtMs > 0L && endedAtMs > startedAtMs
@@ -66,6 +72,13 @@ data class ChargeSession(
     /** Скільки це кВт·год за тією самою міркою, якою рахується запас ходу. */
     fun energyKwh(capacityKwh: Double): Double =
         if (socRise > 0.0 && capacityKwh > 0.0) socRise / 100.0 * capacityKwh else kwh
+
+    /** Вартість сесії, грн, або 0.0 — коли ціна невідома. */
+    fun costUah(capacityKwh: Double): Double =
+        if (pricePerKwh > 0.0) energyKwh(capacityKwh) * pricePerKwh else 0.0
+
+    /** Ручна правка ціни з журналу — єдиний спосіб змінити її заднім числом. */
+    fun withPrice(newPricePerKwh: Double): ChargeSession = copy(pricePerKwh = newPricePerKwh)
 
     /**
      * Середня швидкість зарядки, кВт, або null — коли часу початку немає (зарядку
@@ -178,6 +191,24 @@ data class ChargeLog(
      */
     val sessions: List<ChargeSession> = emptyList(),
 
+    /**
+     * Ручне коригування ціни ЗАРАЗ ТРИВАЮЧОЇ зарядки, грн/кВт·год; null —
+     * дефолтна ціна за роз'єму зі [ChargingPrices] лишається чинною.
+     *
+     * Живе тут, а не в [ChargeRequest], бо це не одноразова команда, а значення,
+     * яке має дожити до закриття сесії — можливо, через кілька читань. Скидається
+     * на null щойно сесія закривається (див. [ChargeTracker]) і на початку
+     * СПРАВЖНЬОЇ нової сесії, щоб не протекти в наступну зарядку.
+     */
+    val sessionPriceOverride: Double? = null,
+
+    /**
+     * Прохання поправити ціну ВЖЕ ЗАВЕРШЕНОЇ зарядки з журналу; null — прохання
+     * немає. Окремо від [request]: те прохання одноразове й без параметрів, а тут
+     * потрібні і яку сесію шукати ([PriceEdit.sessionEndedAtMs]), і нову ціну.
+     */
+    val priceEditRequest: PriceEdit? = null,
+
     /** Прохання від екрана. Не зберігається: живе рівно до наступного читання. */
     val request: ChargeRequest = ChargeRequest.None,
 ) {
@@ -197,6 +228,16 @@ data class ChargeLog(
             .take(MAX_SESSIONS)
         return copy(sessions = kept)
     }
+
+    /**
+     * Ручна правка ціни ЗАВЕРШЕНОЇ зарядки з журналу.
+     *
+     * Шукаємо за [ChargeSession.endedAtMs]: у записів немає окремого id, а час
+     * закінчення в межах збереженої історії унікальний — дві зарядки не можуть
+     * скінчитися в ту саму мілісекунду.
+     */
+    fun withSessionPrice(endedAtMs: Long, newPricePerKwh: Double): ChargeLog =
+        copy(sessions = sessions.map { if (it.endedAtMs == endedAtMs) it.withPrice(newPricePerKwh) else it })
 
     /**
      * Скільки це кВт·год за тією самою міркою, якою рахується запас ходу.
@@ -236,3 +277,6 @@ data class ChargeLog(
  * зарядка тривала й реальна незалежно від цього.
  */
 enum class ChargeRequest { None, FinishSession }
+
+/** Прохання «зміни ціну цій сесії журналу» з екрана. Див. [ChargeLog.priceEditRequest]. */
+data class PriceEdit(val sessionEndedAtMs: Long, val newPricePerKwh: Double)

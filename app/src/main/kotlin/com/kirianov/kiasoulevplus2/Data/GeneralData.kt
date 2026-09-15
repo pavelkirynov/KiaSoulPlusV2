@@ -203,6 +203,19 @@ object GeneralData {
     fun clearChargeRequest() =
         _state.update { it.copy(charge = it.charge.copy(request = ChargeRequest.None)) }
 
+    /**
+     * Коригування ціни ЗАРАЗ ТРИВАЮЧОЇ зарядки, грн/кВт·год; null — прибрати
+     * коригування й повернутися до дефолту за роз'ємом.
+     */
+    fun setChargingPriceOverride(price: Double?) =
+        _state.update { it.copy(charge = it.charge.copy(sessionPriceOverride = price)) }
+
+    /** Правка ціни ВЖЕ ЗАВЕРШЕНОЇ зарядки з журналу. Пише блок tools/charging. */
+    fun requestChargeSessionPriceEdit(sessionEndedAtMs: Long, newPricePerKwh: Double) =
+        _state.update {
+            it.copy(charge = it.charge.copy(priceEditRequest = PriceEdit(sessionEndedAtMs, newPricePerKwh)))
+        }
+
     // --- Похідні величини: пише блок обчислень ---------------------------------
 
     fun updateCalculated(calculated: CalculatedData) =
@@ -241,6 +254,17 @@ object GeneralData {
     /** Умови далекої дороги з екрана прогнозу: відстань, ціна, потужність станції. */
     fun setTripConditions(trip: TripConditions) =
         _state.update { it.copy(settings = it.settings.copy(trip = trip)) }
+
+    /** Дефолтна ціна зарядки за роз'ємом, з екрана налаштувань. */
+    fun setChargingPrices(prices: ChargingPrices) =
+        _state.update { it.copy(settings = it.settings.copy(charging = prices)) }
+
+    /** «Налаштування» з картки зарядки: перейти й прокрутити до ціни зарядки. */
+    fun requestNavigateToSettingsCharging() =
+        _state.update { it.copy(navigateToSettingsChargingRequest = true) }
+
+    fun clearNavigateToSettingsChargingRequest() =
+        _state.update { it.copy(navigateToSettingsChargingRequest = false) }
 
     // --- Гараж: які авто відомі й за яке рахуємо ---------------------------------
 

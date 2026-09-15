@@ -6,6 +6,7 @@
 
 package com.kirianov.kiasoulevplus2.tools.settings
 
+import com.kirianov.kiasoulevplus2.Data.ChargingPrices
 import com.kirianov.kiasoulevplus2.Data.Settings
 import com.kirianov.kiasoulevplus2.Data.TripConditions
 import com.kirianov.kiasoulevplus2.Data.CellPalette
@@ -58,6 +59,12 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                             arrivalSocPercent = values["tripArrivalSoc"] as? Double
                                 ?: defaults.trip.arrivalSocPercent,
                         ),
+                        charging = ChargingPrices(
+                            chademoUahPerKwh = values["chargingChademoPrice"] as? Double
+                                ?: defaults.charging.chademoUahPerKwh,
+                            type1UahPerKwh = values["chargingType1Price"] as? Double
+                                ?: defaults.charging.type1UahPerKwh,
+                        ),
                     )
                 }
             }
@@ -82,6 +89,8 @@ class FileSettingsStore(private val directory: File) : SettingsStore {
                         "tripPrice" to settings.trip.priceUahPerKwh,
                         "tripChargerKw" to settings.trip.chargerKw,
                         "tripArrivalSoc" to settings.trip.arrivalSocPercent,
+                        "chargingChademoPrice" to settings.charging.chademoUahPerKwh,
+                        "chargingType1Price" to settings.charging.type1UahPerKwh,
                     ).also { fields ->
                         // Пороги пишуться плоскими ключами, а не вкладеним
                         // об'єктом: MiniJson навмисно вміє лише плоскі карти, і

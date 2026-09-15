@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DatePicker
@@ -20,6 +22,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -42,6 +46,7 @@ import com.kirianov.kiasoulevplus2.Data.ChargeConnector
 import com.kirianov.kiasoulevplus2.Data.ChargeHistory
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ChargeSession
+import com.kirianov.kiasoulevplus2.Data.ChargingPrices
 import com.kirianov.kiasoulevplus2.Data.ChargingState
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.ConnectionState
@@ -58,6 +63,7 @@ import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
 import com.kirianov.kiasoulevplus2.tools.format.formatDuration
 import com.kirianov.kiasoulevplus2.tools.format.formatMeasurement
 import com.kirianov.kiasoulevplus2.tools.format.formatOrDash
+import com.kirianov.kiasoulevplus2.tools.format.parseDecimalInput
 
 @Composable
 fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
@@ -114,8 +120,12 @@ fun MainScreen(mainViewModel: MainViewModel = viewModel()) {
             charging = state.vehicle.charging,
             bms = bms,
             packKwh = state.garage.active.effectivePackKwh,
-            priceUahPerKwh = state.settings.trip.priceUahPerKwh,
+            chargingPrices = state.settings.charging,
+            priceOverride = state.charge.sessionPriceOverride,
             onFinish = GeneralData::requestChargeFinish,
+            onPriceOverrideChange = mainViewModel::onChargingPriceOverride,
+            onSessionPriceEdit = mainViewModel::onChargeSessionPriceEdit,
+            onOpenPriceSettings = GeneralData::requestNavigateToSettingsCharging,
         )
 
         VehicleCard(state.vehicle)
@@ -284,8 +294,12 @@ private fun ChargeCard(
     charging: ChargingState,
     bms: BmsData,
     packKwh: Double,
-    priceUahPerKwh: Double,
+    chargingPrices: ChargingPrices,
+    priceOverride: Double?,
     onFinish: () -> Unit,
+    onPriceOverrideChange: (Double?) -> Unit,
+    onSessionPriceEdit: (Long, Double) -> Unit,
+    onOpenPriceSettings: () -> Unit,
 ) {
     if (!charge.hasBaseline && !charge.hasLastSession && !charge.hasToday) return
 
@@ -328,6 +342,13 @@ private fun ChargeCard(
                 if (liveConnector != ChargeConnector.UNKNOWN) {
                     MetricRow("Тип", liveConnector.label)
                 }
+
+                SessionPriceRow(
+                    defaultPrice = chargingPrices.forConnector(liveConnector),
+                    override = priceOverride,
+                    onChange = onPriceOverrideChange,
+                    onOpenSettings = onOpenPriceSettings,
+                )
             }
 
             MetricRow(
@@ -373,7 +394,7 @@ private fun ChargeCard(
             ChargeHistorySection(
                 sessions = charge.sessions,
                 packKwh = packKwh,
-                priceUahPerKwh = priceUahPerKwh,
+                onSessionPriceEdit = onSessionPriceEdit,
             )
 
             Text(
@@ -397,6 +418,91 @@ private fun ChargeCard(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+    }
+}
+
+/**
+ * Ціна ЦІЄЇ зарядки: дефолт за роз'ємом із налаштувань, або ручне коригування
+ * «зараз» ([ChargeLog.sessionPriceOverride]).
+ *
+ * Коригування тут, а не тільки в налаштуваннях: на разовій платній станції тариф
+ * рідко збігається з дефолтом, і лізти для одного числа в інший розділ посеред
+ * зарядки незручно. Кнопка «дефолт» веде саме туди — для того, хто хоче
+ * поправити його самого, а не одну сесію.
+ */
+@Composable
+private fun SessionPriceRow(
+    defaultPrice: Double,
+    override: Double?,
+    onChange: (Double?) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    var editing by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = "Ціна, ₴/кВт·год", fontSize = 16.sp)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = when {
+                    override != null -> formatDecimal(override, 2)
+                    defaultPrice > 0.0 -> "${formatDecimal(defaultPrice, 2)} (дефолт)"
+                    else -> "не задана"
+                },
+                fontSize = 16.sp,
+            )
+            Text(
+                text = "змінити",
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { editing = true },
+            )
+        }
+    }
+
+    if (editing) {
+        var text by remember { mutableStateOf(override?.let { formatDecimal(it, 2) } ?: "") }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Ціна цієї зарядки") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                        label = { Text("₴/кВт·год") },
+                        placeholder = { Text(if (defaultPrice > 0.0) formatDecimal(defaultPrice, 2) else "0.00") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                    Text(
+                        text = "Діє лише для цієї зарядки. Порожньо — повернутися до дефолту " +
+                            "за роз'ємом із налаштувань.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        text = "Налаштування дефолтної ціни",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.clickable {
+                            onOpenSettings()
+                            editing = false
+                        },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onChange(parseDecimalInput(text)?.takeIf { it > 0.0 })
+                    editing = false
+                }) { Text("Зберегти") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editing = false }) { Text("Скасувати") }
+            },
+        )
     }
 }
 
@@ -579,7 +685,7 @@ private fun rangeBounds(range: HistoryRange, now: Long, from: Long?, to: Long?):
 private fun ChargeHistorySection(
     sessions: List<ChargeSession>,
     packKwh: Double,
-    priceUahPerKwh: Double,
+    onSessionPriceEdit: (Long, Double) -> Unit,
 ) {
     if (sessions.isEmpty()) return
 
@@ -588,6 +694,7 @@ private fun ChargeHistorySection(
     var customFrom by remember { mutableStateOf<Long?>(null) }
     var customTo by remember { mutableStateOf<Long?>(null) }
     var picking by remember { mutableStateOf<String?>(null) }
+    var editingSession by remember { mutableStateOf<ChargeSession?>(null) }
 
     Row(
         modifier = Modifier
@@ -639,15 +746,16 @@ private fun ChargeHistorySection(
     }
 
     val (fromMs, toMs) = rangeBounds(range, now, customFrom, customTo)
+    // Вартість — сума вже записаних у сесіях цін ([ChargeSession.pricePerKwh]), а
+    // не energyKwh × одна ціна на весь період: у CHAdeMO й Type 1 ціни різні.
     val totals = ChargeHistory.totals(sessions, packKwh, fromMs, toMs)
-    val cost = if (priceUahPerKwh > 0.0) totals.energyKwh * priceUahPerKwh else 0.0
 
     MetricRow(
         "За період",
         "${totals.count} зар. · " + formatMeasurement(totals.energyKwh, 1, "кВт·год"),
     )
-    if (cost > 0.0) {
-        MetricRow("Вартість", formatMeasurement(cost, 0, "грн"))
+    if (totals.costUah > 0.0) {
+        MetricRow("Вартість", formatMeasurement(totals.costUah, 0, "грн"))
     }
     if (!totals.isEmpty) {
         Text(
@@ -666,8 +774,25 @@ private fun ChargeHistorySection(
         )
     } else {
         shown.forEach { session ->
-            ChargeSessionRow(session = session, packKwh = packKwh, nowMs = now)
+            ChargeSessionRow(
+                session = session,
+                packKwh = packKwh,
+                nowMs = now,
+                onEditPrice = { editingSession = session },
+            )
         }
+    }
+
+    editingSession?.let { session ->
+        SessionPriceEditDialog(
+            session = session,
+            packKwh = packKwh,
+            onDismiss = { editingSession = null },
+            onSave = { price ->
+                onSessionPriceEdit(session.endedAtMs, price)
+                editingSession = null
+            },
+        )
     }
 
     picking?.let { which ->
@@ -699,7 +824,12 @@ private fun ChargeHistorySection(
  * із даними машини лише плутала б.
  */
 @Composable
-private fun ChargeSessionRow(session: ChargeSession, packKwh: Double, nowMs: Long) {
+private fun ChargeSessionRow(
+    session: ChargeSession,
+    packKwh: Double,
+    nowMs: Long,
+    onEditPrice: () -> Unit,
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -722,14 +852,76 @@ private fun ChargeSessionRow(session: ChargeSession, packKwh: Double, nowMs: Lon
             if (session.durationMs > 0L) add(formatDuration(session.durationMs))
             if (session.cause.isNotEmpty()) add(session.cause)
         }.joinToString(" · ")
-        if (subtitle.isNotEmpty()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            // Ціна цієї сесії — та, що записана в момент її закриття, а не
+            // поточний дефолт із налаштувань: зміна дефолту заднім числом не
+            // повинна тихо міняти вже показану суму.
+            val cost = session.costUah(packKwh)
             Text(
-                text = subtitle,
+                text = if (cost > 0.0) formatMeasurement(cost, 0, "грн") else "ціна?",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable(onClick = onEditPrice),
             )
         }
     }
+}
+
+/** Правка ціни ОДНІЄЇ завершеної зарядки з журналу — заднім числом. */
+@Composable
+private fun SessionPriceEditDialog(
+    session: ChargeSession,
+    packKwh: Double,
+    onDismiss: () -> Unit,
+    onSave: (Double) -> Unit,
+) {
+    var text by remember(session.endedAtMs) {
+        mutableStateOf(if (session.pricePerKwh > 0.0) formatDecimal(session.pricePerKwh, 2) else "")
+    }
+    val parsed = parseDecimalInput(text)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ціна цієї зарядки") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "${formatMeasurement(session.energyKwh(packKwh), 1, "кВт·год")} · " +
+                        session.connector.label,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                    label = { Text("₴/кВт·год") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    isError = text.isNotEmpty() && parsed == null,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(parsed ?: 0.0) },
+                enabled = parsed != null,
+            ) { Text("Зберегти") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Скасувати") }
+        },
+    )
 }
 
 private const val NO_VALUE = "--"

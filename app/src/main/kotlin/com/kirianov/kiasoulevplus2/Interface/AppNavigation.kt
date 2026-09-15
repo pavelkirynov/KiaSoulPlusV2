@@ -97,6 +97,16 @@ fun AppNavigation() {
     // з можливих помилок, тож екран каже про це кольором, не чекаючи, поки
     // прочитають рядок.
     val state by GeneralData.state.collectAsState()
+
+    // Кнопка «Налаштування» з картки зарядки просить не просто перейти в розділ,
+    // а прокрутити до ціни зарядки. Перемикання розділу — тут, прокрутка — вже
+    // всередині SettingsScreen; прапорець гасить саме він, коли прокрутку зроблено.
+    LaunchedEffect(state.navigateToSettingsChargingRequest) {
+        if (state.navigateToSettingsChargingRequest) {
+            section = AppSection.SETTINGS
+        }
+    }
+
     val tint = when {
         state.garage.viewingOther -> OTHER_CAR_TINT
         !state.isConnected -> DISCONNECTED_TINT

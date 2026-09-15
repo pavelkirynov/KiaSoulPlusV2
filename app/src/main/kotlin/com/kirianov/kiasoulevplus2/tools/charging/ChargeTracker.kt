@@ -63,6 +63,7 @@ package com.kirianov.kiasoulevplus2.tools.charging
 import com.kirianov.kiasoulevplus2.Data.ChargeConnector
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ChargeSession
+import com.kirianov.kiasoulevplus2.Data.ChargingPrices
 
 object ChargeTracker {
 
@@ -203,6 +204,12 @@ object ChargeTracker {
          */
         chademoPlugged: Boolean = false,
         j1772Plugged: Boolean = false,
+        /**
+         * Дефолтна ціна зарядки за роз'ємом, з налаштувань. Сесія бере цю ціну
+         * (або ручне коригування [ChargeLog.sessionPriceOverride], якщо воно є)
+         * лише в момент свого закриття — зміна тут не чіпає вже записану історію.
+         */
+        prices: ChargingPrices = ChargingPrices(),
     ): ChargeLog {
         if (counterKwh <= 0.0) return log
 
@@ -270,6 +277,7 @@ object ChargeTracker {
                 sawType1 = rolled.sessionSawType1 || j1772Plugged,
                 sawChademo = rolled.sessionSawChademo || chademoPlugged,
                 dayKey = dayKey,
+                prices = prices,
             )
         }
 
@@ -475,6 +483,7 @@ object ChargeTracker {
         dayKey: String,
         chademoPlugged: Boolean = false,
         j1772Plugged: Boolean = false,
+        prices: ChargingPrices = ChargingPrices(),
     ): ChargeLog {
         if (counterKwh <= 0.0 || !log.hasBaseline) return log
         val rolled = rollDay(log, dayKey)
@@ -503,6 +512,7 @@ object ChargeTracker {
             sessionStartedAtMs = 0L,
             sessionSawType1 = false,
             sessionSawChademo = false,
+            sessionPriceOverride = null,
             counterBaselineKwh = counterKwh,
             dischargedBaselineKwh = dischargedKwh,
             socBaselinePercent = socPercent,
@@ -515,6 +525,9 @@ object ChargeTracker {
                 startedAtMs = rolled.sessionStartedAtMs,
                 endedAtMs = nowMs,
                 cause = CAUSE_MANUAL,
+                connector = connector,
+                pricePerKwh = rolled.sessionPriceOverride?.takeIf { it > 0.0 }
+                    ?: prices.forConnector(connector),
             ),
         )
     }
@@ -670,6 +683,10 @@ object ChargeTracker {
             },
             sessionSawType1 = j1772Plugged || prevType1,
             sessionSawChademo = chademoPlugged || prevChademo,
+            // Коригування ціни стосується ОДНІЄЇ сесії. Блимання зв'язку
+            // (`continuing`) — це та сама сесія, тож лишаємо; а от справді нова
+            // зарядка не мусить успадкувати ціну, яку хтось поставив для минулої.
+            sessionPriceOverride = if (continuing) log.sessionPriceOverride else null,
         )
     }
 
@@ -690,6 +707,7 @@ object ChargeTracker {
         sawType1: Boolean,
         sawChademo: Boolean,
         dayKey: String,
+        prices: ChargingPrices,
     ): ChargeLog {
         val total = log.sessionKwh + missedKwh
         val totalSocRise = log.sessionSocRise + missedSocRise
@@ -712,6 +730,7 @@ object ChargeTracker {
                 sessionStartedAtMs = 0L,
                 sessionSawType1 = false,
                 sessionSawChademo = false,
+                sessionPriceOverride = null,
             )
 
             // Сесія була відкрита. Усе, що набігло за час нашої відсутності,
@@ -731,6 +750,9 @@ object ChargeTracker {
                 sessionStartedAtMs = 0L,
                 sessionSawType1 = false,
                 sessionSawChademo = false,
+                // Ручне коригування прожило рівно до закриття тієї сесії, для якої
+                // його поставили: наступна зарядка починає з дефолту знову.
+                sessionPriceOverride = null,
             ).withSession(
                 ChargeSession(
                     kwh = total,
@@ -741,6 +763,10 @@ object ChargeTracker {
                     // а роз'єм і запалювання нічого не сказали: підписуємо чесно.
                     cause = cause.ifEmpty { CAUSE_STOPPED },
                     connector = connector,
+                    // Сесію бачили живцем — ручне коригування, якщо його поставили,
+                    // важливіше за дефолтну ціну роз'єму.
+                    pricePerKwh = log.sessionPriceOverride?.takeIf { it > 0.0 }
+                        ?: prices.forConnector(connector),
                 ),
             )
             // Зарядка пройшла без нас цілком: записуємо її як завершену. Часу
@@ -763,6 +789,10 @@ object ChargeTracker {
                     // Зарядку без телефона зарахували за приростом заряду — роз'єму
                     // не бачили, тож тип чесно невідомий.
                     connector = connector,
+                    // Ніхто не спостерігав цю зарядку — ручного коригування бути не
+                    // могло, лишається тільки дефолтна ціна роз'єму (тут — 0.0, бо
+                    // роз'єм UNKNOWN).
+                    pricePerKwh = prices.forConnector(connector),
                 ),
             )
             else -> log

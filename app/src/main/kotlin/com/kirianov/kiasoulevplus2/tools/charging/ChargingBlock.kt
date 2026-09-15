@@ -10,7 +10,9 @@ package com.kirianov.kiasoulevplus2.tools.charging
 
 import com.kirianov.kiasoulevplus2.Data.ChargeLog
 import com.kirianov.kiasoulevplus2.Data.ChargeRequest
+import com.kirianov.kiasoulevplus2.Data.ChargingPrices
 import com.kirianov.kiasoulevplus2.Data.GeneralData
+import com.kirianov.kiasoulevplus2.Data.PriceEdit
 import com.kirianov.kiasoulevplus2.Data.VehicleData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -77,6 +79,12 @@ class ChargingBlock(
                         j1772Plugged = it.bms.j1772Plugged,
                         request = it.charge.request,
                         carKnown = it.carAccounting,
+                        // Дефолтна ціна за роз'ємом — з налаштувань. Сесія бере її
+                        // (або ручне коригування нижче) лише в момент свого
+                        // закриття, тож зміна тут заднім числом нічого не псує.
+                        prices = it.settings.charging,
+                        priceOverride = it.charge.sessionPriceOverride,
+                        priceEditRequest = it.charge.priceEditRequest,
                     )
                 }
                 .distinctUntilChanged()
@@ -97,6 +105,25 @@ class ChargingBlock(
                         return@collect
                     }
 
+                    // Правка ціни в журналі не стосується поточного обліку: сама
+                    // сесія вже давно закрита, тож просто підмінюємо ціну й
+                    // зберігаємо, не чіпаючи ChargeTracker.
+                    reading.priceEditRequest?.let { edit ->
+                        val edited = log.withSessionPrice(edit.sessionEndedAtMs, edit.newPricePerKwh)
+                            .copy(priceEditRequest = null)
+                        log = edited
+                        GeneralData.updateChargeLog(edited)
+                        store.save(edited)
+                        return@collect
+                    }
+
+                    // Ручне коригування ціни триваючої зарядки: значення від екрана
+                    // дожене локальний стан ще до того, як ChargeTracker вирішить,
+                    // закривати сесію цим читанням чи ні.
+                    if (log.sessionPriceOverride != reading.priceOverride) {
+                        log = log.copy(sessionPriceOverride = reading.priceOverride)
+                    }
+
                     // Прохання з екрана виконуємо першим і окремо: у нього свої
                     // правила — жодних порогів, бо зарядку бачила людина.
                     if (reading.request == ChargeRequest.FinishSession) {
@@ -110,6 +137,7 @@ class ChargingBlock(
                             dayKey = day,
                             chademoPlugged = reading.chademoPlugged,
                             j1772Plugged = reading.j1772Plugged,
+                            prices = reading.prices,
                         )
                         if (finished != log) {
                             log = finished
@@ -132,6 +160,7 @@ class ChargingBlock(
                         odometerKm = reading.odometerKm,
                         chademoPlugged = reading.chademoPlugged,
                         j1772Plugged = reading.j1772Plugged,
+                        prices = reading.prices,
                     )
                     if (updated == log) return@collect
 
@@ -162,6 +191,15 @@ class ChargingBlock(
 
         /** Чи підтверджено, що числа дає саме активне авто. */
         val carKnown: Boolean,
+
+        /** Дефолтна ціна зарядки за роз'ємом, з налаштувань. */
+        val prices: ChargingPrices,
+
+        /** Ручне коригування ціни зараз триваючої зарядки; null — дефолт лишається. */
+        val priceOverride: Double?,
+
+        /** Прохання поправити ціну завершеної зарядки з журналу; null — немає. */
+        val priceEditRequest: PriceEdit?,
     )
 
     /**

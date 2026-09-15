@@ -59,17 +59,36 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.runtime.rememberCoroutineScope
 import com.kirianov.kiasoulevplus2.Data.CarProfile
+import com.kirianov.kiasoulevplus2.Data.ChargingPrices
 import com.kirianov.kiasoulevplus2.Data.Garage
+import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.Pack
 import com.kirianov.kiasoulevplus2.Data.PairedDevice
 import com.kirianov.kiasoulevplus2.Data.Settings
 import com.kirianov.kiasoulevplus2.Data.ShareState
 import com.kirianov.kiasoulevplus2.tools.format.formatDecimal
+import com.kirianov.kiasoulevplus2.tools.format.parseDecimalInput
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(settingsViewModel: SettingsViewModel) {
     val state by settingsViewModel.uiState.collectAsState()
+    val chargingPriceRequester = remember { BringIntoViewRequester() }
+    val coroutineScope = rememberCoroutineScope()
+
+    // Кнопка «Налаштування» з картки зарядки просить не просто відкрити цей
+    // екран, а прокрутити прямо до ціни зарядки — картка нижче за список авто
+    // й підключення, і шукати її на дотик посеред заряджання незручно.
+    LaunchedEffect(state.navigateToSettingsChargingRequest) {
+        if (state.navigateToSettingsChargingRequest) {
+            coroutineScope.launch { chargingPriceRequester.bringIntoView() }
+            settingsViewModel.onChargingNavigationHandled()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -99,6 +118,12 @@ fun SettingsScreen(settingsViewModel: SettingsViewModel) {
             devices = state.pairedDevices,
             onAutoConnect = settingsViewModel::onAutoConnectChange,
             onWakeDevice = settingsViewModel::onWakeDeviceChange,
+        )
+
+        ChargingPriceCard(
+            prices = state.settings.charging,
+            onChange = settingsViewModel::onChargingPricesChanged,
+            modifier = Modifier.bringIntoViewRequester(chargingPriceRequester),
         )
 
         BackgroundWorkCard()
@@ -513,6 +538,75 @@ private fun ConnectionCard(
             }
         }
     }
+}
+
+/**
+ * Ціна зарядки за замовчуванням, окремо для CHAdeMO і Type 1.
+ *
+ * ЦЕ ЛИШЕ ЗАМОВЧУВАННЯ (див. [ChargingPrices]): кожна сесія запам'ятовує свою ціну
+ * в момент закриття, тож зміна тут ніколи не переписує вже записану історію —
+ * тільки те, за скільки порахується наступна зарядка.
+ */
+@Composable
+private fun ChargingPriceCard(
+    prices: ChargingPrices,
+    onChange: (ChargingPrices) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(text = "Ціна зарядки", fontSize = 18.sp)
+            Text(
+                text = "Роз'єм — головна межа зарядки: CHAdeMO зазвичай платна швидка " +
+                    "станція, Type 1 найчастіше домашня розетка чи повільний зарядний, " +
+                    "тож і ціни в них різні.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PriceField(
+                    label = "CHAdeMO, ₴/кВт·год",
+                    value = prices.chademoUahPerKwh,
+                    modifier = Modifier.weight(1f),
+                    onChange = { onChange(prices.copy(chademoUahPerKwh = it)) },
+                )
+                PriceField(
+                    label = "Type 1, ₴/кВт·год",
+                    value = prices.type1UahPerKwh,
+                    modifier = Modifier.weight(1f),
+                    onChange = { onChange(prices.copy(type1UahPerKwh = it)) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Поле для ціни: порожньо означає 0.0 («ціна невідома»), а не «залиште як було» —
+ * інакше стерти помилково набрану ціну було б неможливо.
+ */
+@Composable
+private fun PriceField(
+    label: String,
+    value: Double,
+    modifier: Modifier = Modifier,
+    onChange: (Double) -> Unit,
+) {
+    var text by remember(value) { mutableStateOf(if (value > 0.0) formatDecimal(value, 2) else "") }
+
+    OutlinedTextField(
+        value = text,
+        onValueChange = { entered ->
+            text = entered.filter { it.isDigit() || it == '.' || it == ',' }
+            onChange(parseDecimalInput(text) ?: 0.0)
+        },
+        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        modifier = modifier,
+    )
 }
 
 /**

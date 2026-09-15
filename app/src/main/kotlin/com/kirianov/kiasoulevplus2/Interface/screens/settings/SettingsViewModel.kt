@@ -7,6 +7,7 @@
 package com.kirianov.kiasoulevplus2.Interface.screens.settings
 
 import androidx.lifecycle.ViewModel
+import com.kirianov.kiasoulevplus2.Data.ChargingPrices
 import com.kirianov.kiasoulevplus2.Data.GeneralData
 import com.kirianov.kiasoulevplus2.Data.State
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +23,12 @@ class SettingsViewModel : ViewModel() {
     fun onTelemetryChange(enabled: Boolean) = GeneralData.setTelemetryEnabled(enabled)
 
     fun onWakeDeviceChange(address: String) = GeneralData.toggleWakeOnDevice(address)
+
+    /** Дефолтна ціна зарядки за роз'ємом. */
+    fun onChargingPricesChanged(prices: ChargingPrices) = GeneralData.setChargingPrices(prices)
+
+    /** Прокрутку до ціни зарядки виконано — гасимо прапорець запиту. */
+    fun onChargingNavigationHandled() = GeneralData.clearNavigateToSettingsChargingRequest()
 
     /** Правка авто зі списку: назва і ємність разом, за одну дію. */
     fun onCarEdited(vin: String, name: String, packKwh: Double) =

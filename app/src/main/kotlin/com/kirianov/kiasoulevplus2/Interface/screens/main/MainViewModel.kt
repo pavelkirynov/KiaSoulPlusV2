@@ -27,4 +27,11 @@ class MainViewModel : ViewModel() {
             GeneralData.requestConnect()
         }
     }
+
+    /** Коригування ціни зараз триваючої зарядки; null — прибрати коригування. */
+    fun onChargingPriceOverride(price: Double?) = GeneralData.setChargingPriceOverride(price)
+
+    /** Правка ціни вже завершеної зарядки з журналу. */
+    fun onChargeSessionPriceEdit(sessionEndedAtMs: Long, newPricePerKwh: Double) =
+        GeneralData.requestChargeSessionPriceEdit(sessionEndedAtMs, newPricePerKwh)
 }

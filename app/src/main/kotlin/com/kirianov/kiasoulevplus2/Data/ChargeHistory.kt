@@ -16,13 +16,19 @@ object ChargeHistory {
     /**
      * Підсумок за проміжок. [energyKwh] — головне число (за шкалою заряду на корисну
      * ємність), [counterKwh] — за лічильником BMS (занижений), [socRise] — сумарний
-     * приріст заряду у відсоткових пунктах. Вартість екран рахує сам: energyKwh × ціна.
+     * приріст заряду у відсоткових пунктах.
+     *
+     * [costUah] — сума ВЖЕ ЗАПИСАНИХ у сесіях цін ([ChargeSession.pricePerKwh]), а
+     * не energyKwh × одна ціна на весь період: у CHAdeMO й Type 1 ціни різні, тож
+     * єдина ціна на весь проміжок означала б неправильну суму щойно в ньому
+     * трапилися обидва роз'єми.
      */
     data class Totals(
         val count: Int,
         val energyKwh: Double,
         val counterKwh: Double,
         val socRise: Double,
+        val costUah: Double,
     ) {
         val isEmpty: Boolean get() = count == 0
     }
@@ -44,6 +50,7 @@ object ChargeHistory {
             energyKwh = range.sumOf { it.energyKwh(capacityKwh) },
             counterKwh = range.sumOf { it.kwh },
             socRise = range.sumOf { it.socRise },
+            costUah = range.sumOf { it.costUah(capacityKwh) },
         )
     }
 }
