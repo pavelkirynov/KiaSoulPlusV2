@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Іконка для Android 7.1 і нижче (minSdk 23), де лаунчер не обрізає адаптивну іконку.
+    Тут фон — круг, а символ збільшений: безпечна зона адаптивної іконки тут не потрібна,
+    інакше значок виглядав би дрібним у великому полі фону.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M54,2a52,52 0 1 0 0,104a52,52 0 1 0 0,-104z" />
+
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="1.35"
+        android:scaleY="1.35">
+
+        <path
+            android:fillColor="@color/ic_launcher_outline"
+            android:pathData="M49,29h10a2,2 0 0 1 2,2v6h-14v-6a2,2 0 0 1 2,-2z" />
+
+        <path
+            android:strokeColor="@color/ic_launcher_outline"
+            android:strokeWidth="5"
+            android:strokeLineJoin="round"
+            android:pathData="M43,36h22a5,5 0 0 1 5,5v32a5,5 0 0 1 -5,5h-22a5,5 0 0 1 -5,-5v-32a5,5 0 0 1 5,-5z" />
+
+        <path
+            android:fillColor="@color/ic_launcher_accent"
+            android:pathData="M57,43L45,59h7l-2,12l13,-16h-8z" />
+    </group>
+</vector>
