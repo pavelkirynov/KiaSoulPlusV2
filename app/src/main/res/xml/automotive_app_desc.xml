@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <automotiveApp>
+    <!--
+        template — для CarAppService (androidx.car.app).
+        media — для CarMediaService: саме через нього Android Auto показує застосунок,
+        встановлений не з Play Market.
+    -->
     <uses name="template" />
+    <uses name="media" />
 </automotiveApp>

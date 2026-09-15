@@ -1,0 +1,104 @@
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Which variant to assemble"
+        type: choice
+        options: [debug, release]
+        default: debug
+
+permissions:
+  contents: read
+
+# A newer run for the same ref supersedes an older one, so a stuck build
+# does not hold the queue.
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Plain console keeps the log readable in CI, and the daemon buys nothing
+      # on a runner that is thrown away after one build.
+      GRADLE_OPTS: -Dorg.gradle.console=plain -Dorg.gradle.daemon=false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Постійний ключ підпису debug-збірки. У репозиторії його немає навмисно:
+      # маючи ключ, стороння людина зібрала б APK, який телефон прийме як
+      # оновлення цього застосунка. Без секрета збірка не падає — Gradle підпише
+      # типовим ключем, але таку збірку доведеться ставити після видалення старої.
+      - name: Restore the debug signing key
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        # Перевірка в шелі, а не в `if`: контекст secrets у step-level `if`
+        # недоступний, а власний env кроку в його ж `if` ще не існує.
+        run: |
+          if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "Секрета DEBUG_KEYSTORE_BASE64 немає — збірку буде підписано типовим"
+            echo "ключем Gradle. Таку збірку доведеться ставити після видалення старої."
+            exit 0
+          fi
+
+          # tr прибирає переноси рядків і пробіли, які додає копіювання через буфер.
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '[:space:]' \
+            | base64 -d > app/debug.keystore 2>/dev/null || true
+
+          # Перевірка справжнім keytool. Неповний секрет дає валідний base64, але
+          # обрізане сховище, і тоді збірка падає аж на підписі з голим
+          # «EOFException», з якого причину не видно взагалі.
+          if keytool -list -keystore app/debug.keystore -storepass android >/dev/null 2>&1; then
+            echo "Ключ підпису відновлено ($(wc -c < app/debug.keystore) байт):"
+            echo "оновлення стане поверх попередньої версії."
+            # Відбиток СЕРТИФІКАТА (не ключа) — не таємниця, і саме він вирішує,
+            # чи прийме телефон збірку як оновлення. Дає звірити дві збірки між собою.
+            keytool -list -v -keystore app/debug.keystore -storepass android 2>/dev/null \
+              | grep -i 'SHA256:' | head -1
+          else
+            rm -f app/debug.keystore
+            echo "::warning::DEBUG_KEYSTORE_BASE64 пошкоджений або неповний — APK буде"
+            echo "::warning::підписано типовим ключем Gradle, тому цю збірку доведеться"
+            echo "::warning::ставити після видалення старої."
+            # Довжина не є таємницею, а причину показує одразу: майже завжди це
+            # обрізаний під час копіювання рядок.
+            echo "::warning::Отримано $(printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '[:space:]' | wc -c) символів base64, очікується 3664."
+          fi
+
+      - name: Assemble
+        timeout-minutes: 20
+        # Bounded HTTP timeouts turn a stalled artifact download into a failure
+        # with a log, instead of a job that hangs until the runner is reclaimed.
+        run: |
+          ./gradlew testDebugUnitTest assemble${{ inputs.build_type == 'release' && 'Release' || 'Debug' }} \
+            --stacktrace \
+            --console=plain \
+            --no-daemon \
+            -Dorg.gradle.internal.http.connectionTimeout=60000 \
+            -Dorg.gradle.internal.http.socketTimeout=60000
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kia-soul-ev-plus-v2-${{ inputs.build_type || 'debug' }}-apk
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
