@@ -30,6 +30,14 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        # Google removed the legacy standalone "tools" package from the SDK
+        # repository manifest, so the action's own default install (which
+        # requests it) now fails unconditionally. An empty packages list
+        # skips that broken default while still setting up ANDROID_HOME and
+        # pre-accepting the SDK licenses; Gradle/AGP fetch the platform and
+        # build-tools it actually needs on its own.
+        with:
+          packages: ""
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
